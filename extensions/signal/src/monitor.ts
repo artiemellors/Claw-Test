@@ -39,6 +39,11 @@ import type {
   SignalReactionMessage,
   SignalReactionTarget,
 } from "./monitor/event-handler.types.js";
+import {
+  markSignalReplyConsumed,
+  resolveSignalReplyDelivery,
+  type SignalReplyDeliveryState,
+} from "./monitor/reply-delivery.js";
 import { sendMessageSignal } from "./send.js";
 import { runSignalSseLoop } from "./sse-reconnect.js";
 
@@ -313,13 +318,24 @@ async function deliverReplies(params: {
   maxBytes: number;
   textLimit: number;
   chunkMode: "length" | "newline";
+  inheritedReplyToId?: string;
+  replyDeliveryState?: SignalReplyDeliveryState;
+  resolveQuoteAuthor?: (replyToId: string) => string | undefined;
 }) {
   const { replies, target, baseUrl, account, accountId, runtime, maxBytes, textLimit, chunkMode } =
     params;
   for (const payload of replies) {
-    const reply = resolveSendableOutboundReplyParts(payload);
-    const delivered = await deliverTextOrMediaReply({
+    const { payload: resolvedPayload, effectiveReplyTo } = resolveSignalReplyDelivery({
       payload,
+      inheritedReplyToId: params.inheritedReplyToId,
+      state: params.replyDeliveryState,
+    });
+    const effectiveQuoteAuthor = effectiveReplyTo
+      ? params.resolveQuoteAuthor?.(effectiveReplyTo)
+      : undefined;
+    const reply = resolveSendableOutboundReplyParts(resolvedPayload);
+    const delivered = await deliverTextOrMediaReply({
+      payload: resolvedPayload,
       text: reply.text,
       chunkText: (value) => chunkTextWithMode(value, textLimit, chunkMode),
       sendText: async (chunk) => {
@@ -328,7 +344,10 @@ async function deliverReplies(params: {
           account,
           maxBytes,
           accountId,
+          replyTo: effectiveReplyTo,
+          quoteAuthor: effectiveQuoteAuthor,
         });
+        markSignalReplyConsumed(params.replyDeliveryState, effectiveReplyTo);
       },
       sendMedia: async ({ mediaUrl, caption }) => {
         await sendMessageSignal(target, caption ?? "", {
@@ -337,7 +356,10 @@ async function deliverReplies(params: {
           mediaUrl,
           maxBytes,
           accountId,
+          replyTo: effectiveReplyTo,
+          quoteAuthor: effectiveQuoteAuthor,
         });
+        markSignalReplyConsumed(params.replyDeliveryState, effectiveReplyTo);
       },
     });
     if (delivered !== "empty") {
