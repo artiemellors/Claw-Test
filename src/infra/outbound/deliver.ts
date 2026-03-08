@@ -678,34 +678,6 @@ async function deliverOutboundPayloadsCore(
       },
     );
   }
-  let replyConsumed = false;
-  const markReplyConsumedIfSendSucceeded = (
-    replyTo: string | undefined,
-    resultCountBeforeSend: number,
-  ) => {
-    if (replyTo && results.length > resultCountBeforeSend) {
-      replyConsumed = true;
-    }
-  };
-  const trackReplyConsumption = async <T>(
-    replyTo: string | undefined,
-    send: () => Promise<T>,
-    sent?: (value: T) => boolean,
-  ): Promise<T> => {
-    const resultCountBeforeSend = results.length;
-    try {
-      const value = await send();
-      if (replyTo && (sent?.(value) ?? results.length > resultCountBeforeSend)) {
-        replyConsumed = true;
-      }
-      return value;
-    } catch (err) {
-      // Best-effort delivery should only consume reply metadata once a quoted send
-      // actually succeeded, even if a later chunk/send in the same payload fails.
-      markReplyConsumedIfSendSucceeded(replyTo, resultCountBeforeSend);
-      throw err;
-    }
-  };
   for (const payload of normalizedPayloads) {
     let payloadSummary = buildPayloadSummary(payload);
     try {
@@ -728,29 +700,8 @@ async function deliverOutboundPayloadsCore(
       payloadSummary = hookResult.payloadSummary;
 
       params.onPayload?.(payloadSummary);
-      // Treat null as an explicit "do not reply" override so payload-level suppression
-      // is preserved instead of falling back to inherited reply metadata.
-      // NOTE: Many payload builders emit replyToId: undefined. Treat that as "no opinion"
-      // so the inherited reply metadata can still apply.
-      const explicitPayloadReplyTo =
-        "replyToId" in effectivePayload && effectivePayload.replyToId !== undefined
-          ? effectivePayload.replyToId
-          : undefined;
-      const inheritedReplyTo =
-        explicitPayloadReplyTo === undefined ? (params.replyToId ?? undefined) : undefined;
-      const effectiveReplyTo =
-        explicitPayloadReplyTo != null
-          ? explicitPayloadReplyTo
-          : !replyConsumed
-            ? inheritedReplyTo
-            : undefined;
-      // NOTE: quoteAuthor is derived from the top-level params, not resolved per-payload.
-      // The normal Signal inbound→outbound path (monitor.ts:deliverReplies) resolves
-      // quoteAuthor per-payload via resolveQuoteAuthor(effectiveReplyTo). If a future
-      // caller uses deliverOutboundPayloads directly with per-payload replyToId overrides,
-      // it should supply its own quoteAuthor resolution or extend this logic.
-      const effectiveQuoteAuthor = effectiveReplyTo ? (params.quoteAuthor ?? undefined) : undefined;
-      const effectiveSendOverrides = {
+      const sendOverrides = {
+        replyToId: effectivePayload.replyToId ?? params.replyToId ?? undefined,
         threadId: params.threadId ?? undefined,
         audioAsVoice: effectivePayload.audioAsVoice === true ? true : undefined,
         forceDocument: params.forceDocument,
@@ -804,9 +755,7 @@ async function deliverOutboundPayloadsCore(
           );
         }
         const beforeCount = results.length;
-        await trackReplyConsumption(effectiveReplyTo, () =>
-          sendTextChunks(fallbackText, effectiveSendOverrides),
-        );
+        await sendTextChunks(fallbackText, sendOverrides);
         const messageId = results.at(-1)?.messageId;
         emitMessageSent({
           success: results.length > beforeCount,
