@@ -702,6 +702,7 @@ async function deliverOutboundPayloadsCore(
       params.onPayload?.(payloadSummary);
       const sendOverrides = {
         replyToId: effectivePayload.replyToId ?? params.replyToId ?? undefined,
+        quoteAuthor: params.quoteAuthor ?? undefined,
         threadId: params.threadId ?? undefined,
         audioAsVoice: effectivePayload.audioAsVoice === true ? true : undefined,
         forceDocument: params.forceDocument,
