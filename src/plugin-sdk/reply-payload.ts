@@ -1,5 +1,6 @@
 import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import { readStringValue } from "../shared/string-coerce.js";
+export { resolveToolDeliveryPayload } from "../auto-reply/reply/reply-payloads.js";
 
 export type { MediaPayload, MediaPayloadInput } from "../channels/plugins/media-payload.js";
 export { buildMediaPayload } from "../channels/plugins/media-payload.js";

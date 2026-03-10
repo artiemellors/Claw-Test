@@ -92,7 +92,12 @@ export type EmbeddedPiSubscribeContext = {
   shouldEmitToolResult: () => boolean;
   shouldEmitToolOutput: () => boolean;
   emitToolSummary: (toolName?: string, meta?: string) => void;
-  emitToolOutput: (toolName?: string, meta?: string, output?: string, result?: unknown) => void;
+  emitToolOutput: (
+    toolName?: string,
+    meta?: string,
+    output?: string,
+    audioAsVoice?: boolean,
+  ) => void;
   stripBlockTags: (
     text: string,
     state: { thinking: boolean; final: boolean; inlineCode?: InlineCodeState },
@@ -176,7 +181,12 @@ export type ToolHandlerContext = {
   shouldEmitToolResult: () => boolean;
   shouldEmitToolOutput: () => boolean;
   emitToolSummary: (toolName?: string, meta?: string) => void;
-  emitToolOutput: (toolName?: string, meta?: string, output?: string, result?: unknown) => void;
+  emitToolOutput: (
+    toolName?: string,
+    meta?: string,
+    output?: string,
+    audioAsVoice?: boolean,
+  ) => void;
   trimMessagingToolSent: () => void;
 };
 
