@@ -679,6 +679,7 @@ describe("Feishu inbound debounce regressions", () => {
           },
           flushKey: async (_key: string) => false,
           flushAll: async () => 0,
+          unregister: () => {},
         }),
       }),
     );
