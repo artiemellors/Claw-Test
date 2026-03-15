@@ -142,9 +142,6 @@ export async function deliverWebReply(params: {
           "media:image",
         );
       } else if (media.kind === "audio") {
-        if (caption) {
-          deferredAudioText.push(caption);
-        }
         await sendWithRetry(
           () =>
             msg.sendMedia({
@@ -158,6 +155,9 @@ export async function deliverWebReply(params: {
             }),
           wantsVoiceNote ? "media:voice" : "media:audio",
         );
+        if (caption) {
+          deferredAudioText.push(caption);
+        }
       } else if (media.kind === "video") {
         await sendWithRetry(
           () =>
