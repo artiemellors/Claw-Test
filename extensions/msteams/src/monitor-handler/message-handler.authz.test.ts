@@ -160,8 +160,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler({
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage({
       activity: {
         id: "msg-1",
         type: "message",
@@ -211,8 +211,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler({
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage({
       activity: {
         id: "msg-1",
         type: "message",
