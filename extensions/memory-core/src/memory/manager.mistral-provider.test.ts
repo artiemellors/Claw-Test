@@ -10,6 +10,7 @@ import {
 } from "./manager-provider-state.js";
 
 const DEFAULT_OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
+const DEFAULT_LMSTUDIO_EMBEDDING_MODEL = "text-embedding-nomic-embed-text-v1.5";
 
 vi.mock("./embeddings.js", () => ({
   resolveEmbeddingProviderFallbackModel: (providerId: string, fallbackSourceModel: string) =>
@@ -39,7 +40,7 @@ function createProvider(id: string): EmbeddingProvider {
 
 function createSettings(params: {
   provider: "openai" | "mistral";
-  fallback?: "none" | "mistral" | "ollama";
+  fallback?: "none" | "mistral" | "ollama" | "lmstudio";
 }): ResolvedMemorySearchConfig {
   return {
     provider: params.provider,
@@ -112,6 +113,18 @@ describe("memory manager mistral provider wiring", () => {
 
     expect(request?.provider).toBe("ollama");
     expect(request?.model).toBe(DEFAULT_OLLAMA_EMBEDDING_MODEL);
+    expect(request?.fallback).toBe("none");
+  });
+
+  it("uses default lmstudio model when activating lmstudio fallback", async () => {
+    const request = resolveMemoryFallbackProviderRequest({
+      cfg: {} as OpenClawConfig,
+      settings: createSettings({ provider: "openai", fallback: "lmstudio" }),
+      currentProviderId: "openai",
+    });
+
+    expect(request?.provider).toBe("lmstudio");
+    expect(request?.model).toBe(DEFAULT_LMSTUDIO_EMBEDDING_MODEL);
     expect(request?.fallback).toBe("none");
   });
 });

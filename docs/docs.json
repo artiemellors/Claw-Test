@@ -1248,6 +1248,7 @@
                   "providers/huggingface",
                   "providers/kilocode",
                   "providers/litellm",
+                  "providers/lmstudio",
                   "providers/minimax",
                   "providers/mistral",
                   "providers/moonshot",
