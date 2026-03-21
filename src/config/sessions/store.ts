@@ -200,7 +200,12 @@ function updateSessionStoreWriteCaches(params: {
 }): void {
   const fileStat = getFileStatSnapshot(params.storePath);
   setSerializedSessionStore(params.storePath, params.serialized);
-  if (!isSessionStoreCacheEnabled()) {
+  if (
+    !isSessionStoreObjectCacheEligible({
+      storePath: params.storePath,
+      sizeBytes: fileStat?.sizeBytes,
+    })
+  ) {
     dropSessionStoreObjectCache(params.storePath);
     return;
   }

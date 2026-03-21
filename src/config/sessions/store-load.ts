@@ -147,7 +147,13 @@ export function loadSessionStore(
   applySessionStoreMigrations(store);
   normalizeSessionStore(store);
 
-  if (!opts.skipCache && isSessionStoreCacheEnabled()) {
+  if (
+    !opts.skipCache &&
+    isSessionStoreObjectCacheEligible({
+      storePath,
+      sizeBytes: fileStat?.sizeBytes,
+    })
+  ) {
     writeSessionStoreCache({
       storePath,
       store,
@@ -155,6 +161,8 @@ export function loadSessionStore(
       sizeBytes: fileStat?.sizeBytes,
       serialized: serializedFromDisk,
     });
+  } else if (!opts.skipCache) {
+    dropSessionStoreObjectCache(storePath);
   }
 
   return structuredClone(store);
