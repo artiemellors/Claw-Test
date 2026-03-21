@@ -48,7 +48,7 @@ function warnSessionObjectCacheLimitHit(params: {
   });
 }
 
-function isSessionStoreObjectCacheEligible(params: {
+export function isSessionStoreObjectCacheEligible(params: {
   storePath: string;
   sizeBytes?: number;
 }): boolean {
@@ -70,6 +70,17 @@ function isSessionStoreObjectCacheEligible(params: {
     return false;
   }
   return true;
+}
+
+function shouldRetainSessionStoreSerializedCache(sizeBytes?: number): boolean {
+  if (!isSessionStoreCacheEnabled()) {
+    return false;
+  }
+  const maxBytes = resolveSessionObjectCacheMaxBytes();
+  if (maxBytes === 0) {
+    return false;
+  }
+  return sizeBytes === undefined || sizeBytes <= maxBytes;
 }
 
 function normalizeSessionEntryDelivery(entry: SessionEntry): SessionEntry {
@@ -171,7 +182,10 @@ export function loadSessionStore(
     }
   }
 
-  if (serializedFromDisk !== undefined) {
+  if (
+    serializedFromDisk !== undefined &&
+    shouldRetainSessionStoreSerializedCache(fileStat?.sizeBytes)
+  ) {
     setSerializedSessionStore(storePath, serializedFromDisk);
   } else {
     setSerializedSessionStore(storePath, undefined);

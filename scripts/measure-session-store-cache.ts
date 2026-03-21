@@ -14,7 +14,7 @@ import {
   setSerializedSessionStore,
 } from "../src/config/sessions/store-cache.js";
 
-type Mode = "full-cache" | "serialized-only" | "no-cache";
+type Mode = "full-cache" | "serialized-retained" | "no-cache";
 
 type ChildResult = {
   entries: number;
@@ -91,7 +91,7 @@ function parseArgs(argv: string[]) {
     }
     if (arg === "--mode") {
       const value = argv[i + 1];
-      if (value === "full-cache" || value === "serialized-only" || value === "no-cache") {
+      if (value === "full-cache" || value === "serialized-retained" || value === "no-cache") {
         parsed.mode = value;
       }
       i += 1;
@@ -105,18 +105,24 @@ async function runChild(params: { entries: number; mode: Mode }) {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-session-cache-measure-"));
   const storePath = path.join(rootDir, "sessions.json");
   const previousTtl = process.env.OPENCLAW_SESSION_CACHE_TTL_MS;
+  const previousObjectCacheMaxBytes = process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES;
 
   try {
     clearSessionStoreCacheForTest();
     delete process.env.OPENCLAW_SESSION_CACHE_TTL_MS;
+    delete process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES;
     await saveSessionStore(storePath, createStore(params.entries));
     const fileSizeBytes = fs.statSync(storePath).size;
 
     clearSessionStoreCacheForTest();
-    if (params.mode === "serialized-only") {
-      process.env.OPENCLAW_SESSION_CACHE_TTL_MS = "0";
+    if (params.mode === "full-cache") {
+      process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = String(fileSizeBytes + 1024);
+    } else if (params.mode === "serialized-retained") {
+      process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = "0";
+      setSerializedSessionStore(storePath, fs.readFileSync(storePath, "utf8"));
     } else if (params.mode === "no-cache") {
       process.env.OPENCLAW_SESSION_CACHE_TTL_MS = "0";
+      process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = "0";
       setSerializedSessionStore(storePath, undefined);
     }
 
@@ -168,6 +174,11 @@ async function runChild(params: { entries: number; mode: Mode }) {
       delete process.env.OPENCLAW_SESSION_CACHE_TTL_MS;
     } else {
       process.env.OPENCLAW_SESSION_CACHE_TTL_MS = previousTtl;
+    }
+    if (previousObjectCacheMaxBytes === undefined) {
+      delete process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES;
+    } else {
+      process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = previousObjectCacheMaxBytes;
     }
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -237,7 +248,7 @@ async function main() {
   }
 
   const results: AggregateResult[] = [];
-  const modes: Mode[] = ["full-cache", "serialized-only", "no-cache"];
+  const modes: Mode[] = ["full-cache", "serialized-retained", "no-cache"];
 
   for (const entries of ENTRY_COUNTS) {
     for (const mode of modes) {

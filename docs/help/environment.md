@@ -119,11 +119,11 @@ Both resolve from process env at activation time. SecretRef details are document
 
 ## Session store cache
 
-| Variable                                  | Purpose                                                                                                                                                               |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES` | Maximum `sessions.json` size eligible for the in-memory parsed object cache. Defaults to `1000000` bytes (`1 MB`). Set to `0` to disable the object cache completely. |
+| Variable                                  | Purpose                                                                                                                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES` | Maximum `sessions.json` size eligible for the in-memory session-store caches. Defaults to `1000000` bytes (`1 MB`). Set to `0` to disable those caches completely. |
 
-When a session store grows past this limit, OpenClaw keeps the serialized session-store cache but stops retaining the parsed object cache for that `sessions.json`. This lowers memory retention for large stores at the cost of extra disk reads on repeated access.
+When a session store grows past this limit, OpenClaw stops retaining both the parsed object cache and the serialized in-memory copy for that `sessions.json`. This lowers memory retention for large stores at the cost of extra disk reads on repeated access.
 
 If the limit is exceeded, OpenClaw logs a one-time warning per store path that includes the store path, current size, configured limit, and `OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES`.
 

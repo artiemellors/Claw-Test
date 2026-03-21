@@ -18,14 +18,20 @@ import {
 import { getFileStatSnapshot } from "../cache-utils.js";
 import { enforceSessionDiskBudget, type SessionDiskBudgetSweepResult } from "./disk-budget.js";
 import { deriveSessionMetaPatch } from "./metadata.js";
+import { resolveSessionObjectCacheMaxBytes } from "./store-cache-limit.js";
 import {
   dropSessionStoreObjectCache,
   getSerializedSessionStore,
+  getSessionStoreTtl,
   isSessionStoreCacheEnabled,
   setSerializedSessionStore,
   writeSessionStoreCache,
 } from "./store-cache.js";
-import { loadSessionStore, normalizeSessionStore } from "./store-load.js";
+import {
+  isSessionStoreObjectCacheEligible,
+  loadSessionStore,
+  normalizeSessionStore,
+} from "./store-load.js";
 import {
   clearSessionStoreCacheForTest,
   drainSessionStoreLockQueuesForTest,
@@ -65,6 +71,35 @@ let sessionWriteLockAcquirerForTests: typeof acquireSessionWriteLock | null = nu
 function loadSessionArchiveRuntime() {
   sessionArchiveRuntimePromise ??= import("../../gateway/session-archive.runtime.js");
   return sessionArchiveRuntimePromise;
+}
+
+function shouldRetainSessionStoreSerializedCache(sizeBytes?: number): boolean {
+  if (!isSessionStoreCacheEnabled()) {
+    return false;
+  }
+  const maxBytes = resolveSessionObjectCacheMaxBytes();
+  if (maxBytes === 0) {
+    return false;
+  }
+  return sizeBytes === undefined || sizeBytes <= maxBytes;
+}
+
+function isSessionStoreSerializedSnapshotEqual(params: {
+  storePath: string;
+  serialized: string;
+}): boolean {
+  const cached = getSerializedSessionStore({
+    storePath: params.storePath,
+    ttlMs: getSessionStoreTtl(),
+  });
+  if (cached !== undefined) {
+    return cached === params.serialized;
+  }
+  try {
+    return fs.readFileSync(params.storePath, "utf-8") === params.serialized;
+  } catch {
+    return false;
+  }
 }
 
 function removeThreadFromDeliveryContext(context?: DeliveryContext): DeliveryContext | undefined {
@@ -199,7 +234,11 @@ function updateSessionStoreWriteCaches(params: {
   serialized: string;
 }): void {
   const fileStat = getFileStatSnapshot(params.storePath);
-  setSerializedSessionStore(params.storePath, params.serialized);
+  if (shouldRetainSessionStoreSerializedCache(fileStat?.sizeBytes)) {
+    setSerializedSessionStore(params.storePath, params.serialized);
+  } else {
+    setSerializedSessionStore(params.storePath, undefined);
+  }
   if (
     !isSessionStoreObjectCacheEligible({
       storePath: params.storePath,
@@ -396,7 +435,7 @@ async function saveSessionStoreUnlocked(
 
   await fs.promises.mkdir(path.dirname(storePath), { recursive: true });
   const json = JSON.stringify(store, null, 2);
-  if (getSerializedSessionStore(storePath) === json) {
+  if (isSessionStoreSerializedSnapshotEqual({ storePath, serialized: json })) {
     updateSessionStoreWriteCaches({ storePath, store, serialized: json });
     return;
   }
