@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js";
 import { getFileStatSnapshot } from "../cache-utils.js";
 import {
@@ -8,7 +9,10 @@ import {
   setSerializedSessionStore,
   writeSessionStoreCache,
 } from "./store-cache.js";
-import { resolveSessionObjectCacheMaxBytes } from "./store-cache-limit.js";
+import {
+  resolveSessionObjectCacheMaxBytes,
+  SESSION_OBJECT_CACHE_MAX_BYTES_ENV,
+} from "./store-cache-limit.js";
 import { applySessionStoreMigrations } from "./store-migrations.js";
 import { normalizeSessionRuntimeModelFields, type SessionEntry } from "./types.js";
 
@@ -16,8 +20,32 @@ export type LoadSessionStoreOptions = {
   skipCache?: boolean;
 };
 
+const log = createSubsystemLogger("sessions/store");
+const WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS = new Set<string>();
+
+export function clearSessionObjectCacheLimitWarningsForTest(): void {
+  WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS.clear();
+}
+
 function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function warnSessionObjectCacheLimitHit(params: {
+  storePath: string;
+  sizeBytes: number;
+  limitBytes: number;
+}): void {
+  if (WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS.has(params.storePath)) {
+    return;
+  }
+  WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS.add(params.storePath);
+  log.warn("session object cache disabled for large store", {
+    storePath: params.storePath,
+    sizeBytes: params.sizeBytes,
+    limitBytes: params.limitBytes,
+    envVar: SESSION_OBJECT_CACHE_MAX_BYTES_ENV,
+  });
 }
 
 function isSessionStoreObjectCacheEligible(params: {
@@ -33,6 +61,11 @@ function isSessionStoreObjectCacheEligible(params: {
     return false;
   }
   if (params.sizeBytes !== undefined && params.sizeBytes > maxBytes) {
+    warnSessionObjectCacheLimitHit({
+      storePath: params.storePath,
+      sizeBytes: params.sizeBytes,
+      limitBytes: maxBytes,
+    });
     dropSessionStoreObjectCache(params.storePath);
     return false;
   }
