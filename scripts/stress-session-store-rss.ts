@@ -17,6 +17,7 @@ type Options = {
   payloadSize: number;
   uniqueTouches: number;
   cacheTtlMs?: string;
+  reuseLoadedStore: boolean;
 };
 
 type Sample = {
@@ -35,6 +36,7 @@ function parseArgs(argv: string[]): Options {
     sampleEvery: 25,
     payloadSize: 2048,
     uniqueTouches: 400,
+    reuseLoadedStore: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -85,6 +87,10 @@ function parseArgs(argv: string[]): Options {
         options.cacheTtlMs = next;
       }
       i += 1;
+      continue;
+    }
+    if (arg === "--reuse-loaded-store") {
+      options.reuseLoadedStore = true;
     }
   }
 
@@ -198,7 +204,10 @@ async function main() {
             label: `stress-cycle-${String(cycle)}`,
           };
         },
-        { skipMaintenance: true },
+        {
+          skipMaintenance: true,
+          ...(options.reuseLoadedStore ? { baseStore: store } : {}),
+        },
       );
 
       if (cycle % options.sampleEvery === 0 || cycle === options.cycles) {

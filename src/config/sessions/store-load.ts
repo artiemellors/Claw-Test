@@ -4,6 +4,8 @@ import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js"
 import { getFileStatSnapshot } from "../cache-utils.js";
 import {
   dropSessionStoreObjectCache,
+  getSerializedSessionStore,
+  getSessionStoreTtl,
   isSessionStoreCacheEnabled,
   readSessionStoreCache,
   setSerializedSessionStore,
@@ -22,9 +24,44 @@ export type LoadSessionStoreOptions = {
 
 const log = createSubsystemLogger("sessions/store");
 const WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS = new Set<string>();
+let loadedSessionStoreSnapshots = new WeakMap<
+  Record<string, SessionEntry>,
+  { serializedFromDisk?: string }
+>();
 
 export function clearSessionObjectCacheLimitWarningsForTest(): void {
   WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS.clear();
+}
+
+export function clearLoadedSessionStoreSnapshotsForTest(): void {
+  loadedSessionStoreSnapshots = new WeakMap();
+}
+
+export function rememberLoadedSessionStoreSnapshot(params: {
+  store: Record<string, SessionEntry>;
+  serializedFromDisk?: string;
+}): void {
+  loadedSessionStoreSnapshots.set(params.store, {
+    serializedFromDisk: params.serializedFromDisk,
+  });
+}
+
+export function getLoadedSessionStoreSnapshot(
+  store: Record<string, SessionEntry> | undefined,
+): { serializedFromDisk?: string } | undefined {
+  if (!store) {
+    return undefined;
+  }
+  return loadedSessionStoreSnapshots.get(store);
+}
+
+export function forgetLoadedSessionStoreSnapshot(
+  store: Record<string, SessionEntry> | undefined,
+): void {
+  if (!store) {
+    return;
+  }
+  loadedSessionStoreSnapshots.delete(store);
 }
 
 function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
@@ -146,6 +183,13 @@ export function loadSessionStore(
         sizeBytes: currentFileStat?.sizeBytes,
       });
       if (cached) {
+        rememberLoadedSessionStoreSnapshot({
+          store: cached,
+          serializedFromDisk: getSerializedSessionStore({
+            storePath,
+            ttlMs: getSessionStoreTtl(),
+          }),
+        });
         return cached;
       }
     }
@@ -212,5 +256,10 @@ export function loadSessionStore(
     dropSessionStoreObjectCache(storePath);
   }
 
-  return structuredClone(store);
+  const clonedStore = structuredClone(store);
+  rememberLoadedSessionStoreSnapshot({
+    store: clonedStore,
+    serializedFromDisk,
+  });
+  return clonedStore;
 }

@@ -1034,7 +1034,23 @@ export async function runHeartbeatOnce(opts: {
           lastHeartbeatText: normalized.text,
           lastHeartbeatSentAt: startedAt,
         };
-        await saveSessionStore(storePath, store);
+        await updateSessionStore(
+          storePath,
+          (nextStore) => {
+            const nextCurrent = nextStore[sessionKey];
+            if (!nextCurrent) {
+              return;
+            }
+            nextStore[sessionKey] = {
+              ...nextCurrent,
+              lastHeartbeatText: normalized.text,
+              lastHeartbeatSentAt: startedAt,
+            };
+          },
+          {
+            baseStore: store,
+          },
+        );
       }
     }
 

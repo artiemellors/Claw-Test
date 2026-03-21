@@ -28,8 +28,11 @@ import {
   writeSessionStoreCache,
 } from "./store-cache.js";
 import {
+  forgetLoadedSessionStoreSnapshot,
+  getLoadedSessionStoreSnapshot,
   isSessionStoreObjectCacheEligible,
   loadSessionStore,
+  rememberLoadedSessionStoreSnapshot,
   normalizeSessionStore,
 } from "./store-load.js";
 import {
@@ -228,6 +231,10 @@ type SaveSessionStoreOptions = {
   maintenanceOverride?: Partial<ResolvedSessionMaintenanceConfig>;
 };
 
+type UpdateSessionStoreOptions = SaveSessionStoreOptions & {
+  baseStore?: Record<string, SessionEntry>;
+};
+
 function updateSessionStoreWriteCaches(params: {
   storePath: string;
   store: Record<string, SessionEntry>;
@@ -245,6 +252,10 @@ function updateSessionStoreWriteCaches(params: {
       sizeBytes: fileStat?.sizeBytes,
     })
   ) {
+    rememberLoadedSessionStoreSnapshot({
+      store: params.store,
+      serializedFromDisk: params.serialized,
+    });
     dropSessionStoreObjectCache(params.storePath);
     return;
   }
@@ -255,6 +266,28 @@ function updateSessionStoreWriteCaches(params: {
     sizeBytes: fileStat?.sizeBytes,
     serialized: params.serialized,
   });
+  rememberLoadedSessionStoreSnapshot({
+    store: params.store,
+    serializedFromDisk: params.serialized,
+  });
+}
+
+function tryReuseLoadedSessionStoreSnapshot(params: {
+  storePath: string;
+  baseStore?: Record<string, SessionEntry>;
+}): Record<string, SessionEntry> | undefined {
+  const snapshot = getLoadedSessionStoreSnapshot(params.baseStore);
+  if (!params.baseStore || snapshot?.serializedFromDisk === undefined) {
+    return undefined;
+  }
+  try {
+    if (fs.readFileSync(params.storePath, "utf-8") !== snapshot.serializedFromDisk) {
+      return undefined;
+    }
+    return params.baseStore;
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveMutableSessionStoreKey(
@@ -500,20 +533,26 @@ export async function saveSessionStore(
 export async function updateSessionStore<T>(
   storePath: string,
   mutator: (store: Record<string, SessionEntry>) => Promise<T> | T,
-  opts?: SaveSessionStoreOptions,
+  opts?: UpdateSessionStoreOptions,
 ): Promise<T> {
   return await withSessionStoreLock(storePath, async () => {
-    // Always re-read inside the lock to avoid clobbering concurrent writers.
-    const store = loadSessionStore(storePath, { skipCache: true });
+    const store =
+      tryReuseLoadedSessionStoreSnapshot({ storePath, baseStore: opts?.baseStore }) ??
+      loadSessionStore(storePath, { skipCache: true });
     const previousAcpByKey = collectAcpMetadataSnapshot(store);
-    const result = await mutator(store);
-    preserveExistingAcpMetadata({
-      previousAcpByKey,
-      nextStore: store,
-      allowDropSessionKeys: opts?.allowDropAcpMetaSessionKeys,
-    });
-    await saveSessionStoreUnlocked(storePath, store, opts);
-    return result;
+    try {
+      const result = await mutator(store);
+      preserveExistingAcpMetadata({
+        previousAcpByKey,
+        nextStore: store,
+        allowDropSessionKeys: opts?.allowDropAcpMetaSessionKeys,
+      });
+      await saveSessionStoreUnlocked(storePath, store, opts);
+      return result;
+    } catch (error) {
+      forgetLoadedSessionStoreSnapshot(store);
+      throw error;
+    }
   });
 }
 
