@@ -2,11 +2,13 @@ import fs from "node:fs";
 import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js";
 import { getFileStatSnapshot } from "../cache-utils.js";
 import {
+  dropSessionStoreObjectCache,
   isSessionStoreCacheEnabled,
   readSessionStoreCache,
   setSerializedSessionStore,
   writeSessionStoreCache,
 } from "./store-cache.js";
+import { resolveSessionObjectCacheMaxBytes } from "./store-cache-limit.js";
 import { applySessionStoreMigrations } from "./store-migrations.js";
 import { normalizeSessionRuntimeModelFields, type SessionEntry } from "./types.js";
 
@@ -16,6 +18,25 @@ export type LoadSessionStoreOptions = {
 
 function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSessionStoreObjectCacheEligible(params: {
+  storePath: string;
+  sizeBytes?: number;
+}): boolean {
+  if (!isSessionStoreCacheEnabled()) {
+    return false;
+  }
+  const maxBytes = resolveSessionObjectCacheMaxBytes();
+  if (maxBytes === 0) {
+    dropSessionStoreObjectCache(params.storePath);
+    return false;
+  }
+  if (params.sizeBytes !== undefined && params.sizeBytes > maxBytes) {
+    dropSessionStoreObjectCache(params.storePath);
+    return false;
+  }
+  return true;
 }
 
 function normalizeSessionEntryDelivery(entry: SessionEntry): SessionEntry {
@@ -67,15 +88,22 @@ export function loadSessionStore(
   storePath: string,
   opts: LoadSessionStoreOptions = {},
 ): Record<string, SessionEntry> {
-  if (!opts.skipCache && isSessionStoreCacheEnabled()) {
+  if (!opts.skipCache) {
     const currentFileStat = getFileStatSnapshot(storePath);
-    const cached = readSessionStoreCache({
-      storePath,
-      mtimeMs: currentFileStat?.mtimeMs,
-      sizeBytes: currentFileStat?.sizeBytes,
-    });
-    if (cached) {
-      return cached;
+    if (
+      isSessionStoreObjectCacheEligible({
+        storePath,
+        sizeBytes: currentFileStat?.sizeBytes,
+      })
+    ) {
+      const cached = readSessionStoreCache({
+        storePath,
+        mtimeMs: currentFileStat?.mtimeMs,
+        sizeBytes: currentFileStat?.sizeBytes,
+      });
+      if (cached) {
+        return cached;
+      }
     }
   }
 

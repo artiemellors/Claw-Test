@@ -9,12 +9,22 @@ import {
   type SessionEntry,
 } from "../sessions.js";
 
-const LARGE_STORE_MIN_BYTES = 1_000_000;
+const LARGE_STORE_LIMIT_BYTES = 1_000_000;
+
+function createSmallSessionStore(): Record<string, SessionEntry> {
+  return {
+    "session:1": {
+      sessionId: "id-1",
+      updatedAt: Date.now(),
+      displayName: "Small Session",
+    },
+  };
+}
 
 function createLargeSessionStore(): Record<string, SessionEntry> {
   const repeated = "x".repeat(4096);
-  const store: Record<string, SessionEntry> = {};
   const now = Date.now();
+  const store: Record<string, SessionEntry> = {};
   for (let i = 0; i < 320; i += 1) {
     store[`session:${String(i)}`] = {
       sessionId: `id-${String(i)}`,
@@ -25,14 +35,14 @@ function createLargeSessionStore(): Record<string, SessionEntry> {
   return store;
 }
 
-describe("Session Store Cache large store baseline", () => {
+describe("session object cache read limit", () => {
   let fixtureRoot = "";
   let caseId = 0;
   let testDir = "";
   let storePath = "";
 
   beforeAll(() => {
-    fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "session-cache-large-store-test-"));
+    fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "session-cache-limit-read-test-"));
   });
 
   afterAll(() => {
@@ -56,46 +66,42 @@ describe("Session Store Cache large store baseline", () => {
     delete process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES;
   });
 
-  it("keeps a >1 MB store in the write-through cache when the limit is raised", async () => {
-    const store = createLargeSessionStore();
-    process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = String(LARGE_STORE_MIN_BYTES * 2);
-
-    await saveSessionStore(storePath, store);
-
-    const sizeBytes = fs.statSync(storePath).size;
-    expect(sizeBytes).toBeGreaterThan(LARGE_STORE_MIN_BYTES);
+  it("keeps using the object cache for small stores", async () => {
+    await saveSessionStore(storePath, createSmallSessionStore());
 
     const readSpy = vi.spyOn(fs, "readFileSync");
 
-    const loaded1 = loadSessionStore(storePath);
-    const loaded2 = loadSessionStore(storePath);
+    loadSessionStore(storePath);
+    loadSessionStore(storePath);
 
-    expect(Object.keys(loaded1)).toHaveLength(Object.keys(store).length);
-    expect(Object.keys(loaded2)).toHaveLength(Object.keys(store).length);
     expect(readSpy).toHaveBeenCalledTimes(0);
-
     readSpy.mockRestore();
   });
 
-  it("falls back to disk for the same large store when cache TTL is disabled", async () => {
-    const store = createLargeSessionStore();
-    process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = String(LARGE_STORE_MIN_BYTES * 2);
+  it("skips the object cache for large stores above the default limit", async () => {
+    await saveSessionStore(storePath, createLargeSessionStore());
 
-    await saveSessionStore(storePath, store);
-
-    const sizeBytes = fs.statSync(storePath).size;
-    expect(sizeBytes).toBeGreaterThan(LARGE_STORE_MIN_BYTES);
-
-    process.env.OPENCLAW_SESSION_CACHE_TTL_MS = "0";
-    clearSessionStoreCacheForTest();
+    expect(fs.statSync(storePath).size).toBeGreaterThan(LARGE_STORE_LIMIT_BYTES);
 
     const readSpy = vi.spyOn(fs, "readFileSync");
 
-    const loaded = loadSessionStore(storePath);
+    loadSessionStore(storePath);
+    loadSessionStore(storePath);
 
-    expect(Object.keys(loaded)).toHaveLength(Object.keys(store).length);
-    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(readSpy).toHaveBeenCalledTimes(2);
+    readSpy.mockRestore();
+  });
 
+  it("disables object-cache reads entirely when the limit is set to zero", async () => {
+    process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = "0";
+    await saveSessionStore(storePath, createSmallSessionStore());
+
+    const readSpy = vi.spyOn(fs, "readFileSync");
+
+    loadSessionStore(storePath);
+    loadSessionStore(storePath);
+
+    expect(readSpy).toHaveBeenCalledTimes(2);
     readSpy.mockRestore();
   });
 });
