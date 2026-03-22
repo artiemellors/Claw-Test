@@ -4,6 +4,7 @@ import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import { resolveCronDeliveryPlan } from "../delivery-plan.js";
+import { resolveCronJobTimeoutMs } from "../service/timeout-policy.js";
 import type { CronJob, CronRunOutcome, CronRunTelemetry } from "../types.js";
 import {
   dispatchCronDelivery,
@@ -69,6 +70,17 @@ async function loadSessionStoreRuntime() {
 
 function resolveNonNegativeNumber(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+const MIN_CRON_FALLBACK_REMAINING_MS = 1_000;
+const MAX_CRON_FALLBACK_REMAINING_MS = 30_000;
+
+function resolveCronFallbackMinRemainingMs(timeoutMs: number): number {
+  const quarterTimeoutMs = Math.floor(timeoutMs / 4);
+  return Math.max(
+    MIN_CRON_FALLBACK_REMAINING_MS,
+    Math.min(MAX_CRON_FALLBACK_REMAINING_MS, quarterTimeoutMs),
+  );
 }
 
 export type RunCronAgentTurnResult = {
@@ -662,6 +674,7 @@ export async function runCronIsolatedAgentTurn(params: {
   job: CronJob;
   message: string;
   abortSignal?: AbortSignal;
+  deadlineAtMs?: number;
   signal?: AbortSignal;
   sessionKey: string;
   agentId?: string;
@@ -681,7 +694,11 @@ export async function runCronIsolatedAgentTurn(params: {
   if (!prepared.ok) {
     return prepared.result;
   }
-
+  const cronTimeoutMs = resolveCronJobTimeoutMs(params.job);
+  const fallbackMinRemainingMs =
+    typeof cronTimeoutMs === "number" && cronTimeoutMs > 0
+      ? resolveCronFallbackMinRemainingMs(cronTimeoutMs)
+      : undefined;
   try {
     const execution = await executeCronRun({
       cfg: params.cfg,
@@ -709,6 +726,8 @@ export async function runCronIsolatedAgentTurn(params: {
       isAborted,
       thinkLevel: prepared.context.thinkLevel,
       timeoutMs: prepared.context.timeoutMs,
+      deadlineAtMs: params.deadlineAtMs,
+      fallbackMinRemainingMs,
     });
     if (isAborted()) {
       return prepared.context.withRunSession({ status: "error", error: abortReason() });
