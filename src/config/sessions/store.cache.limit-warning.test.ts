@@ -23,12 +23,7 @@ vi.mock("../../logging/subsystem.js", () => {
   return { createSubsystemLogger: () => makeLogger() };
 });
 
-import {
-  clearSessionStoreCacheForTest,
-  loadSessionStore,
-  saveSessionStore,
-  type SessionEntry,
-} from "../sessions.js";
+import type { SessionEntry } from "../sessions.js";
 
 const LARGE_STORE_LIMIT_BYTES = 1_000_000;
 
@@ -57,6 +52,9 @@ function createLargeSessionStore(): Record<string, SessionEntry> {
 }
 
 describe("session object cache limit warning", () => {
+  let clearSessionStoreCacheForTest: typeof import("../sessions.js").clearSessionStoreCacheForTest;
+  let loadSessionStore: typeof import("../sessions.js").loadSessionStore;
+  let saveSessionStore: typeof import("../sessions.js").saveSessionStore;
   let fixtureRoot = "";
   let caseId = 0;
   let testDir = "";
@@ -72,7 +70,10 @@ describe("session object cache limit warning", () => {
     }
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ clearSessionStoreCacheForTest, loadSessionStore, saveSessionStore } =
+      await import("../sessions.js"));
     warnMock.mockClear();
     testDir = path.join(fixtureRoot, `case-${caseId++}`);
     fs.mkdirSync(testDir, { recursive: true });
