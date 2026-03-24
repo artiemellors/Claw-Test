@@ -5,6 +5,8 @@ export const PLAMO_DEFAULT_MODEL_ID = "plamo-2.2-prime";
 export const PLAMO_DEFAULT_MODEL_REF = `plamo/${PLAMO_DEFAULT_MODEL_ID}`;
 export const PLAMO_DEFAULT_CONTEXT_WINDOW = 32_768;
 export const PLAMO_DEFAULT_MAX_TOKENS = 8_192;
+export const PLAMO_PRICE_USD_PER_1M_INPUT = 0.375;
+export const PLAMO_PRICE_USD_PER_1M_OUTPUT = 1.5625;
 
 const PLAMO_MODEL_CATALOG = [
   {
@@ -12,7 +14,13 @@ const PLAMO_MODEL_CATALOG = [
     name: "PLaMo 2.2 Prime",
     reasoning: false,
     input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    // Converted from JPY pricing using a fixed 1 USD = 160 JPY assumption.
+    cost: {
+      input: PLAMO_PRICE_USD_PER_1M_INPUT,
+      output: PLAMO_PRICE_USD_PER_1M_OUTPUT,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
     contextWindow: PLAMO_DEFAULT_CONTEXT_WINDOW,
     maxTokens: PLAMO_DEFAULT_MAX_TOKENS,
   },

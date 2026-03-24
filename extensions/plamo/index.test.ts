@@ -68,6 +68,7 @@ describe("plamo provider plugin", () => {
     expect(catalog.provider.models).toMatchObject([
       {
         id: "plamo-2.2-prime",
+        cost: { input: 0.375, output: 1.5625, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 32_768,
         maxTokens: 8_192,
       },
