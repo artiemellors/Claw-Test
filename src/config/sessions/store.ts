@@ -482,6 +482,7 @@ async function saveSessionStoreUnlocked(
       } catch (err) {
         const code = getErrorCode(err);
         if (code === "ENOENT") {
+          forgetLoadedSessionStoreSnapshot(store);
           return;
         }
         if (i < 4) {
@@ -490,6 +491,7 @@ async function saveSessionStoreUnlocked(
         }
         // Final attempt failed — skip this save. The write lock ensures
         // the next save will retry with fresh data. Log for diagnostics.
+        forgetLoadedSessionStoreSnapshot(store);
         log.warn(`atomic write failed after 5 attempts: ${storePath}`);
       }
     }
@@ -509,13 +511,16 @@ async function saveSessionStoreUnlocked(
       } catch (err2) {
         const code2 = getErrorCode(err2);
         if (code2 === "ENOENT") {
+          forgetLoadedSessionStoreSnapshot(store);
           return;
         }
+        forgetLoadedSessionStoreSnapshot(store);
         throw err2;
       }
       return;
     }
 
+    forgetLoadedSessionStoreSnapshot(store);
     throw err;
   }
 }

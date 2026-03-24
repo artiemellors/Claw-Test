@@ -280,6 +280,44 @@ describe("session store lock (Promise chain mutex)", () => {
     platformSpy.mockRestore();
   });
 
+  it("does not replay a failed baseStore mutator on the next update", async () => {
+    const key = "agent:main:base-store-throw";
+    const { storePath } = await makeTmpStore({
+      [key]: { sessionId: "s1", updatedAt: 100, label: "initial", displayName: "before" },
+    });
+
+    const baseStore = loadSessionStore(storePath, { skipCache: true });
+
+    await expect(
+      updateSessionStore(
+        storePath,
+        async (store) => {
+          store[key] = {
+            ...store[key],
+            label: "failed-mutation",
+          };
+          throw new Error("boom");
+        },
+        { skipMaintenance: true, baseStore },
+      ),
+    ).rejects.toThrow("boom");
+
+    await updateSessionStore(
+      storePath,
+      async (store) => {
+        store[key] = {
+          ...store[key],
+          displayName: "fresh",
+        };
+      },
+      { skipMaintenance: true, baseStore },
+    );
+
+    const store = loadSessionStore(storePath, { skipCache: true });
+    expect(store[key]?.label).toBe("initial");
+    expect(store[key]?.displayName).toBe("fresh");
+  });
+
   it("clears stale runtime provider when model is patched without provider", () => {
     const merged = mergeSessionEntry(
       {
