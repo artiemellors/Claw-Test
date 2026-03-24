@@ -78,13 +78,9 @@ function applySelectionToSession(params: {
   }
   sessionStore[sessionKey] = sessionEntry;
   if (storePath) {
-    updateSessionStore(
-      storePath,
-      (store) => {
-        store[sessionKey] = sessionEntry;
-      },
-      { baseStore: sessionStore },
-    ).catch(() => {
+    updateSessionStore(storePath, (store) => {
+      store[sessionKey] = sessionEntry;
+    }).catch(() => {
       // Ignore persistence errors; session still proceeds.
     });
   }

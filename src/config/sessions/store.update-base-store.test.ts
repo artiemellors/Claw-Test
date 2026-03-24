@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearSessionStoreCacheForTest,
+  getLoadedSessionStoreSnapshotForTest,
   loadSessionStore,
   saveSessionStore,
   updateSessionStore,
@@ -78,6 +79,10 @@ describe("session store base snapshot reuse", () => {
     await saveSessionStore(storePath, createStore(), { skipMaintenance: true });
 
     const baseStore = loadSessionStore(storePath, { skipCache: true });
+    expect(getLoadedSessionStoreSnapshotForTest(baseStore)).toEqual({
+      hasSerializedDigest: false,
+      hasSerializedFromDisk: true,
+    });
     const parseSpy = vi.spyOn(JSON, "parse");
     parseSpy.mockClear();
 
@@ -149,6 +154,10 @@ describe("session store base snapshot reuse", () => {
     expect(fs.statSync(storePath).size).toBeGreaterThan(1_000_000);
 
     const baseStore = loadSessionStore(storePath, { skipCache: true });
+    expect(getLoadedSessionStoreSnapshotForTest(baseStore)).toEqual({
+      hasSerializedDigest: true,
+      hasSerializedFromDisk: false,
+    });
     const parseSpy = vi.spyOn(JSON, "parse");
     parseSpy.mockClear();
 
@@ -176,6 +185,10 @@ describe("session store base snapshot reuse", () => {
 
     expect(parseSpy).not.toHaveBeenCalled();
     parseSpy.mockRestore();
+    expect(getLoadedSessionStoreSnapshotForTest(baseStore)).toEqual({
+      hasSerializedDigest: true,
+      hasSerializedFromDisk: false,
+    });
 
     const saved = loadSessionStore(storePath, { skipCache: true });
     expect(saved["session:1"].label).toBe("updated-large-twice");

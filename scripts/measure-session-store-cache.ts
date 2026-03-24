@@ -118,7 +118,7 @@ async function runChild(params: { entries: number; mode: Mode }) {
     if (params.mode === "full-cache") {
       process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = String(fileSizeBytes + 1024);
     } else if (params.mode === "serialized-retained") {
-      process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = "0";
+      process.env.OPENCLAW_SESSION_OBJECT_CACHE_MAX_BYTES = String(fileSizeBytes + 1024);
       setSerializedSessionStore(storePath, fs.readFileSync(storePath, "utf8"));
     } else if (params.mode === "no-cache") {
       process.env.OPENCLAW_SESSION_CACHE_TTL_MS = "0";
@@ -136,7 +136,9 @@ async function runChild(params: { entries: number; mode: Mode }) {
       return performance.now() - startedAt;
     })();
 
-    if (params.mode === "no-cache") {
+    if (params.mode === "serialized-retained") {
+      dropSessionStoreObjectCache(storePath);
+    } else if (params.mode === "no-cache") {
       dropSessionStoreObjectCache(storePath);
       setSerializedSessionStore(storePath, undefined);
     }
@@ -150,7 +152,9 @@ async function runChild(params: { entries: number; mode: Mode }) {
       return performance.now() - startedAt;
     })();
 
-    if (params.mode === "no-cache") {
+    if (params.mode === "serialized-retained") {
+      dropSessionStoreObjectCache(storePath);
+    } else if (params.mode === "no-cache") {
       dropSessionStoreObjectCache(storePath);
       setSerializedSessionStore(storePath, undefined);
     }
