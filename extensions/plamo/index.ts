@@ -39,9 +39,6 @@ export default defineSingleProviderPluginEntry({
     capabilities: {
       dropThinkingBlockModelHints: ["plamo"],
     },
-    wrapStreamFn: ({ streamFn, extraParams }) =>
-      createPlamoToolCallWrapper(streamFn, {
-        useSyntheticStream: extraParams?.plamoSyntheticStream !== false,
-      }),
+    wrapStreamFn: ({ streamFn }) => createPlamoToolCallWrapper(streamFn),
   },
 });
