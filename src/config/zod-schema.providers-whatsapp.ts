@@ -22,6 +22,8 @@ const WhatsAppGroupEntrySchema = z
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema,
     toolsBySender: ToolPolicyBySenderSchema,
+    forceActivation: z.enum(["always", "mentions", "never"]).optional(),
+    systemPrompt: z.string().optional(),
   })
   .strict()
   .optional();
