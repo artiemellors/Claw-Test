@@ -13,7 +13,11 @@ import { trySafeFileURLToPath } from "../infra/local-file-access.js";
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
-import { toRelativeWorkspacePath } from "./path-policy.js";
+import {
+  normalizeBoundaryRoots,
+  resolvePathWithinRoots,
+  toRelativeWorkspacePath,
+} from "./path-policy.js";
 import { wrapEditToolWithRecovery } from "./pi-tools.host-edit.js";
 import {
   CLAUDE_PARAM_GROUPS,
@@ -556,6 +560,7 @@ export function wrapToolWorkspaceRootGuardWithOptions(
   root: string,
   options?: {
     containerWorkdir?: string;
+    includedRoots?: string[];
   },
 ): AnyAgentTool {
   return {
@@ -572,7 +577,20 @@ export function wrapToolWorkspaceRootGuardWithOptions(
           root,
           containerWorkdir: options?.containerWorkdir,
         });
-        await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+        const allowedRoots = normalizeBoundaryRoots([root, ...(options?.includedRoots ?? [])]);
+        if (allowedRoots.length <= 1) {
+          await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+        } else {
+          const match = resolvePathWithinRoots(allowedRoots, sandboxPath, {
+            cwd: root,
+            boundaryLabel: "allowed work roots",
+          });
+          await assertSandboxPath({
+            filePath: match.resolved,
+            cwd: match.root,
+            root: match.root,
+          });
+        }
       }
       return tool.execute(toolCallId, normalized ?? args, signal, onUpdate);
     },

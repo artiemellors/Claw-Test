@@ -9,6 +9,7 @@ import {
   resolveAgentDir,
   resolveAgentEffectiveModelPrimary,
   resolveAgentExplicitModelPrimary,
+  resolveAgentIncludedWorkDirs,
   resolveFallbackAgentId,
   resolveEffectiveModelFallbacks,
   resolveAgentModelFallbacksOverride,
@@ -48,6 +49,7 @@ describe("resolveAgentConfig", () => {
             id: "main",
             name: "Main Agent",
             workspace: "~/openclaw",
+            includedWorkDirs: ["~/projects/workflow"],
             agentDir: "~/.openclaw/agents/main",
             model: "anthropic/claude-sonnet-4-6",
           },
@@ -58,6 +60,7 @@ describe("resolveAgentConfig", () => {
     expect(result).toEqual({
       name: "Main Agent",
       workspace: "~/openclaw",
+      includedWorkDirs: ["~/projects/workflow"],
       agentDir: "~/.openclaw/agents/main",
       model: "anthropic/claude-sonnet-4-6",
       identity: undefined,
@@ -215,6 +218,21 @@ describe("resolveAgentConfig", () => {
         hasSessionModelOverride: true,
       }),
     ).toEqual([]);
+  });
+
+  it("resolves and deduplicates included work dirs", () => {
+    vi.stubEnv("HOME", "/tmp/openclaw-home");
+    const cfg: OpenClawConfig = {
+      agents: {
+        list: [
+          {
+            id: "main",
+            includedWorkDirs: ["~/repo", "/tmp/openclaw-home/repo", "  "],
+          },
+        ],
+      },
+    };
+    expect(resolveAgentIncludedWorkDirs(cfg, "main")).toEqual(["/tmp/openclaw-home/repo"]);
   });
 
   it("resolves fallback agent id from explicit agent id first", () => {
@@ -493,6 +511,24 @@ describe("resolveAgentIdByWorkspacePath", () => {
       expect(
         resolveAgentIdByWorkspacePath(cfg, path.join(aliasWorkspaceRoot, "projects", "ops", "src")),
       ).toBe("ops");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("matches included work dirs when inferring an agent by path", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-agent-scope-"));
+    const workspaceRoot = path.join(tempRoot, "workspace");
+    const repoRoot = path.join(tempRoot, "repo");
+    try {
+      fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+      const cfg: OpenClawConfig = {
+        agents: {
+          list: [{ id: "main", workspace: workspaceRoot, includedWorkDirs: [repoRoot] }],
+        },
+      };
+
+      expect(resolveAgentIdByWorkspacePath(cfg, path.join(repoRoot, "src"))).toBe("main");
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
