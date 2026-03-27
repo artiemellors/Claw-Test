@@ -18,7 +18,7 @@ describe("media load options", () => {
 
   it.each([
     { mediaLocalRoots: undefined, expectedLocalRoots: undefined },
-    { mediaLocalRoots: [], expectedLocalRoots: undefined },
+    { mediaLocalRoots: [], expectedLocalRoots: [] },
     { mediaLocalRoots: ["/tmp/workspace"], expectedLocalRoots: ["/tmp/workspace"] },
   ] as const)("resolves outbound local roots %#", ({ mediaLocalRoots, expectedLocalRoots }) => {
     expectResolvedOutboundMediaRoots(mediaLocalRoots, expectedLocalRoots);
@@ -32,6 +32,10 @@ describe("media load options", () => {
     {
       params: { maxBytes: 2048, mediaLocalRoots: undefined },
       expected: { maxBytes: 2048, localRoots: undefined },
+    },
+    {
+      params: { mediaLocalRoots: [] },
+      expected: { localRoots: [] },
     },
   ] as const)("builds outbound media load options %#", ({ params, expected }) => {
     expectBuiltOutboundMediaLoadOptions(params, expected);
