@@ -22,6 +22,7 @@ import {
   getDefaultLocalRoots,
   LocalMediaAccessError,
   type LocalMediaAccessErrorCode,
+  type LocalMediaRoot,
 } from "./local-media-access.js";
 import { detectMime, extensionForMime, kindFromMime, normalizeMimeType } from "./mime.js";
 
@@ -40,7 +41,7 @@ type WebMediaOptions = {
   optimizeImages?: boolean;
   ssrfPolicy?: SsrFPolicy;
   /** Allowed root directories for local path reads. "any" is deprecated; prefer sandboxValidated + readFile. */
-  localRoots?: readonly string[] | "any";
+  localRoots?: readonly LocalMediaRoot[] | "any";
   /** Caller already validated the local path (sandbox/other guards); requires readFile override. */
   sandboxValidated?: boolean;
   readFile?: (filePath: string) => Promise<Buffer>;
@@ -52,7 +53,7 @@ type WebMediaOptions = {
 
 function resolveWebMediaOptions(params: {
   maxBytesOrOptions?: number | WebMediaOptions;
-  options?: { ssrfPolicy?: SsrFPolicy; localRoots?: readonly string[] | "any" };
+  options?: { ssrfPolicy?: SsrFPolicy; localRoots?: readonly LocalMediaRoot[] | "any" };
   optimizeImages: boolean;
 }): WebMediaOptions {
   if (typeof params.maxBytesOrOptions === "number" || params.maxBytesOrOptions === undefined) {
@@ -404,7 +405,7 @@ async function loadWebMediaInternal(
 export async function loadWebMedia(
   mediaUrl: string,
   maxBytesOrOptions?: number | WebMediaOptions,
-  options?: { ssrfPolicy?: SsrFPolicy; localRoots?: readonly string[] | "any" },
+  options?: { ssrfPolicy?: SsrFPolicy; localRoots?: readonly LocalMediaRoot[] | "any" },
 ): Promise<WebMediaResult> {
   return await loadWebMediaInternal(
     mediaUrl,
@@ -415,7 +416,7 @@ export async function loadWebMedia(
 export async function loadWebMediaRaw(
   mediaUrl: string,
   maxBytesOrOptions?: number | WebMediaOptions,
-  options?: { ssrfPolicy?: SsrFPolicy; localRoots?: readonly string[] | "any" },
+  options?: { ssrfPolicy?: SsrFPolicy; localRoots?: readonly LocalMediaRoot[] | "any" },
 ): Promise<WebMediaResult> {
   return await loadWebMediaInternal(
     mediaUrl,
