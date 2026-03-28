@@ -58,6 +58,13 @@ export function getAgentScopedMediaLocalRoots(
   cfg: OpenClawConfig,
   agentId?: string,
 ): readonly string[] {
+  const fsConfig = resolveToolFsConfig({ cfg, agentId });
+  if (fsConfig.roots !== undefined) {
+    return fsConfig.roots.map((root) => ({
+      ...root,
+      path: path.resolve(root.path),
+    })) as unknown as string[];
+  }
   const roots = buildMediaLocalRoots(resolveStateDir(), resolveConfigDir());
   const normalizedAgentId = normalizeOptionalString(agentId);
   if (!normalizedAgentId) {
@@ -123,20 +130,16 @@ export function getAgentScopedMediaLocalRootsForSources(params: {
   mediaSources?: readonly string[];
 }): readonly string[] {
   const fsConfig = resolveToolFsConfig({ cfg: params.cfg, agentId: params.agentId });
-  if (fsConfig.roots) {
-    // Preserve fs-root metadata for outbound media checks even though the
-    // broader outbound plumbing still exposes this list as string[] today.
-    return fsConfig.roots.map((root) => ({
-      ...root,
-      path: path.resolve(root.path),
-    })) as unknown as string[];
-  }
   const roots = getAgentScopedMediaLocalRoots(params.cfg, params.agentId);
-  if (fsConfig.workspaceOnly) {
+  if (fsConfig.roots !== undefined) {
     return roots;
+  }
+  const fallbackRoots = roots.filter((root): root is string => typeof root === "string");
+  if (fsConfig.workspaceOnly) {
+    return fallbackRoots;
   }
   if (!resolveEffectiveToolFsRootExpansionAllowed({ cfg: params.cfg, agentId: params.agentId })) {
-    return roots;
+    return fallbackRoots;
   }
-  return appendLocalMediaParentRoots(roots, params.mediaSources);
+  return appendLocalMediaParentRoots(fallbackRoots, params.mediaSources);
 }
