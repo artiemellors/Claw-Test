@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { logWarn } from "../logger.js";
-import { resolveBoundaryPath } from "./boundary-path.js";
+import { resolveBoundaryPath, resolvePathViaExistingAncestor } from "./boundary-path.js";
 import { sameFileIdentity } from "./file-identity.js";
 import { isPinnedPathHelperSpawnError, runPinnedPathHelper } from "./fs-pinned-path-helper.js";
 import { runPinnedUnlinkHelper, runPinnedWriteHelper } from "./fs-pinned-write-helper.js";
@@ -69,6 +69,10 @@ const OPEN_APPEND_CREATE_FLAGS =
   (SUPPORTS_NOFOLLOW ? fsConstants.O_NOFOLLOW : 0);
 
 const ensureTrailingSep = (value: string) => (value.endsWith(path.sep) ? value : value + path.sep);
+
+async function resolveRootDirViaExistingAncestor(rootDir: string): Promise<string> {
+  return path.resolve(await resolvePathViaExistingAncestor(rootDir));
+}
 
 async function expandRelativePathWithHome(relativePath: string): Promise<string> {
   let home = process.env.HOME || process.env.USERPROFILE || os.homedir();
@@ -158,15 +162,7 @@ async function resolvePathWithinRoot(params: {
   rootDir: string;
   relativePath: string;
 }): Promise<{ rootReal: string; rootWithSep: string; resolved: string }> {
-  let rootReal: string;
-  try {
-    rootReal = await fs.realpath(params.rootDir);
-  } catch (err) {
-    if (isNotFoundPathError(err)) {
-      throw new SafeOpenError("not-found", "root dir not found");
-    }
-    throw err;
-  }
+  const rootReal = await resolveRootDirViaExistingAncestor(params.rootDir);
   const rootWithSep = ensureTrailingSep(rootReal);
   const expanded = await expandRelativePathWithHome(params.relativePath);
   const resolved = path.resolve(rootWithSep, expanded);
@@ -611,6 +607,10 @@ export async function writeFileWithinRoot(params: {
     rootDir: params.rootDir,
     relativePath: params.relativePath,
   });
+  await ensurePinnedWriteRootDir({
+    rootReal: pinned.rootReal,
+    mkdir: params.mkdir !== false,
+  });
 
   const identity = await runPinnedWriteHelper({
     rootPath: pinned.rootReal,
@@ -667,6 +667,10 @@ export async function copyFileWithinRoot(params: {
     const pinned = await resolvePinnedWriteTargetWithinRoot({
       rootDir: params.rootDir,
       relativePath: params.relativePath,
+    });
+    await ensurePinnedWriteRootDir({
+      rootReal: pinned.rootReal,
+      mkdir: params.mkdir !== false,
     });
     const sourceStream = source.handle.createReadStream();
     const identity = await runPinnedWriteHelper({
@@ -892,6 +896,29 @@ async function resolvePinnedBoundaryPathWithinRoot(params: {
     rootWithSep,
     canonicalPath: resolved.canonicalPath,
   };
+}
+
+async function ensurePinnedWriteRootDir(params: {
+  rootReal: string;
+  mkdir: boolean;
+}): Promise<void> {
+  try {
+    const stat = await fs.stat(params.rootReal);
+    if (!stat.isDirectory()) {
+      throw new SafeOpenError("invalid-path", "root path is not a directory");
+    }
+    return;
+  } catch (err) {
+    if (!isNotFoundPathError(err)) {
+      throw err;
+    }
+  }
+
+  if (!params.mkdir) {
+    throw new SafeOpenError("not-found", "root dir not found");
+  }
+
+  await fs.mkdir(params.rootReal, { recursive: true });
 }
 
 async function resolvePinnedDeleteTargetWithinRoot(params: {
