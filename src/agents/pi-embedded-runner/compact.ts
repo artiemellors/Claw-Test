@@ -411,15 +411,20 @@ export async function compactEmbeddedPiSessionDirect(
     const reason = error ?? `Unknown model: ${provider}/${modelId}`;
     return fail(reason);
   }
-  let runtimeModel = model;
+  // Re-bind as non-nullable after the null guard; required so tryAuthForModel's
+  // `typeof model` parameter resolves to Model<Api> rather than Model<Api> | undefined.
+  // eslint-disable-next-line prefer-const
+  let resolvedModel: NonNullable<typeof model> = model;
+  let runtimeModel = resolvedModel;
 
   // Attempt auth resolution for a given model, returning the authenticated runtimeModel or throwing.
+  type KeyInfo = Awaited<ReturnType<typeof getApiKeyForModel>>;
   const tryAuthForModel = async (
-    targetModel: typeof model,
+    targetModel: typeof resolvedModel,
     targetModelId: string,
     targetAuthStorage: typeof authStorage,
     targetAuthProfileId: string | undefined,
-  ) => {
+  ): Promise<{ authModel: typeof resolvedModel; keyInfo: KeyInfo }> => {
     let authModel = targetModel;
     const keyInfo = await getApiKeyForModel({
       model: authModel,
@@ -462,11 +467,17 @@ export async function compactEmbeddedPiSessionDirect(
       }
       targetAuthStorage.setRuntimeApiKey(authModel.provider, runtimeApiKey);
     }
-    return authModel;
+    return { authModel, keyInfo };
   };
 
+  let apiKeyInfo: KeyInfo | null = null;
   try {
-    runtimeModel = await tryAuthForModel(runtimeModel, modelId, authStorage, authProfileId);
+    ({ authModel: runtimeModel, keyInfo: apiKeyInfo } = await tryAuthForModel(
+      runtimeModel,
+      modelId,
+      authStorage,
+      authProfileId,
+    ));
   } catch (err) {
     // If auth fails for the primary model, try configured fallbacks before giving up.
     const fallbacks = params.config?.agents?.defaults?.compaction?.modelFallbacks;
@@ -497,7 +508,7 @@ export async function compactEmbeddedPiSessionDirect(
             fbProvider.toLowerCase() !== effectiveProvider.toLowerCase()
               ? undefined
               : params.authProfileId;
-          const fbRuntimeModel = await tryAuthForModel(
+          const { authModel: fbRuntimeModel, keyInfo: fbKeyInfo } = await tryAuthForModel(
             fbResult.model,
             fbModelId,
             fbResult.authStorage,
@@ -506,7 +517,9 @@ export async function compactEmbeddedPiSessionDirect(
           // Fallback succeeded — adopt its model and auth state.
           // Update model so downstream logic (policy, tool wiring, API selection) uses fallback metadata.
           model = fbResult.model;
+          resolvedModel = fbResult.model;
           runtimeModel = fbRuntimeModel;
+          apiKeyInfo = fbKeyInfo;
           // Update active authStorage/modelRegistry so session creation uses fallback credentials.
           authStorage = fbResult.authStorage;
           modelRegistry = fbResult.modelRegistry;
