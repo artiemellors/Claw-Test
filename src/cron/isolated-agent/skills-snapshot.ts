@@ -1,5 +1,5 @@
 import type { SkillSnapshot } from "../../agents/skills.js";
-import { matchesSkillFilter } from "../../agents/skills/filter.js";
+import { canReuseSkillSnapshot } from "../../agents/skills/snapshot-cache.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   buildWorkspaceSkillSnapshot,
@@ -23,11 +23,13 @@ export function resolveCronSkillsSnapshot(params: {
   const snapshotVersion = getSkillsSnapshotVersion(params.workspaceDir);
   const skillFilter = resolveAgentSkillsFilter(params.config, params.agentId);
   const existingSnapshot = params.existingSnapshot;
-  const shouldRefresh =
-    !existingSnapshot ||
-    existingSnapshot.version !== snapshotVersion ||
-    !matchesSkillFilter(existingSnapshot.skillFilter, skillFilter);
-  if (!shouldRefresh) {
+  const shouldRefresh = !canReuseSkillSnapshot({
+    snapshot: existingSnapshot,
+    snapshotVersion,
+    config: params.config,
+    skillFilter,
+  });
+  if (!shouldRefresh && existingSnapshot) {
     return existingSnapshot;
   }
 
