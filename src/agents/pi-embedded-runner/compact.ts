@@ -403,7 +403,7 @@ export async function compactEmbeddedPiSessionDirect(
     }
   }
 
-  const model = finalModel;
+  let model = finalModel;
   const error = finalError;
   let authStorage = finalAuthStorage;
   let modelRegistry = finalModelRegistry;
@@ -504,7 +504,12 @@ export async function compactEmbeddedPiSessionDirect(
             fbAuthProfileId,
           );
           // Fallback succeeded — adopt its model and auth state.
+          // Update model so downstream logic (policy, tool wiring, API selection) uses fallback metadata.
+          model = fbResult.model;
           runtimeModel = fbRuntimeModel;
+          // Update active authStorage/modelRegistry so session creation uses fallback credentials.
+          authStorage = fbResult.authStorage;
+          modelRegistry = fbResult.modelRegistry;
           finalAuthStorage = fbResult.authStorage;
           finalModelRegistry = fbResult.modelRegistry;
           provider = fbProvider;
