@@ -9,6 +9,7 @@ import {
   readFileWithinRoot,
   writeFileWithinRoot,
 } from "../infra/fs-safe.js";
+import { expandHomePrefix } from "../infra/home-dir.js";
 import { trySafeFileURLToPath } from "../infra/local-file-access.js";
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
@@ -402,9 +403,10 @@ export function resolveToolPathAgainstWorkspaceRoot(params: {
 }): string {
   const mapped = mapContainerPathToWorkspaceRoot(params);
   const candidate = mapped.startsWith("@") ? mapped.slice(1) : mapped;
-  return path.isAbsolute(candidate)
-    ? path.resolve(candidate)
-    : path.resolve(params.root, candidate || ".");
+  const expanded = candidate.startsWith("~") ? expandHomePrefix(candidate) : candidate;
+  return path.isAbsolute(expanded)
+    ? path.resolve(expanded)
+    : path.resolve(params.root, expanded || ".");
 }
 
 type MemoryFlushAppendOnlyWriteOptions = {
