@@ -353,8 +353,8 @@ export async function processMessage(params: {
   replyPipeline: {
     ...replyPipeline,
     responsePrefix,
-    },
-    replyResolver: params.replyResolver,
+  },
+  replyResolver: params.replyResolver,
     route: params.route,
     shouldClearGroupHistory,
   });
