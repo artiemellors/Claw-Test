@@ -60,10 +60,7 @@ import {
 } from "./dispatch-from-config.runtime.js";
 import { shouldSkipDuplicateInbound } from "./inbound-dedupe.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
-import {
-  resolveToolDeliveryPayload as resolveDefaultToolDeliveryPayload,
-  shouldSuppressReasoningPayload,
-} from "./reply-payloads.js";
+import { resolveToolDeliveryPayload as resolveDefaultToolDeliveryPayload } from "./reply-payloads.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
 

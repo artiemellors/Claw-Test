@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { runFfmpegMock } = vi.hoisted(() => ({
   runFfmpegMock: vi.fn(),
@@ -16,6 +16,10 @@ vi.mock("openclaw/plugin-sdk/media-runtime", async () => {
 });
 
 describe("maybeNormalizeVoiceBubbleAudio", () => {
+  beforeEach(() => {
+    runFfmpegMock.mockReset();
+  });
+
   it("transcodes webm voice-note audio to ogg for WhatsApp delivery", async () => {
     const { _test } = await import("./tts.js");
     runFfmpegMock.mockResolvedValueOnce("");

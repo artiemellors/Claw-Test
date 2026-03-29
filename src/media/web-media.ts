@@ -9,8 +9,8 @@ import {
 } from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
 import { maxBytesForKind, type MediaKind } from "./constants.js";
-import { runFfprobe } from "./ffmpeg-exec.js";
 import { fetchRemoteMedia } from "./fetch.js";
+import { runFfprobe } from "./ffmpeg-exec.js";
 import {
   convertHeicToJpeg,
   hasAlphaChannel,
@@ -144,6 +144,16 @@ function assertHostReadMediaAllowed(params: {
   );
 }
 
+function shouldConvertHeicBuffer(opts: { contentType?: string; fileName?: string }): boolean {
+  if (!isHeicSource(opts)) {
+    return false;
+  }
+  if (!opts.contentType) {
+    return true;
+  }
+  return HEIC_MIME_RE.test(opts.contentType.trim());
+}
+
 async function normalizeAudioOnlyWebmMime(
   filePath: string,
   contentType?: string,
@@ -226,9 +236,11 @@ async function optimizeImageWithFallback(params: {
   meta?: { contentType?: string; fileName?: string };
 }): Promise<OptimizedImage> {
   const { buffer, cap, meta } = params;
+  const sourceLooksHeic = isHeicSource(meta ?? {});
   const isPng =
-    meta?.contentType === "image/png" ||
-    normalizeLowercaseStringOrEmpty(meta?.fileName).endsWith(".png");
+    !sourceLooksHeic &&
+    (meta?.contentType === "image/png" ||
+      normalizeLowercaseStringOrEmpty(meta?.fileName).endsWith(".png"));
   const hasAlpha = isPng && (await hasAlphaChannel(buffer));
 
   if (hasAlpha) {
@@ -476,7 +488,7 @@ export async function optimizeImageToJpeg(
 }> {
   // Try a grid of sizes/qualities until under the limit.
   let source = buffer;
-  if (isHeicSource(opts)) {
+  if (shouldConvertHeicBuffer(opts)) {
     try {
       source = await convertHeicToJpeg(buffer);
     } catch (err) {
