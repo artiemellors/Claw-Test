@@ -1,4 +1,3 @@
-import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
 import {
@@ -28,10 +27,16 @@ const MAX_STUCK_SESSION_WARN_MS = 24 * 60 * 60 * 1000;
 let commandPollBackoffRuntimePromise: Promise<
   typeof import("../agents/command-poll-backoff.runtime.js")
 > | null = null;
+let configRuntimePromise: Promise<typeof import("../config/config.js")> | null = null;
 
 function loadCommandPollBackoffRuntime() {
   commandPollBackoffRuntimePromise ??= import("../agents/command-poll-backoff.runtime.js");
   return commandPollBackoffRuntimePromise;
+}
+
+function loadConfigRuntime() {
+  configRuntimePromise ??= import("../config/config.js");
+  return configRuntimePromise;
 }
 
 function markActivity() {
@@ -330,6 +335,83 @@ export function logActiveRuns() {
 
 let heartbeatInterval: NodeJS.Timeout | null = null;
 
+async function runDiagnosticHeartbeatTick(
+  config?: OpenClawConfig,
+  opts?: { getConfig?: () => OpenClawConfig },
+) {
+  let heartbeatConfig = config;
+  if (!heartbeatConfig) {
+    try {
+      const { getRuntimeConfig } = await loadConfigRuntime();
+      heartbeatConfig = (opts?.getConfig ?? getRuntimeConfig)();
+    } catch {
+      heartbeatConfig = undefined;
+    }
+  }
+  const stuckSessionWarnMs = resolveStuckSessionWarnMs(heartbeatConfig);
+  const now = Date.now();
+  pruneDiagnosticSessionStates(now, true);
+  const activeCount = Array.from(diagnosticSessionStates.values()).filter(
+    (s) => s.state === "processing",
+  ).length;
+  const waitingCount = Array.from(diagnosticSessionStates.values()).filter(
+    (s) => s.state === "waiting",
+  ).length;
+  const totalQueued = Array.from(diagnosticSessionStates.values()).reduce(
+    (sum, s) => sum + s.queueDepth,
+    0,
+  );
+  const hasActivity =
+    lastActivityAt > 0 ||
+    webhookStats.received > 0 ||
+    activeCount > 0 ||
+    waitingCount > 0 ||
+    totalQueued > 0;
+  if (!hasActivity) {
+    return;
+  }
+  if (now - lastActivityAt > 120_000 && activeCount === 0 && waitingCount === 0) {
+    return;
+  }
+
+  diag.debug(
+    `heartbeat: webhooks=${webhookStats.received}/${webhookStats.processed}/${webhookStats.errors} active=${activeCount} waiting=${waitingCount} queued=${totalQueued}`,
+  );
+  emitDiagnosticEvent({
+    type: "diagnostic.heartbeat",
+    webhooks: {
+      received: webhookStats.received,
+      processed: webhookStats.processed,
+      errors: webhookStats.errors,
+    },
+    active: activeCount,
+    waiting: waitingCount,
+    queued: totalQueued,
+  });
+
+  void loadCommandPollBackoffRuntime()
+    .then(({ pruneStaleCommandPolls }) => {
+      for (const [, state] of diagnosticSessionStates) {
+        pruneStaleCommandPolls(state);
+      }
+    })
+    .catch((err) => {
+      diag.debug(`command-poll-backoff prune failed: ${String(err)}`);
+    });
+
+  for (const [, state] of diagnosticSessionStates) {
+    const ageMs = now - state.lastActivity;
+    if (state.state === "processing" && ageMs > stuckSessionWarnMs) {
+      logSessionStuck({
+        sessionId: state.sessionId,
+        sessionKey: state.sessionKey,
+        state: state.state,
+        ageMs,
+      });
+    }
+  }
+}
+
 export function startDiagnosticHeartbeat(
   config?: OpenClawConfig,
   opts?: { getConfig?: () => OpenClawConfig },
@@ -338,76 +420,7 @@ export function startDiagnosticHeartbeat(
     return;
   }
   heartbeatInterval = setInterval(() => {
-    let heartbeatConfig = config;
-    if (!heartbeatConfig) {
-      try {
-        heartbeatConfig = (opts?.getConfig ?? getRuntimeConfig)();
-      } catch {
-        heartbeatConfig = undefined;
-      }
-    }
-    const stuckSessionWarnMs = resolveStuckSessionWarnMs(heartbeatConfig);
-    const now = Date.now();
-    pruneDiagnosticSessionStates(now, true);
-    const activeCount = Array.from(diagnosticSessionStates.values()).filter(
-      (s) => s.state === "processing",
-    ).length;
-    const waitingCount = Array.from(diagnosticSessionStates.values()).filter(
-      (s) => s.state === "waiting",
-    ).length;
-    const totalQueued = Array.from(diagnosticSessionStates.values()).reduce(
-      (sum, s) => sum + s.queueDepth,
-      0,
-    );
-    const hasActivity =
-      lastActivityAt > 0 ||
-      webhookStats.received > 0 ||
-      activeCount > 0 ||
-      waitingCount > 0 ||
-      totalQueued > 0;
-    if (!hasActivity) {
-      return;
-    }
-    if (now - lastActivityAt > 120_000 && activeCount === 0 && waitingCount === 0) {
-      return;
-    }
-
-    diag.debug(
-      `heartbeat: webhooks=${webhookStats.received}/${webhookStats.processed}/${webhookStats.errors} active=${activeCount} waiting=${waitingCount} queued=${totalQueued}`,
-    );
-    emitDiagnosticEvent({
-      type: "diagnostic.heartbeat",
-      webhooks: {
-        received: webhookStats.received,
-        processed: webhookStats.processed,
-        errors: webhookStats.errors,
-      },
-      active: activeCount,
-      waiting: waitingCount,
-      queued: totalQueued,
-    });
-
-    void loadCommandPollBackoffRuntime()
-      .then(({ pruneStaleCommandPolls }) => {
-        for (const [, state] of diagnosticSessionStates) {
-          pruneStaleCommandPolls(state);
-        }
-      })
-      .catch((err) => {
-        diag.debug(`command-poll-backoff prune failed: ${String(err)}`);
-      });
-
-    for (const [, state] of diagnosticSessionStates) {
-      const ageMs = now - state.lastActivity;
-      if (state.state === "processing" && ageMs > stuckSessionWarnMs) {
-        logSessionStuck({
-          sessionId: state.sessionId,
-          sessionKey: state.sessionKey,
-          state: state.state,
-          ageMs,
-        });
-      }
-    }
+    void runDiagnosticHeartbeatTick(config, opts);
   }, 30_000);
   heartbeatInterval.unref?.();
 }
