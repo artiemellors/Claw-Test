@@ -111,7 +111,8 @@ function isPixelLimitError(error: unknown): boolean {
 }
 
 function isHeicSource(opts: { contentType?: string; fileName?: string }): boolean {
-  if (HEIC_MIME_RE.test(normalizeOptionalString(opts.contentType) ?? "")) {
+  const normalizedContentType = normalizeMimeType(opts.contentType);
+  if (normalizedContentType && HEIC_MIME_RE.test(normalizedContentType)) {
     return true;
   }
   if (HEIC_EXT_RE.test(normalizeOptionalString(opts.fileName) ?? "")) {
@@ -148,10 +149,11 @@ function shouldConvertHeicBuffer(opts: { contentType?: string; fileName?: string
   if (!isHeicSource(opts)) {
     return false;
   }
-  if (!opts.contentType) {
+  const normalizedContentType = normalizeMimeType(opts.contentType);
+  if (!normalizedContentType) {
     return true;
   }
-  return HEIC_MIME_RE.test(opts.contentType.trim());
+  return HEIC_MIME_RE.test(normalizedContentType);
 }
 
 async function normalizeAudioOnlyWebmMime(
