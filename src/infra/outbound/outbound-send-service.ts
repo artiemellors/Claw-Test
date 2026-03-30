@@ -30,6 +30,7 @@ export type OutboundSendContext = {
   agentId?: string;
   mediaAccess?: OutboundMediaAccess;
   mediaReadFile?: OutboundMediaReadFile;
+  ignoreConfiguredRootsForMedia?: boolean;
   accountId?: string | null;
   gateway?: OutboundGatewayContext;
   toolContext?: ChannelThreadingToolContext;
@@ -71,6 +72,7 @@ async function tryHandleWithPluginAction(params: {
     mediaSources: collectActionMediaSources(params.ctx.params),
     mediaAccess: params.ctx.mediaAccess,
     mediaReadFile: params.ctx.mediaReadFile,
+    ignoreConfiguredRoots: params.ctx.ignoreConfiguredRootsForMedia,
   });
   const handled = await dispatchChannelMessageAction({
     channel: params.ctx.channel,
