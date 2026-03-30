@@ -15,6 +15,10 @@ type BuildMediaLocalRootsOptions = {
   preferredTmpDir?: string;
 };
 
+type AgentScopedMediaRootsOptions = {
+  ignoreConfiguredRoots?: boolean;
+};
+
 let cachedPreferredTmpDir: string | undefined;
 const HTTP_URL_RE = /^https?:\/\//i;
 const DATA_URL_RE = /^data:/i;
@@ -54,12 +58,13 @@ export function getDefaultMediaLocalRoots(): readonly string[] {
   return buildMediaLocalRoots(resolveStateDir(), resolveConfigDir());
 }
 
-export function getAgentScopedMediaLocalRoots(
+function getAgentScopedMediaLocalRootsInternal(
   cfg: OpenClawConfig,
   agentId?: string,
+  options?: AgentScopedMediaRootsOptions,
 ): readonly string[] {
   const fsConfig = resolveToolFsConfig({ cfg, agentId });
-  if (fsConfig.roots !== undefined) {
+  if (!options?.ignoreConfiguredRoots && fsConfig.roots !== undefined) {
     return fsConfig.roots.map((root) => ({
       ...root,
       path: path.resolve(root.path),
@@ -79,6 +84,13 @@ export function getAgentScopedMediaLocalRoots(
     roots.push(normalizedWorkspaceDir);
   }
   return roots;
+}
+
+export function getAgentScopedMediaLocalRoots(
+  cfg: OpenClawConfig,
+  agentId?: string,
+): readonly string[] {
+  return getAgentScopedMediaLocalRootsInternal(cfg, agentId);
 }
 
 function resolveLocalMediaPath(source: string): string | undefined {
@@ -128,10 +140,13 @@ export function getAgentScopedMediaLocalRootsForSources(params: {
   cfg: OpenClawConfig;
   agentId?: string;
   mediaSources?: readonly string[];
+  ignoreConfiguredRoots?: boolean;
 }): readonly string[] {
   const fsConfig = resolveToolFsConfig({ cfg: params.cfg, agentId: params.agentId });
-  const roots = getAgentScopedMediaLocalRoots(params.cfg, params.agentId);
-  if (fsConfig.roots !== undefined) {
+  const roots = getAgentScopedMediaLocalRootsInternal(params.cfg, params.agentId, {
+    ignoreConfiguredRoots: params.ignoreConfiguredRoots,
+  });
+  if (fsConfig.roots !== undefined && !params.ignoreConfiguredRoots) {
     return roots;
   }
   const fallbackRoots = roots.filter((root): root is string => typeof root === "string");
