@@ -7,6 +7,15 @@ import {
   setPwToolsCoreCurrentPage,
 } from "./pw-tools-core.test-harness.js";
 
+function clearProxyEnvironment(): void {
+  vi.stubEnv("HTTP_PROXY", "");
+  vi.stubEnv("HTTPS_PROXY", "");
+  vi.stubEnv("ALL_PROXY", "");
+  vi.stubEnv("http_proxy", "");
+  vi.stubEnv("https_proxy", "");
+  vi.stubEnv("all_proxy", "");
+}
+
 installPwToolsCoreTestHooks();
 const mod = await import("./pw-tools-core.snapshot.js");
 
@@ -21,9 +30,7 @@ const PROXY_ENV_KEYS = [
 
 describe("pw-tools-core.snapshot navigate guard", () => {
   beforeEach(() => {
-    for (const key of PROXY_ENV_KEYS) {
-      vi.stubEnv(key, "");
-    }
+    clearProxyEnvironment();
   });
 
   afterEach(() => {

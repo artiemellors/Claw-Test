@@ -1,3 +1,4 @@
+import type { ReplyPayload } from "../auto-reply/types.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import { readStringValue } from "../shared/string-coerce.js";
 export { resolveToolDeliveryPayload } from "../auto-reply/reply/reply-payloads.js";
@@ -401,4 +402,41 @@ export async function deliverFormattedTextWithAttachments(params: {
     replyToId: params.payload.replyToId,
   });
   return true;
+}
+
+export function resolveToolDeliveryPayload(
+  payload: ReplyPayload,
+  options?: {
+    allowText?: boolean;
+    allowExecApproval?: boolean;
+  },
+): ReplyPayload | null {
+  const allowText = options?.allowText === true;
+  const allowExecApproval = options?.allowExecApproval !== false;
+
+  if (allowText && payload.text?.trim()) {
+    return payload;
+  }
+
+  const execApproval =
+    payload.channelData &&
+    typeof payload.channelData === "object" &&
+    !Array.isArray(payload.channelData)
+      ? payload.channelData.execApproval
+      : undefined;
+  if (
+    allowExecApproval &&
+    execApproval &&
+    typeof execApproval === "object" &&
+    !Array.isArray(execApproval)
+  ) {
+    return payload;
+  }
+
+  const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
+  if (!hasMedia) {
+    return null;
+  }
+
+  return { ...payload, text: undefined };
 }
