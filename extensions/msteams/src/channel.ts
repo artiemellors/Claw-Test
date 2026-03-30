@@ -336,6 +336,9 @@ function describeMSTeamsMessageTool({
           "member-info",
           "channel-list",
           "channel-info",
+          "addParticipant",
+          "removeParticipant",
+          "renameGroup",
         ] satisfies ChannelMessageActionName[])
       : [],
     capabilities: enabled ? ["cards"] : [],
@@ -896,6 +899,71 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
             });
             return jsonMSTeamsOkActionResult("channel-info", {
               channelInfo: result.channel,
+            });
+          }
+
+          if (ctx.action === "addParticipant") {
+            const userId = typeof ctx.params.userId === "string" ? ctx.params.userId.trim() : "";
+            if (!userId) {
+              return actionError("addParticipant requires a userId.");
+            }
+            return await runWithRequiredActionTarget({
+              actionLabel: "addParticipant",
+              toolParams: ctx.params,
+              currentChannelId: ctx.toolContext?.currentChannelId,
+              run: async (to) => {
+                const role = readOptionalTrimmedString(ctx.params, "role");
+                const { addParticipantMSTeams } = await loadMSTeamsChannelRuntime();
+                const result = await addParticipantMSTeams({
+                  cfg: ctx.cfg,
+                  to,
+                  userId,
+                  role,
+                });
+                return jsonMSTeamsOkActionResult("addParticipant", result);
+              },
+            });
+          }
+
+          if (ctx.action === "removeParticipant") {
+            const userId = typeof ctx.params.userId === "string" ? ctx.params.userId.trim() : "";
+            if (!userId) {
+              return actionError("removeParticipant requires a userId.");
+            }
+            return await runWithRequiredActionTarget({
+              actionLabel: "removeParticipant",
+              toolParams: ctx.params,
+              currentChannelId: ctx.toolContext?.currentChannelId,
+              run: async (to) => {
+                const { removeParticipantMSTeams } = await loadMSTeamsChannelRuntime();
+                const result = await removeParticipantMSTeams({
+                  cfg: ctx.cfg,
+                  to,
+                  userId,
+                });
+                return jsonMSTeamsOkActionResult("removeParticipant", result);
+              },
+            });
+          }
+
+          if (ctx.action === "renameGroup") {
+            const name = typeof ctx.params.name === "string" ? ctx.params.name.trim() : "";
+            if (!name) {
+              return actionError("renameGroup requires a name.");
+            }
+            return await runWithRequiredActionTarget({
+              actionLabel: "renameGroup",
+              toolParams: ctx.params,
+              currentChannelId: ctx.toolContext?.currentChannelId,
+              run: async (to) => {
+                const { renameGroupMSTeams } = await loadMSTeamsChannelRuntime();
+                const result = await renameGroupMSTeams({
+                  cfg: ctx.cfg,
+                  to,
+                  name,
+                });
+                return jsonMSTeamsOkActionResult("renameGroup", result);
+              },
             });
           }
 
