@@ -42,12 +42,12 @@ describe("program routes", () => {
     await expect(route?.run(argv)).resolves.toBe(false);
   }
 
-  it("matches status route and preloads plugins only for text output", () => {
+  it("always preloads plugins for status", () => {
     const route = expectRoute(["status"]);
     expect(typeof route?.loadPlugins).toBe("function");
     const shouldLoad = route?.loadPlugins as (argv: string[]) => boolean;
     expect(shouldLoad(["node", "openclaw", "status"])).toBe(true);
-    expect(shouldLoad(["node", "openclaw", "status", "--json"])).toBe(false);
+    expect(shouldLoad(["node", "openclaw", "status", "--json"])).toBe(true);
   });
 
   it("matches health route and preloads plugins only for text output", () => {

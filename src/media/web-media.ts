@@ -145,6 +145,15 @@ function assertHostReadMediaAllowed(params: {
   );
 }
 
+function isRemoteUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function shouldConvertHeicBuffer(opts: { contentType?: string; fileName?: string }): boolean {
   if (!isHeicSource(opts)) {
     return false;
@@ -161,6 +170,9 @@ async function normalizeAudioOnlyWebmMime(
   contentType?: string,
 ): Promise<string | undefined> {
   if (contentType !== "video/webm" || getFileExtension(filePath) !== ".webm") {
+    return contentType;
+  }
+  if (isRemoteUrl(filePath)) {
     return contentType;
   }
 

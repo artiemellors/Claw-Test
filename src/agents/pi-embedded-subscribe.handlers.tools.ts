@@ -492,7 +492,13 @@ async function emitToolResultOutput(params: {
           result,
         );
       }
-      ctx.emitToolOutput(toolName, meta, outputText, extractToolResultAudioAsVoice(result));
+      ctx.emitToolOutput(
+        toolName,
+        meta,
+        outputText,
+        extractToolResultAudioAsVoice(result),
+        result,
+      );
     }
     if (!hasStructuredMedia) {
       return;

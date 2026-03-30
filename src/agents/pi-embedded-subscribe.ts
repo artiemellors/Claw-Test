@@ -400,6 +400,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     toolName: string | undefined,
     message: string,
     audioAsVoice?: boolean,
+    result?: unknown,
   ) => {
     if (!params.onToolResult) {
       return;
@@ -409,7 +410,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       mediaUrls,
       audioAsVoice: parsedAudioAsVoice,
     } = parseReplyDirectives(message);
-    const filteredMediaUrls = filterToolResultMediaUrls(toolName, mediaUrls ?? []);
+    const filteredMediaUrls = filterToolResultMediaUrls(toolName, mediaUrls ?? [], result);
     const resolvedAudioAsVoice = Boolean(audioAsVoice || parsedAudioAsVoice);
     if (!cleanedText && filteredMediaUrls.length === 0 && !resolvedAudioAsVoice) {
       return;
@@ -435,6 +436,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     meta?: string,
     output?: string,
     audioAsVoice?: boolean,
+    result?: unknown,
   ) => {
     if (!output) {
       return;
@@ -443,7 +445,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       markdown: useMarkdown,
     });
     const message = `${agg}\n${formatToolOutputBlock(output)}`;
-    emitToolResultMessage(toolName, message, audioAsVoice);
+    emitToolResultMessage(toolName, message, audioAsVoice, result);
   };
 
   const stripBlockTags = (

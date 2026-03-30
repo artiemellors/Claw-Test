@@ -97,6 +97,7 @@ export type EmbeddedPiSubscribeContext = {
     meta?: string,
     output?: string,
     audioAsVoice?: boolean,
+    result?: unknown,
   ) => void;
   stripBlockTags: (
     text: string,
@@ -186,6 +187,7 @@ export type ToolHandlerContext = {
     meta?: string,
     output?: string,
     audioAsVoice?: boolean,
+    result?: unknown,
   ) => void;
   trimMessagingToolSent: () => void;
 };

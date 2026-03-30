@@ -1,7 +1,23 @@
+import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import { readStringValue } from "../shared/string-coerce.js";
 export { resolveToolDeliveryPayload } from "../auto-reply/reply/reply-payloads.js";
+
+function extractToolDeliveryMediaUrls(payload: ReplyPayload): string[] {
+  const mediaUrls = payload.mediaUrls ?? [];
+  const mediaUrl = payload.mediaUrl ? [payload.mediaUrl] : [];
+  const parsed = payload.text ? parseReplyDirectives(payload.text) : undefined;
+  const textMediaUrls = parsed?.mediaUrls ?? [];
+  const seen = new Set<string>();
+  for (const url of [...mediaUrls, ...mediaUrl, ...textMediaUrls]) {
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+  }
+  return [...seen];
+}
 
 export type { MediaPayload, MediaPayloadInput } from "../channels/plugins/media-payload.js";
 export { buildMediaPayload } from "../channels/plugins/media-payload.js";
@@ -433,10 +449,11 @@ export function resolveToolDeliveryPayload(
     return payload;
   }
 
-  const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
+  const mediaUrls = extractToolDeliveryMediaUrls(payload);
+  const hasMedia = mediaUrls.length > 0;
   if (!hasMedia) {
     return null;
   }
 
-  return { ...payload, text: undefined };
+  return { ...payload, text: undefined, mediaUrls, mediaUrl: mediaUrls[0] };
 }
