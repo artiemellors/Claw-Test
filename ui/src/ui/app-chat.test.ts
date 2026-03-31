@@ -2,6 +2,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatHost } from "./app-chat.ts";
+import { CHAT_AUTOSTART_BOOTSTRAP_PROMPT } from "./chat-autostart.ts";
 
 const { setLastActiveSessionKeyMock } = vi.hoisted(() => ({
   setLastActiveSessionKeyMock: vi.fn(),
@@ -321,14 +322,14 @@ describe("handleSendChat", () => {
     const host = makeHost({
       client: { request } as unknown as ChatHost["client"],
       sessionKey: "main",
-      chatAutostartPrompt: "Please introduce yourself to the user.",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
     });
 
     await refreshChat(host, { scheduleScroll: false });
 
     expect(request).toHaveBeenCalledWith("chat.send", {
       sessionKey: "main",
-      message: "Please introduce yourself to the user.",
+      message: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
       deliver: false,
       hideUserMessage: true,
       idempotencyKey: expect.any(String),

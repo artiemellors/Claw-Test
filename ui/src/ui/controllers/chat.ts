@@ -229,7 +229,8 @@ export async function sendChatMessage(
     }
   }
 
-  if (options?.localEcho !== false) {
+  const shouldLocalEcho = options?.localEcho ?? true;
+  if (shouldLocalEcho) {
     state.chatMessages = [
       ...state.chatMessages,
       {

@@ -8,6 +8,7 @@ import {
 } from "./app-polling.ts";
 import { scheduleChatScroll, scheduleLogsScroll } from "./app-scroll.ts";
 import type { OpenClawApp } from "./app.ts";
+import { resolveChatAutostartPrompt } from "./chat-autostart.ts";
 import { loadAgentFiles } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
@@ -71,29 +72,6 @@ type SettingsHost = {
   dreamDiaryContent: string | null;
   chatAutostartPrompt?: string | null;
 };
-
-const DEFAULT_CHAT_AUTOSTART_PROMPT = "Please introduce yourself to the user.";
-
-function resolveChatAutostartPrompt(raw: string | null): string | null {
-  if (raw == null) {
-    return null;
-  }
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const normalized = trimmed.toLowerCase();
-  if (
-    normalized === "1" ||
-    normalized === "true" ||
-    normalized === "yes" ||
-    normalized === "on" ||
-    normalized === "bootstrap"
-  ) {
-    return DEFAULT_CHAT_AUTOSTART_PROMPT;
-  }
-  return trimmed;
-}
 
 export function applySettings(host: SettingsHost, next: UiSettings) {
   const normalized = {
