@@ -43,7 +43,7 @@ describe("addParticipantMSTeams", () => {
     mockState.resolveGraphToken.mockResolvedValue(TOKEN);
   });
 
-  it("adds member to a chat with default role", async () => {
+  it("adds member to a chat with empty roles array by default", async () => {
     mockState.postGraphJson.mockResolvedValue({});
 
     const result = await addParticipantMSTeams({
@@ -58,7 +58,7 @@ describe("addParticipantMSTeams", () => {
       path: `/chats/${encodeURIComponent(CHAT_ID)}/members`,
       body: {
         "@odata.type": "#microsoft.graph.aadUserConversationMember",
-        roles: ["member"],
+        roles: [],
         "user@odata.bind": "https://graph.microsoft.com/v1.0/users('user-aad-id-1')",
       },
     });
@@ -116,7 +116,7 @@ describe("addParticipantMSTeams", () => {
       path: "/teams/team-id-1/channels/channel-id-1/members",
       body: {
         "@odata.type": "#microsoft.graph.aadUserConversationMember",
-        roles: ["member"],
+        roles: [],
         "user@odata.bind": "https://graph.microsoft.com/v1.0/users('user-aad-id-3')",
       },
     });
@@ -130,7 +130,7 @@ describe("removeParticipantMSTeams", () => {
   });
 
   it("lists members, finds match, deletes by membershipId", async () => {
-    mockState.fetchGraphJson.mockResolvedValue({
+    mockState.fetchGraphJson.mockResolvedValueOnce({
       value: [
         { id: "membership-1", userId: "user-aad-id-1" },
         { id: "membership-2", userId: "user-aad-id-2" },
@@ -156,7 +156,7 @@ describe("removeParticipantMSTeams", () => {
   });
 
   it("throws when user not found in member list", async () => {
-    mockState.fetchGraphJson.mockResolvedValue({
+    mockState.fetchGraphJson.mockResolvedValueOnce({
       value: [
         { id: "membership-1", userId: "user-aad-id-1" },
         { id: "membership-3", userId: "user-aad-id-3" },
@@ -173,7 +173,7 @@ describe("removeParticipantMSTeams", () => {
   });
 
   it("removes member from a channel", async () => {
-    mockState.fetchGraphJson.mockResolvedValue({
+    mockState.fetchGraphJson.mockResolvedValueOnce({
       value: [{ id: "membership-5", userId: "user-aad-id-5" }],
     });
     mockState.deleteGraphRequest.mockResolvedValue(undefined);
@@ -193,6 +193,73 @@ describe("removeParticipantMSTeams", () => {
       token: TOKEN,
       path: "/teams/team-id-1/channels/channel-id-1/members/membership-5",
     });
+  });
+
+  it("paginates through @odata.nextLink to find member on a later page", async () => {
+    // Page 1: target not found, has nextLink
+    mockState.fetchGraphJson.mockResolvedValueOnce({
+      value: [
+        { id: "m-1", userId: "other-1" },
+        { id: "m-2", userId: "other-2" },
+      ],
+      "@odata.nextLink":
+        "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.tacv2/members?$skiptoken=page2",
+    });
+    // Page 2: target not found, has nextLink
+    mockState.fetchGraphJson.mockResolvedValueOnce({
+      value: [{ id: "m-3", userId: "other-3" }],
+      "@odata.nextLink":
+        "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.tacv2/members?$skiptoken=page3",
+    });
+    // Page 3: target found
+    mockState.fetchGraphJson.mockResolvedValueOnce({
+      value: [{ id: "m-target", userId: "target-user" }],
+    });
+    mockState.deleteGraphRequest.mockResolvedValue(undefined);
+
+    const result = await removeParticipantMSTeams({
+      cfg: {} as OpenClawConfig,
+      to: CHAT_ID,
+      userId: "target-user",
+    });
+
+    expect(result).toEqual({ removed: { userId: "target-user", chatId: CHAT_ID } });
+    expect(mockState.fetchGraphJson).toHaveBeenCalledTimes(3);
+
+    // Verify pagination paths extracted from absolute nextLink URLs
+    expect(mockState.fetchGraphJson).toHaveBeenNthCalledWith(2, {
+      token: TOKEN,
+      path: "/chats/19%3Aabc%40thread.tacv2/members?$skiptoken=page2",
+    });
+    expect(mockState.fetchGraphJson).toHaveBeenNthCalledWith(3, {
+      token: TOKEN,
+      path: "/chats/19%3Aabc%40thread.tacv2/members?$skiptoken=page3",
+    });
+
+    expect(mockState.deleteGraphRequest).toHaveBeenCalledWith({
+      token: TOKEN,
+      path: `/chats/${encodeURIComponent(CHAT_ID)}/members/m-target`,
+    });
+  });
+
+  it("respects the 20-page safety cap", async () => {
+    for (let i = 0; i < 20; i++) {
+      mockState.fetchGraphJson.mockResolvedValueOnce({
+        value: [{ id: `m-${i}`, userId: `other-${i}` }],
+        "@odata.nextLink": `https://graph.microsoft.com/v1.0/chats/x/members?$skiptoken=p${i + 1}`,
+      });
+    }
+
+    await expect(
+      removeParticipantMSTeams({
+        cfg: {} as OpenClawConfig,
+        to: CHAT_ID,
+        userId: "missing-user",
+      }),
+    ).rejects.toThrow("User missing-user is not a member of this conversation");
+
+    // Should stop at exactly 20 pages
+    expect(mockState.fetchGraphJson).toHaveBeenCalledTimes(20);
   });
 });
 

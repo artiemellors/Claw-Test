@@ -35,7 +35,7 @@ export async function addParticipantMSTeams(
 
   const body = {
     "@odata.type": "#microsoft.graph.aadUserConversationMember",
-    roles: [params.role || "member"],
+    roles: params.role ? [params.role] : [],
     "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${params.userId}')`,
   };
 
@@ -78,23 +78,33 @@ export async function removeParticipantMSTeams(
   const conversationId = await resolveGraphConversationId(params.to);
   const conv = resolveConversationPath(conversationId);
 
-  // List members to find the membership ID for the target user
-  const membersRes = await fetchGraphJson<{ value?: GraphConversationMember[] }>({
-    token,
-    path: `${conv.basePath}/members`,
-  });
+  // Paginate through members to find the membership ID for the target user.
+  // Graph API paginates at 100 members; follow @odata.nextLink until found.
+  const MAX_PAGES = 20;
+  let nextPath: string | undefined = `${conv.basePath}/members`;
+  for (let page = 0; page < MAX_PAGES && nextPath; page++) {
+    const res = await fetchGraphJson<{
+      value?: GraphConversationMember[];
+      "@odata.nextLink"?: string;
+    }>({ token, path: nextPath });
 
-  const member = (membersRes.value ?? []).find((m) => m.userId === params.userId);
-  if (!member?.id) {
-    throw new Error(`User ${params.userId} is not a member of this conversation`);
+    const found = (res.value ?? []).find((m) => m.userId === params.userId);
+    if (found?.id) {
+      await deleteGraphRequest({
+        token,
+        path: `${conv.basePath}/members/${encodeURIComponent(found.id)}`,
+      });
+      return { removed: { userId: params.userId, chatId: conversationId } };
+    }
+
+    // nextLink is an absolute URL; extract the relative path for fetchGraphJson
+    const nextLink = res["@odata.nextLink"];
+    nextPath = nextLink
+      ? nextLink.replace("https://graph.microsoft.com/v1.0", "")
+      : undefined;
   }
 
-  await deleteGraphRequest({
-    token,
-    path: `${conv.basePath}/members/${encodeURIComponent(member.id)}`,
-  });
-
-  return { removed: { userId: params.userId, chatId: conversationId } };
+  throw new Error(`User ${params.userId} is not a member of this conversation`);
 }
 
 // ---------------------------------------------------------------------------
