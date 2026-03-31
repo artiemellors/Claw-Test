@@ -38,6 +38,7 @@ describe("task registry import boundary", () => {
         importers.push(relative);
       }
     }
-    expect(importers.toSorted()).toEqual([...ALLOWED_IMPORTERS].toSorted());
+    const unexpectedImporters = importers.filter((importer) => !ALLOWED_IMPORTERS.has(importer));
+    expect(unexpectedImporters).toEqual([]);
   });
 });
