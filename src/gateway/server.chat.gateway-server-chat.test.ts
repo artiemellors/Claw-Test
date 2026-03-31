@@ -565,6 +565,32 @@ describe("gateway server chat", () => {
     expect(collectHistoryTextValues(historyMessages)).toEqual(["hello", "real reply"]);
   });
 
+  test("chat.send can hide the triggering user turn from chat history", async () => {
+    await withMainSessionStore(async () => {
+      mockGetReplyFromConfigOnce(async () => ({
+        text: "Hello, I am ready to help.",
+      }));
+
+      const res = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "Please introduce yourself to the user.",
+        hideUserMessage: true,
+        idempotencyKey: "idem-hidden-user-turn-1",
+      });
+
+      expect(res.ok).toBe(true);
+      await waitForAgentRunOk("idem-hidden-user-turn-1", CHAT_RESPONSE_TIMEOUT_MS);
+
+      const historyRes = await rpcReq<{ messages?: unknown[] }>(ws, "chat.history", {
+        sessionKey: "main",
+      });
+      expect(historyRes.ok).toBe(true);
+      expect(collectHistoryTextValues(historyRes.payload?.messages ?? [])).toEqual([
+        "Hello, I am ready to help.",
+      ]);
+    });
+  });
+
   test("routes chat.send slash commands without agent runs", async () => {
     await withMainSessionStore(async () => {
       const spy = vi.mocked(agentCommand);

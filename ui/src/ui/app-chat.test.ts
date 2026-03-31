@@ -14,18 +14,27 @@ vi.mock("./app-settings.ts", () => ({
 let handleSendChat: typeof import("./app-chat.ts").handleSendChat;
 let refreshChatAvatar: typeof import("./app-chat.ts").refreshChatAvatar;
 let clearPendingQueueItemsForRun: typeof import("./app-chat.ts").clearPendingQueueItemsForRun;
+let refreshChat: typeof import("./app-chat.ts").refreshChat;
 
 async function loadChatHelpers(params?: { reload?: boolean }): Promise<void> {
   if (params?.reload) {
     vi.resetModules();
   }
-  ({ handleSendChat, refreshChatAvatar, clearPendingQueueItemsForRun } =
+  ({ handleSendChat, refreshChatAvatar, clearPendingQueueItemsForRun, refreshChat } =
     await import("./app-chat.ts"));
 }
 
 function makeHost(overrides?: Partial<ChatHost>): ChatHost {
   return {
     client: null,
+    toolStreamById: new Map(),
+    toolStreamOrder: [],
+    chatToolMessages: [],
+    chatStreamSegments: [],
+    toolStreamSyncTimer: null,
+    chatHasAutoScrolled: false,
+    chatUserNearBottom: true,
+    chatNewMessagesBelow: false,
     chatMessages: [],
     chatStream: null,
     connected: true,
@@ -45,7 +54,7 @@ function makeHost(overrides?: Partial<ChatHost>): ChatHost {
     refreshSessionsAfterChat: new Set<string>(),
     updateComplete: Promise.resolve(),
     ...overrides,
-  };
+  } as ChatHost;
 }
 
 function createDeferred<T>() {
@@ -278,6 +287,55 @@ describe("handleSendChat", () => {
         text: "follow up",
       }),
     ]);
+  });
+
+  it("autostarts a hidden prompt once for an empty chat session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: "Please introduce yourself to the user.",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).toHaveBeenCalledWith("chat.send", {
+      sessionKey: "main",
+      message: "Please introduce yourself to the user.",
+      deliver: false,
+      hideUserMessage: true,
+      idempotencyKey: expect.any(String),
+      attachments: undefined,
+    });
+    expect(host.chatMessages).toEqual([]);
+    expect(host.chatAutostartPrompt).toBeNull();
   });
 });
 

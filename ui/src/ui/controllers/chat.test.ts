@@ -591,6 +591,30 @@ describe("sendChatMessage", () => {
       ],
     });
   });
+
+  it("can send a hidden prompt without local echoing the user turn", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true });
+    const state = createState({
+      connected: true,
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const result = await sendChatMessage(state, "Please introduce yourself.", {
+      hideUserMessage: true,
+      localEcho: false,
+    });
+
+    expect(result).toBeTypeOf("string");
+    expect(request).toHaveBeenCalledWith("chat.send", {
+      sessionKey: "main",
+      message: "Please introduce yourself.",
+      deliver: false,
+      hideUserMessage: true,
+      idempotencyKey: expect.any(String),
+      attachments: undefined,
+    });
+    expect(state.chatMessages).toEqual([]);
+  });
 });
 
 describe("abortChatRun", () => {

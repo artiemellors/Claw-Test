@@ -35,6 +35,7 @@ export type ChatHost = {
   chatModelsLoading: boolean;
   chatModelCatalog: ModelCatalogEntry[];
   sessionsResult?: SessionsListResult | null;
+  chatAutostartPrompt?: string | null;
   updateComplete?: Promise<unknown>;
   refreshSessionsAfterChat: Set<string>;
   /** Callback for slash-command side effects that need app-level access. */
@@ -137,12 +138,18 @@ async function sendChatMessageNow(
     previousAttachments?: ChatAttachment[];
     restoreAttachments?: boolean;
     refreshSessions?: boolean;
+    hideUserMessage?: boolean;
+    localEcho?: boolean;
   },
 ) {
   resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
   // Reset scroll state before sending to ensure auto-scroll works for the response
   resetChatScroll(host as unknown as Parameters<typeof resetChatScroll>[0]);
-  const runId = await sendChatMessage(host as unknown as OpenClawApp, message, opts?.attachments);
+  const runId = await sendChatMessage(host as unknown as OpenClawApp, message, {
+    attachments: opts?.attachments,
+    hideUserMessage: opts?.hideUserMessage,
+    localEcho: opts?.localEcho,
+  });
   const ok = Boolean(runId);
   if (!ok && opts?.previousDraft != null) {
     host.chatMessage = opts.previousDraft;
@@ -171,6 +178,26 @@ async function sendChatMessageNow(
     host.refreshSessionsAfterChat.add(runId);
   }
   return ok;
+}
+
+async function maybeAutostartChat(host: ChatHost) {
+  const prompt = host.chatAutostartPrompt?.trim();
+  if (!prompt) {
+    return;
+  }
+  if (!host.connected || !host.client || isChatBusy(host)) {
+    return;
+  }
+  if (host.chatMessages.length > 0 || typeof host.chatStream === "string") {
+    host.chatAutostartPrompt = null;
+    return;
+  }
+
+  host.chatAutostartPrompt = null;
+  await sendChatMessageNow(host, prompt, {
+    hideUserMessage: true,
+    localEcho: false,
+  });
 }
 
 async function flushChatQueue(host: ChatHost) {
@@ -405,6 +432,7 @@ export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: bool
     refreshChatAvatar(host),
     refreshChatModels(host),
   ]);
+  await maybeAutostartChat(host);
   if (opts?.scheduleScroll !== false) {
     scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
   }

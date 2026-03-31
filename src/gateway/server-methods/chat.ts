@@ -1410,6 +1410,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       message: string;
       thinking?: string;
       deliver?: boolean;
+      hideUserMessage?: boolean;
       originatingChannel?: string;
       originatingTo?: string;
       originatingAccountId?: string;
@@ -1476,6 +1477,17 @@ export const chatHandlers: GatewayRequestHandlers = {
         false,
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, "message or attachment required"),
+      );
+      return;
+    }
+    if (p.hideUserMessage && p.deliver === true) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "hideUserMessage cannot be combined with deliver=true",
+        ),
       );
       return;
     }
@@ -1754,11 +1766,13 @@ export const chatHandlers: GatewayRequestHandlers = {
       // Surface accepted inbound turns immediately so transcript subscribers
       // (gateway watchers, MCP bridges, external channel backends) do not wait
       // on model startup, completion, or failure paths before seeing the user turn.
-      void emitUserTranscriptUpdate().catch((transcriptErr) => {
-        context.logGateway.warn(
-          `webchat eager user transcript update failed: ${formatForLog(transcriptErr)}`,
-        );
-      });
+      if (!p.hideUserMessage) {
+        void emitUserTranscriptUpdate().catch((transcriptErr) => {
+          context.logGateway.warn(
+            `webchat eager user transcript update failed: ${formatForLog(transcriptErr)}`,
+          );
+        });
+      }
 
       let agentRunStarted = false;
       void dispatchInboundMessage({
@@ -1772,7 +1786,9 @@ export const chatHandlers: GatewayRequestHandlers = {
           imageOrder: parsedImageOrder.length > 0 ? parsedImageOrder : undefined,
           onAgentRunStart: (runId) => {
             agentRunStarted = true;
-            void emitUserTranscriptUpdate();
+            if (!p.hideUserMessage) {
+              void emitUserTranscriptUpdate();
+            }
             const connId = typeof client?.connId === "string" ? client.connId : undefined;
             const wantsToolEvents = hasGatewayClientCap(
               client?.connect?.caps,
@@ -1796,7 +1812,9 @@ export const chatHandlers: GatewayRequestHandlers = {
         .then(async () => {
           await rewriteUserTranscriptMedia();
           if (!agentRunStarted) {
-            await emitUserTranscriptUpdate();
+            if (!p.hideUserMessage) {
+              await emitUserTranscriptUpdate();
+            }
             const btwReplies = deliveredReplies
               .map((entry) => entry.payload)
               .filter(isBtwReplyPayload);
@@ -1883,7 +1901,9 @@ export const chatHandlers: GatewayRequestHandlers = {
               });
             }
           } else {
-            void emitUserTranscriptUpdate();
+            if (!p.hideUserMessage) {
+              void emitUserTranscriptUpdate();
+            }
           }
           setGatewayDedupeEntry({
             dedupe: context.dedupe,
@@ -1901,11 +1921,13 @@ export const chatHandlers: GatewayRequestHandlers = {
               `webchat transcript media rewrite failed after error: ${formatForLog(rewriteErr)}`,
             );
           });
-          void emitUserTranscriptUpdate().catch((transcriptErr) => {
-            context.logGateway.warn(
-              `webchat user transcript update failed after error: ${formatForLog(transcriptErr)}`,
-            );
-          });
+          if (!p.hideUserMessage) {
+            void emitUserTranscriptUpdate().catch((transcriptErr) => {
+              context.logGateway.warn(
+                `webchat user transcript update failed after error: ${formatForLog(transcriptErr)}`,
+              );
+            });
+          }
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
           setGatewayDedupeEntry({
             dedupe: context.dedupe,

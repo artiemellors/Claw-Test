@@ -73,6 +73,7 @@ type SettingsHost = {
   dreamDiaryError: string | null;
   dreamDiaryPath: string | null;
   dreamDiaryContent: string | null;
+  chatAutostartPrompt?: string | null;
 };
 
 function setTestWindowUrl(urlString: string) {
@@ -161,6 +162,7 @@ const createHost = (tab: Tab): SettingsHost => ({
   dreamDiaryError: null,
   dreamDiaryPath: null,
   dreamDiaryContent: null,
+  chatAutostartPrompt: null,
 });
 
 describe("setTabFromRoute", () => {
@@ -380,5 +382,15 @@ describe("applySettingsFromUrl", () => {
     expect(host.settings.lastActiveSessionKey).toBe("agent:test_old:main");
     expect(host.pendingGatewayUrl).toBe("ws://gateway-b.example:18789");
     expect(host.pendingGatewayToken).toBe("test-token");
+  });
+
+  it("captures and strips autostart prompts from the URL", () => {
+    setTestWindowUrl("https://control.example/chat?autostart=bootstrap");
+    const host = createHost("chat");
+
+    applySettingsFromUrl(host);
+
+    expect(host.chatAutostartPrompt).toBe("Please introduce yourself to the user.");
+    expect(window.location.search).toBe("");
   });
 });

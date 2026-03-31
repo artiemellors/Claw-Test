@@ -69,7 +69,31 @@ type SettingsHost = {
   dreamDiaryError: string | null;
   dreamDiaryPath: string | null;
   dreamDiaryContent: string | null;
+  chatAutostartPrompt?: string | null;
 };
+
+const DEFAULT_CHAT_AUTOSTART_PROMPT = "Please introduce yourself to the user.";
+
+function resolveChatAutostartPrompt(raw: string | null): string | null {
+  if (raw == null) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (
+    normalized === "1" ||
+    normalized === "true" ||
+    normalized === "yes" ||
+    normalized === "on" ||
+    normalized === "bootstrap"
+  ) {
+    return DEFAULT_CHAT_AUTOSTART_PROMPT;
+  }
+  return trimmed;
+}
 
 export function applySettings(host: SettingsHost, next: UiSettings) {
   const normalized = {
@@ -125,6 +149,7 @@ export function applySettingsFromUrl(host: SettingsHost) {
   const sessionRaw = params.get("session") ?? hashParams.get("session");
   const token = normalizeOptionalString(tokenRaw);
   const session = normalizeOptionalString(sessionRaw);
+  const autostartRaw = params.get("autostart") ?? hashParams.get("autostart");
   const shouldResetSessionForToken = Boolean(token && !session && !gatewayUrlChanged);
   let shouldCleanUrl = false;
 
@@ -174,6 +199,16 @@ export function applySettingsFromUrl(host: SettingsHost) {
         lastActiveSessionKey: session,
       });
     }
+  }
+
+  if (autostartRaw != null) {
+    const prompt = resolveChatAutostartPrompt(autostartRaw);
+    if (prompt) {
+      host.chatAutostartPrompt = prompt;
+    }
+    params.delete("autostart");
+    hashParams.delete("autostart");
+    shouldCleanUrl = true;
   }
 
   if (gatewayUrlRaw != null) {
