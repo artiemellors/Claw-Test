@@ -338,6 +338,47 @@ describe("handleSendChat", () => {
     expect(host.chatMessages).toEqual([]);
     expect(host.chatAutostartPrompt).toBeNull();
   });
+
+  it("skips autostart when chat history failed to load", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        throw new Error("history unavailable");
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+  });
 });
 
 afterAll(() => {

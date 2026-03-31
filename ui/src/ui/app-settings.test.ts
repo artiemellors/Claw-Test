@@ -404,4 +404,18 @@ describe("applySettingsFromUrl", () => {
     expect(host.chatAutostartPrompt).toBeNull();
     expect(window.location.search).toBe("");
   });
+
+  it("defers autostart when gateway switch is pending confirmation", () => {
+    setTestWindowUrl(
+      "https://control.example/chat?gatewayUrl=wss://other-gateway.example/openclaw&autostart=bootstrap",
+    );
+    const host = createHost("chat");
+    host.settings.gatewayUrl = "wss://control.example/openclaw";
+
+    applySettingsFromUrl(host);
+
+    expect(host.pendingGatewayUrl).toBe("wss://other-gateway.example/openclaw");
+    expect(host.chatAutostartPrompt).toBeNull();
+    expect(window.location.search).toBe("");
+  });
 });

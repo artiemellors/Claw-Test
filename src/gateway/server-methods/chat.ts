@@ -1736,6 +1736,9 @@ export const chatHandlers: GatewayRequestHandlers = {
       };
       let transcriptMediaRewriteDone = false;
       const rewriteUserTranscriptMedia = async () => {
+        if (p.hideUserMessage) {
+          return;
+        }
         if (transcriptMediaRewriteDone) {
           return;
         }

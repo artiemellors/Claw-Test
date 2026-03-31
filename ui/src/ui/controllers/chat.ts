@@ -95,9 +95,9 @@ function maybeResetToolStream(state: ChatState) {
   }
 }
 
-export async function loadChatHistory(state: ChatState) {
+export async function loadChatHistory(state: ChatState): Promise<boolean> {
   if (!state.client || !state.connected) {
-    return;
+    return false;
   }
   const sessionKey = state.sessionKey;
   const requestVersion = beginChatHistoryRequest(state);
@@ -122,6 +122,7 @@ export async function loadChatHistory(state: ChatState) {
     maybeResetToolStream(state);
     state.chatStream = null;
     state.chatStreamStartedAt = null;
+    return true;
   } catch (err) {
     if (!shouldApplyChatHistoryResult(state, requestVersion, sessionKey)) {
       return;
@@ -133,6 +134,7 @@ export async function loadChatHistory(state: ChatState) {
     } else {
       state.lastError = String(err);
     }
+    return false;
   } finally {
     if (isLatestChatHistoryRequest(state, requestVersion)) {
       state.chatLoading = false;
@@ -270,7 +272,7 @@ export async function sendChatMessage(
       sessionKey: state.sessionKey,
       message: msg,
       deliver: false,
-      hideUserMessage: options?.hideUserMessage === true,
+      ...(options?.hideUserMessage === true ? { hideUserMessage: true } : {}),
       idempotencyKey: runId,
       attachments: apiAttachments,
     });
@@ -281,14 +283,16 @@ export async function sendChatMessage(
     state.chatStream = null;
     state.chatStreamStartedAt = null;
     state.lastError = error;
-    state.chatMessages = [
-      ...state.chatMessages,
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "Error: " + error }],
-        timestamp: Date.now(),
-      },
-    ];
+    if (options?.hideUserMessage !== true) {
+      state.chatMessages = [
+        ...state.chatMessages,
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Error: " + error }],
+          timestamp: Date.now(),
+        },
+      ];
+    }
     return null;
   } finally {
     state.chatSending = false;

@@ -179,16 +179,6 @@ export function applySettingsFromUrl(host: SettingsHost) {
     }
   }
 
-  if (autostartRaw != null) {
-    const prompt = resolveChatAutostartPrompt(autostartRaw);
-    if (prompt) {
-      host.chatAutostartPrompt = prompt;
-    }
-    params.delete("autostart");
-    hashParams.delete("autostart");
-    shouldCleanUrl = true;
-  }
-
   if (gatewayUrlRaw != null) {
     if (gatewayUrlChanged) {
       host.pendingGatewayUrl = nextGatewayUrl;
@@ -201,6 +191,16 @@ export function applySettingsFromUrl(host: SettingsHost) {
     }
     params.delete("gatewayUrl");
     hashParams.delete("gatewayUrl");
+    shouldCleanUrl = true;
+  }
+
+  if (autostartRaw != null) {
+    const prompt = resolveChatAutostartPrompt(autostartRaw);
+    if (prompt && !gatewayUrlChanged) {
+      host.chatAutostartPrompt = prompt;
+    }
+    params.delete("autostart");
+    hashParams.delete("autostart");
     shouldCleanUrl = true;
   }
 
