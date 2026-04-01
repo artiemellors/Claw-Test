@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../../config/config.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { extractAssistantText, sanitizeTextContent } from "./sessions-helpers.js";
 
@@ -13,7 +14,7 @@ type SessionsToolTestConfig = {
   session: { scope: "per-sender"; mainKey: string };
   tools: {
     agentToAgent: { enabled: boolean };
-    sessions?: { visibility: "all" | "own" };
+    sessions?: { visibility: "all" | "own" | "self" | "tree" | "agent" };
   };
 };
 
@@ -22,13 +23,10 @@ const loadConfigMock = vi.fn<() => SessionsToolTestConfig>(() => ({
   tools: { agentToAgent: { enabled: false } },
 }));
 
-vi.mock("../../config/config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../config/config.js")>();
-  return {
-    ...actual,
-    loadConfig: () => loadConfigMock() as never,
-  };
-});
+// Do not use importOriginal here: the real config barrel pulls in io.ts (dotenv, disk, shell env).
+vi.mock("../../config/config.js", () => ({
+  loadConfig: () => loadConfigMock() as OpenClawConfig,
+}));
 vi.mock("./sessions-send-tool.a2a.js", () => ({
   runSessionsSendA2AFlow: vi.fn(),
 }));
@@ -49,17 +47,17 @@ async function loadFreshSessionsToolModulesForTest() {
   vi.doMock("../../gateway/call.js", () => ({
     callGateway: (opts: unknown) => callGatewayMock(opts),
   }));
-  vi.doMock("../../config/config.js", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("../../config/config.js")>();
-    return {
-      ...actual,
-      loadConfig: () => loadConfigMock() as never,
-    };
-  });
+  vi.doMock("../../config/config.js", () => ({
+    loadConfig: () => loadConfigMock() as OpenClawConfig,
+  }));
   ({ createSessionsListTool } = await import("./sessions-list-tool.js"));
   ({ createSessionsSendTool } = await import("./sessions-send-tool.js"));
   ({ resolveAnnounceTarget } = await import("./sessions-announce-target.js"));
   ({ setActivePluginRegistry } = await import("../../plugins/runtime.js"));
+}
+
+function toolConfig(): OpenClawConfig {
+  return loadConfigMock() as OpenClawConfig;
 }
 
 const installRegistry = async () => {
@@ -109,7 +107,10 @@ const installRegistry = async () => {
 };
 
 function createMainSessionsListTool() {
-  return createSessionsListTool({ agentSessionKey: MAIN_AGENT_SESSION_KEY });
+  return createSessionsListTool({
+    agentSessionKey: MAIN_AGENT_SESSION_KEY,
+    config: toolConfig(),
+  });
 }
 
 async function executeMainSessionsList() {
@@ -120,6 +121,7 @@ function createMainSessionsSendTool() {
   return createSessionsSendTool({
     agentSessionKey: MAIN_AGENT_SESSION_KEY,
     agentChannel: MAIN_AGENT_CHANNEL,
+    config: toolConfig(),
   });
 }
 
@@ -336,6 +338,35 @@ describe("sessions_list gating", () => {
       method: "chat.history",
       params: { sessionKey: "current", limit: 1 },
     });
+  });
+
+  it("uses requesterAgentIdOverride when enforcing cross-agent list visibility", async () => {
+    loadConfigMock.mockReturnValue({
+      session: { scope: "per-sender", mainKey: "main" },
+      tools: {
+        agentToAgent: { enabled: false },
+        sessions: { visibility: "all" },
+      },
+    });
+    callGatewayMock.mockClear();
+    callGatewayMock.mockResolvedValue({
+      path: "/tmp/sessions.json",
+      sessions: [
+        { key: "agent:main:main", kind: "direct" },
+        { key: "agent:tony:main", kind: "direct" },
+      ],
+    });
+
+    const tool = createSessionsListTool({
+      agentSessionKey: "global",
+      requesterAgentIdOverride: "tony",
+      config: toolConfig(),
+    });
+    const result = await tool.execute("call-override-list", {});
+    const details = result.details as { sessions?: Array<{ key?: string }>; count?: number };
+    const keys = (details.sessions ?? []).map((row) => row.key);
+    expect(keys).toEqual(["agent:tony:main"]);
+    expect(details.count).toBe(1);
   });
 });
 
@@ -584,6 +615,34 @@ describe("sessions_send gating", () => {
       status: "ok",
       reply: undefined,
       sessionKey: MAIN_AGENT_SESSION_KEY,
+    });
+  });
+
+  it("uses requesterAgentIdOverride when enforcing cross-agent send visibility", async () => {
+    loadConfigMock.mockReturnValue({
+      session: { scope: "per-sender", mainKey: "main" },
+      tools: {
+        agentToAgent: { enabled: false },
+        sessions: { visibility: "all" },
+      },
+    });
+    const tool = createSessionsSendTool({
+      agentSessionKey: "global",
+      agentChannel: MAIN_AGENT_CHANNEL,
+      requesterAgentIdOverride: "tony",
+      config: toolConfig(),
+    });
+
+    const result = await tool.execute("call-override-send", {
+      sessionKey: "agent:main:main",
+      message: "hi",
+      timeoutSeconds: 0,
+    });
+
+    expect(result.details).toMatchObject({
+      status: "forbidden",
+      error:
+        "Agent-to-agent messaging is disabled. Set tools.agentToAgent.enabled=true to allow cross-agent sends.",
     });
   });
 });

@@ -104,6 +104,7 @@ export function createSessionsListTool(opts?: {
       const visibilityGuard = await createSessionVisibilityGuard({
         action: "list",
         requesterSessionKey: effectiveRequesterKey,
+        requesterAgentId,
         visibility,
         a2aPolicy,
       });
