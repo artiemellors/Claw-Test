@@ -473,10 +473,13 @@ describe("handleSendChat", () => {
 
     const refreshPromise = refreshChat(host, { scheduleScroll: false });
     expect(resolveHistory).not.toBeNull();
-    if (!resolveHistory) {
+    // TypeScript cannot track the closure assignment inside the mock callback,
+    // so the narrowing after the null guard collapses to `never`. Assert here.
+    const resolve = resolveHistory as (() => void) | null;
+    if (!resolve) {
       throw new Error("expected pending history resolver");
     }
-    resolveHistory();
+    resolve();
     await refreshPromise;
 
     expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
