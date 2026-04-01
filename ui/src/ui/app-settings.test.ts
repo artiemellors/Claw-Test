@@ -460,4 +460,16 @@ describe("applySettingsFromUrl", () => {
     expect(host.pendingChatAutostartPrompt).toBeNull();
     expect(window.location.search).toBe("");
   });
+
+  it("clears stale pending autostart when a gateway-only deep link omits autostart", () => {
+    setTestWindowUrl("https://control.example/chat?gatewayUrl=wss://new-gateway.example/openclaw");
+    const host = createHost("chat");
+    host.settings.gatewayUrl = "wss://control.example/openclaw";
+    host.pendingChatAutostartPrompt = "stale pending prompt from prior link";
+
+    applySettingsFromUrl(host);
+
+    expect(host.pendingGatewayUrl).toBe("wss://new-gateway.example/openclaw");
+    expect(host.pendingChatAutostartPrompt).toBeNull();
+  });
 });
