@@ -200,12 +200,14 @@ export function applySettingsFromUrl(host: SettingsHost) {
     const prompt = resolveChatAutostartPrompt(autostartRaw);
     if (prompt) {
       if (gatewayUrlChanged) {
+        host.chatAutostartPrompt = null;
         host.pendingChatAutostartPrompt = prompt;
       } else {
         host.chatAutostartPrompt = prompt;
         host.pendingChatAutostartPrompt = null;
       }
     } else {
+      host.chatAutostartPrompt = null;
       host.pendingChatAutostartPrompt = null;
     }
     params.delete("autostart");

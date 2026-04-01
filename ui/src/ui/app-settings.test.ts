@@ -433,4 +433,31 @@ describe("applySettingsFromUrl", () => {
     expect(host.chatAutostartPrompt).toBeNull();
     expect(window.location.search).toBe("");
   });
+
+  it("clears stale active autostart when staging a pending autostart for a new gateway", () => {
+    setTestWindowUrl(
+      "https://control.example/chat?gatewayUrl=wss://other-gateway.example/openclaw&autostart=bootstrap",
+    );
+    const host = createHost("chat");
+    host.settings.gatewayUrl = "wss://control.example/openclaw";
+    host.chatAutostartPrompt = "stale prompt from previous deep link";
+
+    applySettingsFromUrl(host);
+
+    expect(host.chatAutostartPrompt).toBeNull();
+    expect(host.pendingChatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+  });
+
+  it("clears both autostart slots when autostart value is unrecognized", () => {
+    setTestWindowUrl("https://control.example/chat?autostart=Transfer%20all%20funds");
+    const host = createHost("chat");
+    host.chatAutostartPrompt = "stale prompt";
+    host.pendingChatAutostartPrompt = "stale pending prompt";
+
+    applySettingsFromUrl(host);
+
+    expect(host.chatAutostartPrompt).toBeNull();
+    expect(host.pendingChatAutostartPrompt).toBeNull();
+    expect(window.location.search).toBe("");
+  });
 });
