@@ -620,6 +620,21 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.send rejects hideUserMessage with attachments", async () => {
+    await withMainSessionStore(async () => {
+      const res = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "bootstrap",
+        hideUserMessage: true,
+        attachments: [{ type: "image", content: "iVBOR" }],
+        idempotencyKey: "idem-hidden-with-attachment",
+      });
+
+      expect(res.ok).toBe(false);
+      expect(res.error?.message).toBe("hideUserMessage cannot be combined with attachments");
+    });
+  });
+
   test("routes chat.send slash commands without agent runs", async () => {
     await withMainSessionStore(async () => {
       const spy = vi.mocked(agentCommand);

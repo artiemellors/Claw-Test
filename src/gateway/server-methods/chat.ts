@@ -1496,6 +1496,17 @@ export const chatHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    if (p.hideUserMessage && normalizedAttachments.length > 0) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "hideUserMessage cannot be combined with attachments",
+        ),
+      );
+      return;
+    }
     if (p.hideUserMessage && !canHideUserMessage(client)) {
       respond(
         false,
