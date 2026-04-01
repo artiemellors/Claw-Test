@@ -516,9 +516,49 @@ export function formatSkillsCompact(skills: Skill[]): string {
 
 // Budget reserved for the compact-mode warning line prepended by the caller.
 const COMPACT_WARNING_OVERHEAD = 150;
+const COMPACT_FORMAT_NOTICE =
+  "⚠️ Skills catalog using compact format (descriptions omitted). Run `openclaw skills check` to audit.";
 
 function joinPromptSections(...sections: Array<string | undefined>): string {
   return sections.filter(Boolean).join("\n");
+}
+
+function formatSkillsPromptBody(skills: Skill[], compact: boolean): string {
+  return compact ? formatSkillsCompact(skills) : formatSkillsForPrompt(skills);
+}
+
+function buildCompactFormatNotice(maxChars: number): string {
+  return COMPACT_FORMAT_NOTICE.length <= maxChars ? COMPACT_FORMAT_NOTICE : "";
+}
+
+function renderSkillsPromptCandidate(params: {
+  skills: Skill[];
+  includedSkills: Skill[];
+  remoteNote?: string;
+  compact: boolean;
+  maxChars: number;
+}): { prompt: string; truncated: boolean; note: string } {
+  const skillsBody = formatSkillsPromptBody(params.includedSkills, params.compact);
+  const basePrompt = joinPromptSections(params.remoteNote, skillsBody);
+  const noteBudget = Math.max(0, params.maxChars - basePrompt.length - 1);
+  const omittedSkills = params.skills.slice(params.includedSkills.length);
+  const truncated = omittedSkills.length > 0;
+  const note = truncated
+    ? buildSkillsTruncationNote({
+        includedCount: params.includedSkills.length,
+        totalCount: params.skills.length,
+        omittedSkills,
+        compact: params.compact,
+        maxChars: noteBudget,
+      })
+    : params.compact
+      ? buildCompactFormatNotice(noteBudget)
+      : "";
+  return {
+    note,
+    prompt: joinPromptSections(params.remoteNote, note, skillsBody),
+    truncated,
+  };
 }
 
 function applySkillsPromptLimits(params: {
@@ -540,13 +580,27 @@ function applySkillsPromptLimits(params: {
   let truncated = total > byCount.length;
   let compact = false;
 
-  const fitsFull = (skills: Skill[]): boolean =>
-    formatSkillsForPrompt(skills).length <= limits.maxSkillsPromptChars - remoteNoteOverhead;
+  const fitsCandidate = (skills: Skill[], compactMode: boolean): boolean => {
+    const candidate = renderSkillsPromptCandidate({
+      skills: params.skills,
+      includedSkills: skills,
+      remoteNote: params.remoteNote,
+      compact: compactMode,
+      maxChars: limits.maxSkillsPromptChars,
+    });
+    const requiresNotice = compactMode || candidate.truncated;
+    return (
+      candidate.prompt.length <= limits.maxSkillsPromptChars &&
+      (!requiresNotice || candidate.note.length > 0)
+    );
+  };
+
+  const fitsFull = (skills: Skill[]): boolean => fitsCandidate(skills, false);
 
   // Reserve space for the warning line the caller prepends in compact mode.
   const compactBudget = limits.maxSkillsPromptChars - remoteNoteOverhead - COMPACT_WARNING_OVERHEAD;
   const fitsCompact = (skills: Skill[]): boolean =>
-    formatSkillsCompact(skills).length <= compactBudget;
+    compactBudget >= 0 && fitsCandidate(skills, true);
 
   if (!fitsFull(skillsForPrompt)) {
     // Full format exceeds budget. Try compact (name + location, no description)
@@ -729,32 +783,20 @@ function resolveWorkspaceSkillPromptState(
   // tier decision is based on the exact strings that end up in the prompt.
   // resolvedSkills keeps canonical paths for snapshot / runtime consumers.
   const promptSkills = compactSkillPaths(resolvedSkills);
-  const { skillsForPrompt, omittedSkills, truncated, compact } = applySkillsPromptLimits({
+  const { skillsForPrompt, truncated, compact } = applySkillsPromptLimits({
     skills: promptSkills,
     config: opts?.config,
     remoteNote,
   });
-  const skillsBody = compact
-    ? formatSkillsCompact(skillsForPrompt)
-    : formatSkillsForPrompt(skillsForPrompt);
-  const basePrompt = joinPromptSections(remoteNote, skillsBody);
-  const noteBudget = Math.max(0, limits.maxSkillsPromptChars - basePrompt.length - 1);
-  const truncationNote = truncated
-    ? buildSkillsTruncationNote({
-        includedCount: skillsForPrompt.length,
-        totalCount: resolvedSkills.length,
-        omittedSkills,
-        compact,
-        maxChars: noteBudget,
-      })
-    : compact
-      ? (() => {
-          const compactNote =
-            "⚠️ Skills catalog using compact format (descriptions omitted). Run `openclaw skills check` to audit.";
-          return compactNote.length <= noteBudget ? compactNote : "";
-        })()
-      : "";
-  const prompt = joinPromptSections(remoteNote, truncationNote, skillsBody);
+  const skillsBody = formatSkillsPromptBody(skillsForPrompt, compact);
+  const candidate = renderSkillsPromptCandidate({
+    skills: resolvedSkills,
+    includedSkills: skillsForPrompt,
+    remoteNote,
+    compact,
+    maxChars: limits.maxSkillsPromptChars,
+  });
+  const prompt = candidate.prompt;
   return { eligible, prompt, resolvedSkills };
 }
 
