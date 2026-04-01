@@ -205,6 +205,8 @@ export function applySettingsFromUrl(host: SettingsHost) {
         host.chatAutostartPrompt = prompt;
         host.pendingChatAutostartPrompt = null;
       }
+    } else {
+      host.pendingChatAutostartPrompt = null;
     }
     params.delete("autostart");
     hashParams.delete("autostart");
