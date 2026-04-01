@@ -591,6 +591,35 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.send requires operator.admin to hide the triggering user turn", async () => {
+    await withGatewayServer(async ({ port }) => {
+      await withMainSessionStore(async () => {
+        let scopedWs: WebSocket | undefined;
+
+        try {
+          scopedWs = new WebSocket(`ws://127.0.0.1:${port}`);
+          trackConnectChallengeNonce(scopedWs);
+          await new Promise<void>((resolve) => scopedWs?.once("open", resolve));
+          await connectOk(scopedWs, {
+            scopes: ["operator.write"],
+          });
+
+          const res = await rpcReq(scopedWs, "chat.send", {
+            sessionKey: "main",
+            message: "Please introduce yourself to the user.",
+            hideUserMessage: true,
+            idempotencyKey: "idem-hidden-user-turn-write-scope",
+          });
+
+          expect(res.ok).toBe(false);
+          expect(res.error?.message).toBe("missing scope: operator.admin");
+        } finally {
+          scopedWs?.close();
+        }
+      });
+    });
+  });
+
   test("routes chat.send slash commands without agent runs", async () => {
     await withMainSessionStore(async () => {
       const spy = vi.mocked(agentCommand);

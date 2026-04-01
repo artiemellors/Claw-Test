@@ -74,6 +74,7 @@ type SettingsHost = {
   dreamDiaryError: string | null;
   dreamDiaryPath: string | null;
   dreamDiaryContent: string | null;
+  pendingChatAutostartPrompt?: string | null;
   chatAutostartPrompt?: string | null;
 };
 
@@ -163,6 +164,7 @@ const createHost = (tab: Tab): SettingsHost => ({
   dreamDiaryError: null,
   dreamDiaryPath: null,
   dreamDiaryContent: null,
+  pendingChatAutostartPrompt: null,
   chatAutostartPrompt: null,
 });
 
@@ -416,6 +418,7 @@ describe("applySettingsFromUrl", () => {
 
     expect(host.pendingGatewayUrl).toBe("wss://other-gateway.example/openclaw");
     expect(host.chatAutostartPrompt).toBeNull();
+    expect(host.pendingChatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
     expect(window.location.search).toBe("");
   });
 });

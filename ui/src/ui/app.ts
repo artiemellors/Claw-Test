@@ -206,6 +206,7 @@ export class OpenClawApp extends LitElement {
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
   pendingGatewayToken: string | null = null;
+  pendingChatAutostartPrompt: string | null = null;
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -739,8 +740,11 @@ export class OpenClawApp extends LitElement {
       return;
     }
     const nextToken = normalizeOptionalString(this.pendingGatewayToken) ?? "";
+    const nextAutostartPrompt = normalizeOptionalString(this.pendingChatAutostartPrompt);
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
+    this.pendingChatAutostartPrompt = null;
+    this.chatAutostartPrompt = nextAutostartPrompt;
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,
       gatewayUrl: nextGatewayUrl,
@@ -752,6 +756,7 @@ export class OpenClawApp extends LitElement {
   handleGatewayUrlCancel() {
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
+    this.pendingChatAutostartPrompt = null;
   }
 
   // Sidebar handlers for tool output viewing

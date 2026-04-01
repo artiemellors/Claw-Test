@@ -344,6 +344,11 @@ function canInjectSystemProvenance(client: GatewayRequestHandlerOptions["client"
   return scopes.includes(ADMIN_SCOPE);
 }
 
+function canHideUserMessage(client: GatewayRequestHandlerOptions["client"]): boolean {
+  const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
+  return scopes.includes(ADMIN_SCOPE);
+}
+
 /**
  * Persist inline images and offloaded-ref media to the transcript media store.
  *
@@ -1488,6 +1493,14 @@ export const chatHandlers: GatewayRequestHandlers = {
           ErrorCodes.INVALID_REQUEST,
           "hideUserMessage cannot be combined with deliver=true",
         ),
+      );
+      return;
+    }
+    if (p.hideUserMessage && !canHideUserMessage(client)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, `missing scope: ${ADMIN_SCOPE}`),
       );
       return;
     }
