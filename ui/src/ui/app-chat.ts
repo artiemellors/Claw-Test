@@ -197,10 +197,13 @@ async function maybeAutostartChat(host: ChatHost, historyLoaded: boolean) {
   }
 
   host.chatAutostartPrompt = null;
-  await sendChatMessageNow(host, prompt, {
+  const ok = await sendChatMessageNow(host, prompt, {
     hideUserMessage: true,
     localEcho: false,
   });
+  if (!ok) {
+    host.chatAutostartPrompt = prompt;
+  }
 }
 
 async function flushChatQueue(host: ChatHost) {
