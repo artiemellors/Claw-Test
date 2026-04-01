@@ -37,6 +37,7 @@ export function resolveAgentScopedOutboundMediaAccess(params: {
   workspaceDir?: string;
   mediaAccess?: OutboundMediaAccess;
   mediaReadFile?: OutboundMediaReadFile;
+  ignoreConfiguredRoots?: boolean;
 }): OutboundMediaAccess {
   const localRoots =
     params.mediaAccess?.localRoots ??
@@ -44,6 +45,7 @@ export function resolveAgentScopedOutboundMediaAccess(params: {
       cfg: params.cfg,
       agentId: params.agentId,
       mediaSources: params.mediaSources,
+      ignoreConfiguredRoots: params.ignoreConfiguredRoots,
     });
   const resolvedWorkspaceDir =
     params.workspaceDir ??
