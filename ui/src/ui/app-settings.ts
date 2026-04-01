@@ -187,6 +187,7 @@ export function applySettingsFromUrl(host: SettingsHost) {
         host.pendingGatewayToken = null;
       }
       if (autostartRaw == null) {
+        host.chatAutostartPrompt = null;
         host.pendingChatAutostartPrompt = null;
       }
     } else {
