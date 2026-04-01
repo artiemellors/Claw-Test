@@ -20,11 +20,21 @@ const WhatsAppGroupEntrySchema = z
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema,
     toolsBySender: ToolPolicyBySenderSchema,
+    systemPrompt: z.string().optional(),
   })
   .strict()
   .optional();
 
 const WhatsAppGroupsSchema = z.record(z.string(), WhatsAppGroupEntrySchema).optional();
+
+const WhatsAppDirectEntrySchema = z
+  .object({
+    systemPrompt: z.string().optional(),
+  })
+  .strict()
+  .optional();
+
+const WhatsAppDirectSchema = z.record(z.string(), WhatsAppDirectEntrySchema).optional();
 
 const WhatsAppAckReactionSchema = z
   .object({
@@ -58,6 +68,7 @@ const WhatsAppSharedSchema = z.object({
   blockStreaming: z.boolean().optional(),
   blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
   groups: WhatsAppGroupsSchema,
+  direct: WhatsAppDirectSchema,
   ackReaction: WhatsAppAckReactionSchema,
   reactionLevel: z.enum(["off", "ack", "minimal", "extensive"]).optional(),
   debounceMs: z.number().int().nonnegative().optional().default(0),

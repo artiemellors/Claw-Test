@@ -8,6 +8,74 @@ import type { ChannelOutboundAdapter } from "./types.js";
 export const WHATSAPP_GROUP_INTRO_HINT =
   "WhatsApp IDs: SenderId is the participant JID (group participant id).";
 
+/**
+ * Returns the resolved system prompt for a WhatsApp group chat given a pre-resolved
+ * account config slice.
+ *
+ * Resolution order:
+ *   1. groups["<groupId>"].systemPrompt — specific group entry, if it defines a prompt.
+ *   2. groups["*"].systemPrompt         — wildcard entry, used when the specific group
+ *      entry is absent or defines no prompt.
+ *
+ * The caller is responsible for resolving the account config before calling this
+ * function. Account groups fully replace root groups (no deep merge), so the slice
+ * passed in already reflects the correct precedence.
+ *
+ * Returns undefined when no matching prompt is found.
+ */
+export function resolveWhatsAppGroupSystemPrompt(params: {
+  accountConfig?: { groups?: Record<string, { systemPrompt?: string }> } | null;
+  groupId?: string | null;
+}): string | undefined {
+  // Get group-level systemPrompt if groupId is provided.
+  // Resolve per-field: use the specific group's systemPrompt if set, otherwise
+  // fall back to the wildcard "*" entry so default prompts still apply even when
+  // the specific group entry only defines non-prompt settings (e.g. requireMention).
+  let groupSystemPrompt: string | undefined;
+  if (params.groupId) {
+    const groups = params.accountConfig?.groups;
+    // Resolution order: specific group entry → wildcard "*" entry.
+    // Root groups naturally reach here when the account defines no groups of its
+    // own (resolveWhatsAppAccount uses override-not-merge semantics, same as
+    // resolveChannelGroups: accountGroups ?? rootGroups).
+    groupSystemPrompt =
+      groups?.[params.groupId]?.systemPrompt?.trim() ||
+      groups?.["*"]?.systemPrompt?.trim() ||
+      undefined;
+  }
+  return groupSystemPrompt;
+}
+
+/**
+ * Returns the resolved system prompt for a WhatsApp direct (1:1) chat given a
+ * pre-resolved account config slice.
+ *
+ * Resolution order:
+ *   1. direct["<peerId>"].systemPrompt — specific peer entry, if it defines a prompt.
+ *   2. direct["*"].systemPrompt        — wildcard entry, used when the specific peer
+ *      entry is absent or defines no prompt.
+ *
+ * The caller is responsible for resolving the account config before calling this
+ * function. Account direct maps fully replace root direct maps (no deep merge), so
+ * the slice passed in already reflects the correct precedence.
+ *
+ * Returns undefined when no matching prompt is found or peerId is not provided.
+ */
+export function resolveWhatsAppDirectSystemPrompt(params: {
+  accountConfig?: { direct?: Record<string, { systemPrompt?: string }> } | null;
+  peerId?: string | null;
+}): string | undefined {
+  let directSystemPrompt: string | undefined;
+  if (params.peerId) {
+    const direct = params.accountConfig?.direct;
+    directSystemPrompt =
+      direct?.[params.peerId]?.systemPrompt?.trim() ||
+      direct?.["*"]?.systemPrompt?.trim() ||
+      undefined;
+  }
+  return directSystemPrompt;
+}
+
 export function resolveWhatsAppGroupIntroHint(): string {
   return WHATSAPP_GROUP_INTRO_HINT;
 }

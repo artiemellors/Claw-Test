@@ -1,3 +1,7 @@
+import {
+  resolveWhatsAppDirectSystemPrompt,
+  resolveWhatsAppGroupSystemPrompt,
+} from "openclaw/plugin-sdk/whatsapp-shared";
 import { resolveWhatsAppAccount } from "../../accounts.js";
 import { getPrimaryIdentityId, getSelfIdentity, getSenderIdentity } from "../../identity.js";
 import { newConnectionId } from "../../reconnect.js";
@@ -45,6 +49,7 @@ import {
 async function resolveWhatsAppCommandAuthorized(params: {
   cfg: ReturnType<typeof loadConfig>;
   msg: WebInboundMsg;
+  account: ReturnType<typeof resolveWhatsAppAccount>;
 }): Promise<boolean> {
   const useAccessGroups = params.cfg.commands?.useAccessGroups !== false;
   if (!useAccessGroups) {
@@ -61,7 +66,7 @@ async function resolveWhatsAppCommandAuthorized(params: {
     return false;
   }
 
-  const account = resolveWhatsAppAccount({ cfg: params.cfg, accountId: params.msg.accountId });
+  const account = params.account;
   const dmPolicy = account.dmPolicy ?? "pairing";
   const groupPolicy = account.groupPolicy ?? "allowlist";
   const configuredAllowFrom = account.allowFrom ?? [];
@@ -105,11 +110,11 @@ async function resolveWhatsAppCommandAuthorized(params: {
 function resolvePinnedMainDmRecipient(params: {
   cfg: ReturnType<typeof loadConfig>;
   msg: WebInboundMsg;
+  account: ReturnType<typeof resolveWhatsAppAccount>;
 }): string | null {
-  const account = resolveWhatsAppAccount({ cfg: params.cfg, accountId: params.msg.accountId });
   return resolvePinnedMainDmOwnerFromAllowlist({
     dmScope: params.cfg.session?.dmScope,
-    allowFrom: account.allowFrom,
+    allowFrom: params.account.allowFrom,
     normalizeEntry: (entry) => normalizeE164(entry),
   });
 }
@@ -270,7 +275,7 @@ export async function processMessage(params: {
     normalizeE164,
   });
   const commandAuthorized = shouldComputeCommandAuthorized(params.msg.body, params.cfg)
-    ? await resolveWhatsAppCommandAuthorized({ cfg: params.cfg, msg: params.msg })
+    ? await resolveWhatsAppCommandAuthorized({ cfg: params.cfg, msg: params.msg, account })
     : undefined;
   const { onModelSelected, ...replyPipeline } = createChannelReplyPipeline({
     cfg: params.cfg,
@@ -289,12 +294,25 @@ export async function processMessage(params: {
     pipelineResponsePrefix: replyPipeline.responsePrefix,
   });
 
+  // Resolve combined conversation system prompt using the group or direct surface.
+  const conversationSystemPrompt =
+    params.msg.chatType === "group"
+      ? resolveWhatsAppGroupSystemPrompt({
+          accountConfig: account,
+          groupId: conversationId,
+        })
+      : resolveWhatsAppDirectSystemPrompt({
+          accountConfig: account,
+          peerId: dmRouteTarget ?? params.msg.from,
+        });
+
   const ctxPayload = buildWhatsAppInboundContext({
     combinedBody,
     commandAuthorized,
     conversationId,
     groupHistory: visibleGroupHistory,
     groupMemberRoster: params.groupMemberNames.get(params.groupHistoryKey),
+    groupSystemPrompt: conversationSystemPrompt,
     msg: params.msg,
     route: params.route,
     sender: {
@@ -308,6 +326,7 @@ export async function processMessage(params: {
   const pinnedMainDmRecipient = resolvePinnedMainDmRecipient({
     cfg: params.cfg,
     msg: params.msg,
+    account,
   });
   updateWhatsAppMainLastRoute({
     backgroundTasks: params.backgroundTasks,
