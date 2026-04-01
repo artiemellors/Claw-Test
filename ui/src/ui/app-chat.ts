@@ -180,7 +180,14 @@ async function sendChatMessageNow(
   return ok;
 }
 
-async function maybeAutostartChat(host: ChatHost, historyLoaded: boolean) {
+async function maybeAutostartChat(
+  host: ChatHost,
+  historyLoaded: boolean,
+  expectedSessionKey?: string,
+) {
+  if (expectedSessionKey && host.sessionKey !== expectedSessionKey) {
+    return;
+  }
   const prompt = host.chatAutostartPrompt?.trim();
   if (!prompt) {
     return;
@@ -427,6 +434,7 @@ function injectCommandResult(host: ChatHost, content: string) {
 }
 
 export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: boolean }) {
+  const refreshSessionKey = host.sessionKey;
   const [historyLoaded] = await Promise.all([
     loadChatHistory(host as unknown as OpenClawApp),
     loadSessions(host as unknown as OpenClawApp, {
@@ -438,7 +446,7 @@ export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: bool
     refreshChatAvatar(host),
     refreshChatModels(host),
   ]);
-  await maybeAutostartChat(host, historyLoaded);
+  await maybeAutostartChat(host, historyLoaded, refreshSessionKey);
   if (opts?.scheduleScroll !== false) {
     scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
   }

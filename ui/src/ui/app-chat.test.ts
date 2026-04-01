@@ -428,6 +428,61 @@ describe("handleSendChat", () => {
     expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
     expect(host.chatMessages).toEqual([]);
   });
+
+  it("preserves autostart when the session changes during refresh", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    let host!: ChatHost;
+    let resolveHistory: (() => void) | null = null;
+    const request = vi.fn((method: string) => {
+      if (method === "chat.history") {
+        return new Promise((resolve) => {
+          resolveHistory = () => {
+            host.sessionKey = "secondary";
+            resolve({ messages: [], thinkingLevel: null });
+          };
+        });
+      }
+      if (method === "sessions.list") {
+        return Promise.resolve({
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        });
+      }
+      if (method === "models.list") {
+        return Promise.resolve({ models: [] });
+      }
+      if (method === "chat.send") {
+        return Promise.resolve({ ok: true });
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+    });
+
+    const refreshPromise = refreshChat(host, { scheduleScroll: false });
+    expect(resolveHistory).not.toBeNull();
+    if (!resolveHistory) {
+      throw new Error("expected pending history resolver");
+    }
+    resolveHistory();
+    await refreshPromise;
+
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    expect(host.sessionKey).toBe("secondary");
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+  });
 });
 
 afterAll(() => {
