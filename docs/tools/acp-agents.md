@@ -809,7 +809,9 @@ Restart the gateway after changing these values.
 
 > **Important:** OpenClaw currently defaults to `permissionMode=approve-reads` and `nonInteractivePermissions=fail`. In non-interactive ACP sessions, any write or exec that triggers a permission prompt can fail with `AcpRuntimeError: Permission prompt unavailable in non-interactive mode`.
 >
-> If you need to restrict permissions, set `nonInteractivePermissions` to `deny` so sessions degrade gracefully instead of crashing.
+> - To auto-approve prompts for trusted automated agents, set `nonInteractivePermissions` to `allow`.
+> - To degrade gracefully instead of crashing, set `nonInteractivePermissions` to `deny`.
+> - To bypass prompts entirely at the harness level (no prompts are raised at all), set `permissionMode` to `approve-all`.
 
 ## Troubleshooting
 
@@ -829,5 +831,5 @@ Restart the gateway after changing these values.
 | `sessions_spawn sandbox="require" is unsupported for runtime="acp" ...`     | `sandbox="require"` requested for ACP runtime.                                  | Use `runtime="subagent"` for required sandboxing, or use ACP with `sandbox="inherit"` from a non-sandboxed session.                                               |
 | Missing ACP metadata for bound session                                      | Stale/deleted ACP session metadata.                                             | Recreate with `/acp spawn`, then rebind/focus thread.                                                                                                             |
 | `AcpRuntimeError: Permission prompt unavailable in non-interactive mode`    | `permissionMode` blocks writes/exec in non-interactive ACP session.             | Set `plugins.entries.acpx.config.permissionMode` to `approve-all` and restart gateway. See [Permission configuration](#permission-configuration).                 |
-| ACP session fails early with little output                                  | Permission prompts are blocked by `permissionMode`/`nonInteractivePermissions`. | Check gateway logs for `AcpRuntimeError`. For full permissions, set `permissionMode=approve-all` and `nonInteractivePermissions=allow`; for graceful degradation, set `nonInteractivePermissions=deny`. |
+| ACP session fails early with little output                                  | Permission prompts are blocked by `permissionMode`/`nonInteractivePermissions`. | Check gateway logs for `AcpRuntimeError`. To auto-approve prompts, set `nonInteractivePermissions=allow`; for harness-level bypass (no prompts raised), set `permissionMode=approve-all`; for graceful degradation, set `nonInteractivePermissions=deny`. |
 | ACP session stalls indefinitely after completing work                       | Harness process finished but ACP session did not report completion.             | Monitor with `ps aux \| grep acpx`; kill stale processes manually.                                                                                                |
