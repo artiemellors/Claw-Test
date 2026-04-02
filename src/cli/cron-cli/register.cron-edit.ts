@@ -13,6 +13,7 @@ import {
   resolveCronEditScheduleRequest,
 } from "./schedule-options.js";
 import { getCronChannelOptions, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
+import { theme } from "../../terminal/theme.js";
 
 const assignIf = (
   target: Record<string, unknown>,
@@ -24,6 +25,31 @@ const assignIf = (
     target[key] = value;
   }
 };
+
+function formatPatchValue(val: unknown): string {
+  if (val === null) return theme.muted("(cleared)");
+  if (val === undefined) return theme.muted("(unchanged)");
+  if (typeof val === "object") return JSON.stringify(val);
+  return String(val);
+}
+
+function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  for (const [key, next] of Object.entries(patch)) {
+    const prev = (existing as Record<string, unknown>)[key];
+    const prevStr = formatPatchValue(prev);
+    const nextStr = formatPatchValue(next);
+    if (prevStr !== nextStr) {
+      lines.push(
+        `  ${theme.muted(key + ":")} ${prevStr} ${theme.muted("→")} ${nextStr}`,
+      );
+    }
+  }
+  if (lines.length > 0) {
+    lines.unshift(theme.warn("Applying changes:"));
+  }
+  return lines;
+}
 
 export function registerCronEditCommand(cron: Command) {
   addGatewayClientOptions(
@@ -307,6 +333,20 @@ export function registerCronEditCommand(cron: Command) {
               failureAlert.accountId = accountId ? accountId : undefined;
             }
             patch.failureAlert = failureAlert;
+          }
+
+          // Fetch current job to show a before/after diff before applying changes.
+          if (Object.keys(patch).length > 0) {
+            const listed = (await callGatewayFromCli("cron.list", opts, {
+              includeDisabled: true,
+            })) as { jobs?: CronJob[] } | null;
+            const existing = (listed?.jobs ?? []).find((job) => job.id === id);
+            if (existing) {
+              const diffLines = buildCronPatchDiff(existing, patch);
+              if (diffLines.length > 0) {
+                defaultRuntime.log(diffLines.join("\n"));
+              }
+            }
           }
 
           const res = await callGatewayFromCli("cron.update", opts, {
