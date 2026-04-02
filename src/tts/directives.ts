@@ -52,7 +52,8 @@ export function parseTtsDirectives(
   let cleanedText = text;
   let hasDirective = false;
 
-  const blockRegex = /\[\[tts:text\]\]([\s\S]*?)\[\[\/tts:text\]\]/gi;
+  const blockRegex =
+    /(?:^|\r?\n)[ \t]*\[\[tts:text\]\][ \t]*(?:\r?\n|$)([\s\S]*?)(?:\r?\n)[ \t]*\[\[\/tts:text\]\][ \t]*(?=\r?\n|$)/gi;
   cleanedText = cleanedText.replace(blockRegex, (_match, inner: string) => {
     hasDirective = true;
     if (policy.allowText && overrides.ttsText == null) {
@@ -61,7 +62,7 @@ export function parseTtsDirectives(
     return "";
   });
 
-  const directiveRegex = /\[\[tts:([^\]]+)\]\]/gi;
+  const directiveRegex = /(?:^|\r?\n)[ \t]*\[\[tts:([^\]]+)\]\][ \t]*(?=\r?\n|$)/gi;
   cleanedText = cleanedText.replace(directiveRegex, (_match, body: string) => {
     hasDirective = true;
     const tokens = body.split(/\s+/).filter(Boolean);
