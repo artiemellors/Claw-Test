@@ -6,6 +6,8 @@ Docs: https://docs.openclaw.ai
 
 ## 2026.4.2-beta.1
 
+- Docs/heartbeat: clarify `heartbeat.model` fallback behavior: the fallback chain is skipped only when `heartbeat.model` uses a different provider than the primary and is not itself listed in the configured fallbacks; same-provider overrides and no-override runs follow the standard fallback chain. (#40875)
+
 ### Breaking
 
 - Plugins/xAI: move `x_search` settings from the legacy core `tools.web.x_search.*` path to the plugin-owned `plugins.entries.xai.config.xSearch.*` path, standardize `x_search` auth on `plugins.entries.xai.config.webSearch.apiKey` / `XAI_API_KEY`, and migrate legacy config with `openclaw doctor --fix`. (#59674) Thanks @vincentkoc.
