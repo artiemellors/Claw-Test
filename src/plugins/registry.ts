@@ -192,6 +192,7 @@ export type PluginRecord = {
   format?: PluginFormat;
   bundleFormat?: PluginBundleFormat;
   bundleCapabilities?: string[];
+  skills: string[];
   kind?: PluginKind | PluginKind[];
   source: string;
   rootDir?: string;
