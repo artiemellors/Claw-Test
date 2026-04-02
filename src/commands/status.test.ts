@@ -908,6 +908,42 @@ describe("statusCommand", () => {
     expect(joined).not.toContain("enabled (plugin openclaw-mem0) · unavailable");
   });
 
+  it("accepts legacy gateway memory status payloads without crashing", async () => {
+    mocks.loadConfig.mockReturnValue({
+      session: {},
+      plugins: {
+        slots: { memory: "openclaw-mem0" },
+      },
+    });
+    mocks.getActiveMemorySearchManager.mockResolvedValue({
+      manager: null,
+      error: "memory plugin unavailable",
+    } as never);
+    mockProbeGatewayResult({
+      ok: true,
+      connectLatencyMs: 10,
+      error: null,
+      health: {},
+      status: {},
+      presence: [],
+    });
+    mocks.callGateway.mockImplementation(async ({ method }: { method: string }) => {
+      if (method === "doctor.memory.status") {
+        return {
+          agentId: "main",
+          provider: "mem0",
+          embedding: { ok: true },
+        };
+      }
+      return {};
+    });
+
+    const joined = await runStatusAndGetJoinedLogs({ deep: true });
+
+    expect(joined).toContain("gateway active");
+    expect(joined).toContain("provider mem0");
+  });
+
   it("warns instead of crashing when gateway auth SecretRef is unresolved for probe auth", async () => {
     mocks.loadConfig.mockReturnValue({
       session: {},
