@@ -76,11 +76,11 @@ const SHARED_DEFAULT_MODEL_CASES: SharedDefaultModelCase[] = [
 ];
 
 describe("applyDefaultModelChoice", () => {
-  it("ensures allowlist entry exists when returning an agent override", async () => {
+  it("returns agentModelOverride when no inherited default exists", async () => {
     const defaultModel = "vercel-ai-gateway/anthropic/claude-opus-4.6";
     const noteAgentModel = vi.fn(async () => {});
     const applied = await applyDefaultModelChoice({
-      config: {},
+      config: {}, // No inherited agents.defaults.model
       setDefaultModel: false,
       defaultModel,
       // Simulate a provider function that does not explicitly add the entry.
@@ -90,10 +90,10 @@ describe("applyDefaultModelChoice", () => {
       prompter: makePrompter(),
     });
 
-    // When setDefaultModel is false, agent should inherit from agents.defaults.model
-    // instead of baking in the provider's defaultModel. See issue #24170.
+    // When no inherited default model exists, we must return the provider's
+    // default as agentModelOverride to avoid creating an agent with no model.
     expect(noteAgentModel).not.toHaveBeenCalled();
-    expect(applied.agentModelOverride).toBeUndefined();
+    expect(applied.agentModelOverride).toEqual(defaultModel);
     expect(applied.config.agents?.defaults?.models?.[defaultModel]).toEqual({});
   });
 
