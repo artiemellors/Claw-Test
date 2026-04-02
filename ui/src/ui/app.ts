@@ -744,7 +744,9 @@ export class OpenClawApp extends LitElement {
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
     this.pendingChatAutostartPrompt = null;
-    this.chatAutostartPrompt = nextAutostartPrompt;
+    if (nextAutostartPrompt) {
+      this.chatAutostartPrompt = nextAutostartPrompt;
+    }
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,
       gatewayUrl: nextGatewayUrl,
