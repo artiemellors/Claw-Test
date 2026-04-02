@@ -462,7 +462,9 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         params.runtime.error?.(
           `feishu[${account.accountId}] ${info.kind} reply failed: ${String(error)}`,
         );
-        await closeStreaming();
+        // Keep the active streaming session open here so upstream failover or
+        // retry logic can continue updating the same card instead of closing a
+        // partial card and emitting a second visible final reply later.
         typingCallbacks?.onIdle?.();
       },
       onIdle: async () => {
