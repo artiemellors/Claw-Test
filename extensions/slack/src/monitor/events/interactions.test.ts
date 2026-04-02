@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const enqueueSystemEventMock = vi.hoisted(() => vi.fn());
+const requestHeartbeatNowMock = vi.hoisted(() => vi.fn());
 const dispatchPluginInteractiveHandlerMock = vi.hoisted(() =>
   vi.fn(async () => ({
     matched: false,
@@ -13,6 +14,7 @@ const buildPluginBindingResolvedTextMock = vi.hoisted(() => vi.fn(() => "Binding
 
 let registerSlackInteractionEvents: typeof import("./interactions.js").registerSlackInteractionEvents;
 let enqueueSystemEventSpy: ReturnType<typeof vi.spyOn>;
+let requestHeartbeatNowSpy: ReturnType<typeof vi.spyOn>;
 let dispatchPluginInteractiveHandlerSpy: ReturnType<typeof vi.spyOn>;
 let resolvePluginConversationBindingApprovalSpy: ReturnType<typeof vi.spyOn>;
 let buildPluginBindingResolvedTextSpy: ReturnType<typeof vi.spyOn>;
@@ -175,6 +177,12 @@ describe("registerSlackInteractionEvents", () => {
         (enqueueSystemEventMock as (...innerArgs: unknown[]) => boolean)(
           ...args,
         )) as typeof channelRuntime.enqueueSystemEvent);
+    requestHeartbeatNowSpy = vi
+      .spyOn(channelRuntime, "requestHeartbeatNow")
+      .mockImplementation(((...args: Parameters<typeof channelRuntime.requestHeartbeatNow>) =>
+        (requestHeartbeatNowMock as (...innerArgs: unknown[]) => void)(
+          ...args,
+        )) as typeof channelRuntime.requestHeartbeatNow);
     dispatchPluginInteractiveHandlerSpy = vi
       .spyOn(pluginRuntime, "dispatchPluginInteractiveHandler")
       .mockImplementation(((
@@ -206,10 +214,13 @@ describe("registerSlackInteractionEvents", () => {
 
   beforeEach(() => {
     enqueueSystemEventSpy.mockClear();
+    requestHeartbeatNowSpy.mockClear();
     dispatchPluginInteractiveHandlerSpy.mockClear();
     resolvePluginConversationBindingApprovalSpy.mockClear();
     buildPluginBindingResolvedTextSpy.mockClear();
     enqueueSystemEventMock.mockClear();
+    enqueueSystemEventMock.mockReturnValue(true);
+    requestHeartbeatNowMock.mockClear();
     dispatchPluginInteractiveHandlerMock.mockClear();
     resolvePluginConversationBindingApprovalMock.mockClear();
     resolvePluginConversationBindingApprovalMock.mockResolvedValue({ status: "expired" });
@@ -294,6 +305,10 @@ describe("registerSlackInteractionEvents", () => {
       channelId: "C1",
       channelType: "channel",
       senderId: "U123",
+    });
+    expect(requestHeartbeatNowMock).toHaveBeenCalledWith({
+      reason: "exec-event",
+      sessionKey: "agent:ops:slack:channel:C1",
     });
     expect(app.client.chat.update).toHaveBeenCalledTimes(1);
   });
@@ -742,6 +757,7 @@ describe("registerSlackInteractionEvents", () => {
 
     expect(ack).toHaveBeenCalled();
     expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(requestHeartbeatNowMock).not.toHaveBeenCalled();
     expect(app.client.chat.update).not.toHaveBeenCalled();
     expect(respond).toHaveBeenCalledWith({
       text: "You are not authorized to use this control.",
@@ -1335,6 +1351,10 @@ describe("registerSlackInteractionEvents", () => {
         expect.objectContaining({ actionId: "notes_input", inputValue: "ship now" }),
       ]),
     );
+    expect(requestHeartbeatNowMock).toHaveBeenCalledWith({
+      reason: "exec-event",
+      sessionKey: "agent:ops:slack:channel:C1",
+    });
   });
 
   it("blocks modal events when private metadata userId does not match submitter", async () => {
@@ -1362,6 +1382,7 @@ describe("registerSlackInteractionEvents", () => {
 
     expect(ack).toHaveBeenCalled();
     expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(requestHeartbeatNowMock).not.toHaveBeenCalled();
   });
 
   it("blocks modal events when private metadata is missing userId", async () => {
@@ -1738,6 +1759,10 @@ describe("registerSlackInteractionEvents", () => {
       ]),
     );
     expect(options.sessionKey).toBe("agent:main:slack:channel:C99");
+    expect(requestHeartbeatNowMock).toHaveBeenCalledWith({
+      reason: "exec-event",
+      sessionKey: "agent:main:slack:channel:C99",
+    });
   });
 
   it("defaults modal close isCleared to false when Slack omits the flag", async () => {
