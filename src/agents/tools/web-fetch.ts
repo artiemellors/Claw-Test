@@ -539,6 +539,20 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
       url: params.url,
       maxRedirects: params.maxRedirects,
       timeoutSeconds: params.timeoutSeconds,
+      // Opt into TRUSTED_ENV_PROXY mode so requests route through the
+      // operator-configured HTTP(S)_PROXY when one is set.  This is safe
+      // because:
+      //  1. The proxy path still enforces pre-DNS hostname-level SSRF
+      //     checks via assertHostnameAllowedByPolicy (blocks localhost,
+      //     .local, .internal, metadata endpoints, private IP literals).
+      //  2. Only DNS resolution and post-resolution IP checks are
+      //     delegated to the proxy, which is appropriate - the proxy
+      //     resolves DNS in its own namespace and the pinned addresses
+      //     from local resolution would be meaningless.
+      //  3. If no HTTP(S)_PROXY env var exists, fetchWithSsrFGuard falls
+      //     back to the full DNS-pinned SSRF path automatically.
+      //  4. NO_PROXY-excluded hosts also fall back to DNS pinning.
+      useEnvProxy: true,
       init: {
         headers: {
           Accept: "text/markdown, text/html;q=0.9, */*;q=0.1",

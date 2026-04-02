@@ -308,6 +308,31 @@ function dedupeAndPreferIpv4(results: readonly LookupAddress[]): string[] {
   return [...ipv4, ...otherFamilies];
 }
 
+/**
+ * Run the same pre-DNS hostname policy checks that resolvePinnedHostnameWithPolicy
+ * performs (hostname allowlist + blocked-hostname/IP detection), without performing
+ * DNS resolution. Used by trusted-env-proxy mode where DNS is delegated to the proxy.
+ */
+export function assertHostnameAllowedByPolicy(
+  hostname: string,
+  policy?: SsrFPolicy,
+): void {
+  const normalized = normalizeHostname(hostname);
+  if (!normalized) {
+    throw new Error("Invalid hostname");
+  }
+
+  const hostnameAllowlist = normalizeHostnameAllowlist(policy?.hostnameAllowlist);
+  if (!matchesHostnameAllowlist(normalized, hostnameAllowlist)) {
+    throw new SsrFBlockedError(`Blocked hostname (not in allowlist): ${hostname}`);
+  }
+
+  const skipPrivateNetworkChecks = shouldSkipPrivateNetworkChecks(normalized, policy);
+  if (!skipPrivateNetworkChecks) {
+    assertAllowedHostOrIpOrThrow(normalized, policy);
+  }
+}
+
 export async function resolvePinnedHostnameWithPolicy(
   hostname: string,
   params: { lookupFn?: LookupFn; policy?: SsrFPolicy } = {},

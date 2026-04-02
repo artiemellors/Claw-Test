@@ -1,9 +1,10 @@
 import type { Dispatcher } from "undici";
 import { logWarn } from "../../logger.js";
 import { buildTimeoutAbortSignal } from "../../utils/fetch-timeout.js";
-import { hasProxyEnvConfigured } from "./proxy-env.js";
+import { hasEnvHttpProxyConfigured, isHostExcludedByNoProxy } from "./proxy-env.js";
 import { retainSafeHeadersForCrossOriginRedirect as retainSafeRedirectHeaders } from "./redirect-headers.js";
 import {
+  assertHostnameAllowedByPolicy,
   closeDispatcher,
   createPinnedDispatcher,
   resolvePinnedHostnameWithPolicy,
@@ -157,18 +158,38 @@ export async function fetchWithSsrFGuard(params: GuardedFetchOptions): Promise<G
 
     let dispatcher: Dispatcher | null = null;
     try {
-      assertExplicitProxySupportsPinnedDns(parsedUrl, params.dispatcherPolicy, params.pinDns);
-      const pinned = await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
-        lookupFn: params.lookupFn,
-        policy: params.policy,
-      });
+      const effectivePort =
+        Number.parseInt(parsedUrl.port, 10) || (parsedUrl.protocol === "https:" ? 443 : 80);
       const canUseTrustedEnvProxy =
-        mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY && hasProxyEnvConfigured();
+        mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY &&
+        hasEnvHttpProxyConfigured(parsedUrl.protocol === "https:" ? "https" : "http") &&
+        !isHostExcludedByNoProxy(parsedUrl.hostname, effectivePort);
       if (canUseTrustedEnvProxy) {
+        // When routing through a trusted env proxy (e.g. OpenShell's CONNECT
+        // proxy), skip DNS-based SSRF pinning entirely. The proxy resolves DNS
+        // in its own network namespace and applies its own SSRF protections.
+        // Attempting local DNS here fails in sandboxed environments where UDP
+        // is intentionally blocked (all traffic must go through the proxy).
+        //
+        // If the host is excluded by NO_PROXY/no_proxy, EnvHttpProxyAgent
+        // connects directly, so we must fall through to the DNS-pinned path
+        // to retain post-resolution private-IP checks.
+        //
+        // Pre-DNS hostname policy checks (allowlist, blocked hostnames, private
+        // IP literals) are still enforced before dispatch - only DNS resolution
+        // and post-resolution IP checks are skipped.
+        assertHostnameAllowedByPolicy(parsedUrl.hostname, params.policy);
         const { EnvHttpProxyAgent } = loadUndiciRuntimeDeps();
         dispatcher = new EnvHttpProxyAgent();
-      } else if (params.pinDns !== false) {
-        dispatcher = createPinnedDispatcher(pinned, params.dispatcherPolicy, params.policy);
+      } else {
+        assertExplicitProxySupportsPinnedDns(parsedUrl, params.dispatcherPolicy, params.pinDns);
+        const pinned = await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
+          lookupFn: params.lookupFn,
+          policy: params.policy,
+        });
+        if (params.pinDns !== false) {
+          dispatcher = createPinnedDispatcher(pinned, params.dispatcherPolicy, params.policy);
+        }
       }
 
       const init: RequestInit & { dispatcher?: Dispatcher } = {

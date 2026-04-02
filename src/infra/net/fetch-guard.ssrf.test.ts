@@ -365,4 +365,221 @@ describe("fetchWithSsrFGuard hardening", () => {
       expectEnvProxy: true,
     });
   });
+
+  it("skips DNS resolution entirely in trusted env proxy mode", async () => {
+    vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:7890");
+    const lookupFn = vi.fn(async () => [
+      { address: "93.184.216.34", family: 4 },
+    ]) as unknown as LookupFn;
+    const fetchImpl = vi.fn(async () => okResponse());
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://public.example/resource",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    expect(lookupFn).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await result.release();
+  });
+
+  it("still blocks dangerous hostnames even in trusted env proxy mode", async () => {
+    vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:7890");
+    const lookupFn = vi.fn() as unknown as LookupFn;
+    const fetchImpl = vi.fn(async () => okResponse());
+
+    const blockedUrls = [
+      "http://localhost/secret",
+      "http://169.254.169.254/metadata",
+      "http://foo.internal/admin",
+      "http://bar.local/config",
+    ];
+
+    for (const url of blockedUrls) {
+      await expect(
+        fetchWithSsrFGuard({
+          url,
+          fetchImpl,
+          lookupFn,
+          mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+        }),
+      ).rejects.toThrow(/private|internal|blocked/i);
+    }
+
+    expect(lookupFn).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("enforces hostnameAllowlist in trusted env proxy mode", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:7890");
+    const lookupFn = vi.fn() as unknown as LookupFn;
+    const fetchImpl = vi.fn(async () => okResponse());
+
+    await expect(
+      fetchWithSsrFGuard({
+        url: "https://not-allowed.example/resource",
+        fetchImpl,
+        lookupFn,
+        mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+        policy: { hostnameAllowlist: ["*.permitted.example"] },
+      }),
+    ).rejects.toThrow(/allowlist/i);
+
+    expect(lookupFn).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("respects allowPrivateNetwork policy in trusted env proxy mode", async () => {
+    vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:7890");
+    const lookupFn = vi.fn() as unknown as LookupFn;
+    const fetchImpl = vi.fn(async () => okResponse());
+
+    // With allowPrivateNetwork, private IP literals should be allowed through
+    const result = await fetchWithSsrFGuard({
+      url: "http://169.254.169.254/metadata",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+      policy: { dangerouslyAllowPrivateNetwork: true },
+    });
+
+    expect(lookupFn).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await result.release();
+  });
+
+  it("falls back to DNS pinning when trusted env proxy mode is set but no proxy env var exists", async () => {
+    // Ensure no proxy vars leak from the test host
+    vi.stubEnv("HTTP_PROXY", "");
+    vi.stubEnv("HTTPS_PROXY", "");
+    vi.stubEnv("ALL_PROXY", "");
+    vi.stubEnv("http_proxy", "");
+    vi.stubEnv("https_proxy", "");
+    vi.stubEnv("all_proxy", "");
+
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestInit = init as RequestInit & { dispatcher?: unknown };
+      // Should get a pinned dispatcher, NOT EnvHttpProxyAgent
+      expect(requestInit.dispatcher).toBeDefined();
+      expect(getDispatcherClassName(requestInit.dispatcher)).not.toBe("EnvHttpProxyAgent");
+      return okResponse();
+    });
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://public.example/resource",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    expect(lookupFn).toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await result.release();
+  });
+
+  it("falls back to DNS pinning when NO_PROXY excludes the target host", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.corp:8080");
+    vi.stubEnv("HTTP_PROXY", "http://proxy.corp:8080");
+    vi.stubEnv("ALL_PROXY", "");
+    vi.stubEnv("http_proxy", "");
+    vi.stubEnv("https_proxy", "");
+    vi.stubEnv("all_proxy", "");
+    // Target host is excluded from proxying by NO_PROXY
+    vi.stubEnv("NO_PROXY", "example.com,internal.corp");
+    vi.stubEnv("no_proxy", "");
+
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestInit = init as RequestInit & { dispatcher?: unknown };
+      // Should get a pinned dispatcher, NOT EnvHttpProxyAgent,
+      // because the host is excluded by NO_PROXY
+      expect(requestInit.dispatcher).toBeDefined();
+      expect(getDispatcherClassName(requestInit.dispatcher)).not.toBe("EnvHttpProxyAgent");
+      return okResponse();
+    });
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://example.com/resource",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    // DNS pinning should be active because NO_PROXY bypasses the proxy
+    expect(lookupFn).toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await result.release();
+  });
+
+  it("still uses env proxy when NO_PROXY entry has a non-matching port", async () => {
+    // Stub both upper and lower case to the same value; on Windows
+    // process.env is case-insensitive so delete(lower) would also
+    // remove the upper-case entry.
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.corp:8080");
+    vi.stubEnv("HTTP_PROXY", "http://proxy.corp:8080");
+    vi.stubEnv("ALL_PROXY", "");
+    vi.stubEnv("http_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("https_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("all_proxy", "");
+    // NO_PROXY excludes example.com only on port 8443, not default HTTPS (443)
+    vi.stubEnv("NO_PROXY", "example.com:8443");
+    vi.stubEnv("no_proxy", "");
+
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestInit = init as RequestInit & { dispatcher?: unknown };
+      // Should get EnvHttpProxyAgent because NO_PROXY port doesn't match
+      expect(requestInit.dispatcher).toBeDefined();
+      expect(getDispatcherClassName(requestInit.dispatcher)).toBe("EnvHttpProxyAgent");
+      return okResponse();
+    });
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://example.com/resource",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    expect(lookupFn).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await result.release();
+  });
+
+  it("falls back to DNS pinning when NO_PROXY matches the default port", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://proxy.corp:8080");
+    vi.stubEnv("HTTP_PROXY", "http://proxy.corp:8080");
+    vi.stubEnv("ALL_PROXY", "");
+    vi.stubEnv("http_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("https_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("all_proxy", "");
+    // NO_PROXY excludes example.com on port 443 - the default HTTPS port
+    vi.stubEnv("NO_PROXY", "example.com:443");
+    vi.stubEnv("no_proxy", "example.com:443");
+
+    const lookupFn = createPublicLookup();
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestInit = init as RequestInit & { dispatcher?: unknown };
+      // Should get a pinned dispatcher, NOT EnvHttpProxyAgent,
+      // because NO_PROXY matches the default HTTPS port
+      expect(requestInit.dispatcher).toBeDefined();
+      expect(getDispatcherClassName(requestInit.dispatcher)).not.toBe("EnvHttpProxyAgent");
+      return okResponse();
+    });
+
+    const result = await fetchWithSsrFGuard({
+      url: "https://example.com/resource",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    // DNS pinning should be active because NO_PROXY excludes this host
+    expect(lookupFn).toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await result.release();
+  });
 });
