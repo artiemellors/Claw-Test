@@ -65,6 +65,16 @@ function getQueueState() {
   }));
 }
 
+// Well-known lanes that should never be pruned from the Map — they are
+// reused across the entire gateway lifetime and the allocation cost of
+// re-creating them on every enqueue would outweigh the memory savings.
+const PERSISTENT_LANES: ReadonlySet<string> = new Set<string>([
+  CommandLane.Main,
+  CommandLane.Cron,
+  CommandLane.Subagent,
+  CommandLane.Nested,
+]);
+
 function normalizeLane(lane: string): string {
   return lane.trim() || CommandLane.Main;
 }
@@ -111,7 +121,7 @@ function drainLane(lane: string) {
   }
   state.draining = true;
 
-  const pump = () => {
+  const pump = (afterTaskCompletion = false) => {
     try {
       while (state.activeTaskIds.size < state.maxConcurrent && state.queue.length > 0) {
         const entry = state.queue.shift() as QueueEntry;
@@ -139,7 +149,7 @@ function drainLane(lane: string) {
               diag.debug(
                 `lane task done: lane=${lane} durationMs=${Date.now() - startTime} active=${state.activeTaskIds.size} queued=${state.queue.length}`,
               );
-              pump();
+              pump(true);
             }
             entry.resolve(result);
           } catch (err) {
@@ -155,7 +165,7 @@ function drainLane(lane: string) {
               );
             }
             if (completedCurrentGeneration) {
-              pump();
+              pump(true);
             }
             entry.reject(err);
           }
@@ -163,6 +173,23 @@ function drainLane(lane: string) {
       }
     } finally {
       state.draining = false;
+      // Prune dynamic lanes (e.g. "session:<key>", "auth-probe:…") once they
+      // become idle after completing work, to prevent unbounded growth of the
+      // lanes Map.  Only prune after a task has actually completed — not on
+      // the initial drainLane call (which may be from setCommandLaneConcurrency
+      // or enqueueCommandInLane before any work has run).  Well-known lanes
+      // are kept permanently to avoid re-allocation churn.  Lanes with a
+      // custom concurrency setting (maxConcurrent > 1) are also preserved so
+      // the tuning is not silently lost after an idle period.
+      if (
+        afterTaskCompletion &&
+        state.queue.length === 0 &&
+        state.activeTaskIds.size === 0 &&
+        !PERSISTENT_LANES.has(lane) &&
+        state.maxConcurrent <= 1
+      ) {
+        getQueueState().lanes.delete(lane);
+      }
     }
   };
 
@@ -242,7 +269,8 @@ export function getTotalQueueSize() {
 
 export function clearCommandLane(lane: string = CommandLane.Main) {
   const cleaned = normalizeLane(lane);
-  const state = getQueueState().lanes.get(cleaned);
+  const queueState = getQueueState();
+  const state = queueState.lanes.get(cleaned);
   if (!state) {
     return 0;
   }
@@ -250,6 +278,16 @@ export function clearCommandLane(lane: string = CommandLane.Main) {
   const pending = state.queue.splice(0);
   for (const entry of pending) {
     entry.reject(new CommandLaneClearedError(cleaned));
+  }
+  // Prune dynamic lanes that are now fully idle.  Lanes with a custom
+  // concurrency setting (maxConcurrent > 1) are preserved so the tuning
+  // is not silently lost.
+  if (
+    state.activeTaskIds.size === 0 &&
+    !PERSISTENT_LANES.has(cleaned) &&
+    state.maxConcurrent <= 1
+  ) {
+    queueState.lanes.delete(cleaned);
   }
   return removed;
 }
@@ -264,6 +302,13 @@ export function resetCommandQueueStateForTest(): void {
   queueState.gatewayDraining = false;
   queueState.lanes.clear();
   queueState.nextTaskId = 1;
+}
+
+/**
+ * Test-only: returns the current number of lanes in the queue state.
+ */
+export function getLaneCountForTest(): number {
+  return getQueueState().lanes.size;
 }
 
 /**
@@ -284,13 +329,22 @@ export function resetAllLanes(): void {
   const queueState = getQueueState();
   queueState.gatewayDraining = false;
   const lanesToDrain: string[] = [];
+  const lanesToPrune: string[] = [];
   for (const state of queueState.lanes.values()) {
     state.generation += 1;
     state.activeTaskIds.clear();
     state.draining = false;
     if (state.queue.length > 0) {
       lanesToDrain.push(state.lane);
+    } else if (!PERSISTENT_LANES.has(state.lane) && state.maxConcurrent <= 1) {
+      // Dynamic lane with no pending work and default concurrency after
+      // reset — prune it.  Lanes with custom concurrency are kept so the
+      // tuning survives the restart.
+      lanesToPrune.push(state.lane);
     }
+  }
+  for (const lane of lanesToPrune) {
+    queueState.lanes.delete(lane);
   }
   // Drain after the full reset pass so all lanes are in a clean state first.
   for (const lane of lanesToDrain) {
