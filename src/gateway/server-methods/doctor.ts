@@ -44,9 +44,17 @@ export const doctorHandlers: GatewayRequestHandlers = {
 
     try {
       const status = manager.status();
-      let embedding = await manager.probeEmbeddingAvailability();
-      if (!embedding.ok && !embedding.error) {
-        embedding = { ok: false, error: "memory embeddings unavailable" };
+      let embedding: DoctorMemoryStatusPayload["embedding"];
+      try {
+        embedding = await manager.probeEmbeddingAvailability();
+        if (!embedding.ok && !embedding.error) {
+          embedding = { ok: false, error: "memory embeddings unavailable" };
+        }
+      } catch (err) {
+        embedding = {
+          ok: false,
+          error: `gateway memory probe failed: ${formatError(err)}`,
+        };
       }
       const payload: DoctorMemoryStatusPayload = {
         agentId,
