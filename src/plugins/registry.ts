@@ -1005,14 +1005,6 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               registerHook: (events, handler, opts) =>
                 registerHook(record, events, handler, opts, params.config),
               registerHttpRoute: (routeParams) => registerHttpRoute(record, routeParams),
-              registerProvider: (provider) => registerProvider(record, provider),
-              registerSpeechProvider: (provider) => registerSpeechProvider(record, provider),
-              registerMediaUnderstandingProvider: (provider) =>
-                registerMediaUnderstandingProvider(record, provider),
-              registerImageGenerationProvider: (provider) =>
-                registerImageGenerationProvider(record, provider),
-              registerWebFetchProvider: (provider) => registerWebFetchProvider(record, provider),
-              registerWebSearchProvider: (provider) => registerWebSearchProvider(record, provider),
               registerGatewayMethod: (method, handler, opts) =>
                 registerGatewayMethod(record, method, handler, opts),
               registerService: (service) => registerService(record, service),
@@ -1179,10 +1171,29 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 registerTypedHook(record, hookName, handler, opts, params.hookPolicy),
             }
           : {}),
+        // Registration modes are intentionally layered:
+        // - full: expose the complete plugin registration surface
+        // - provider-only: keep snapshot/discovery loads limited to provider registration
+        // - setup-only/setup-runtime/cli-metadata: allow lightweight setup/metadata paths
+        ...(registrationMode === "full" || registrationMode === "provider-only"
+          ? {
+              registerProvider: (provider) => registerProvider(record, provider),
+              registerSpeechProvider: (provider) => registerSpeechProvider(record, provider),
+              registerMediaUnderstandingProvider: (provider) =>
+                registerMediaUnderstandingProvider(record, provider),
+              registerImageGenerationProvider: (provider) =>
+                registerImageGenerationProvider(record, provider),
+              registerWebFetchProvider: (provider) => registerWebFetchProvider(record, provider),
+              registerWebSearchProvider: (provider) => registerWebSearchProvider(record, provider),
+            }
+          : {}),
         // Allow setup-only/setup-runtime paths to surface parse-time CLI metadata
         // without opting into the wider full-registration surface.
         registerCli: (registrar, opts) => registerCli(record, registrar, opts),
-        registerChannel: (registration) => registerChannel(record, registration, registrationMode),
+        registerChannel:
+          registrationMode === "provider-only"
+            ? () => {}
+            : (registration) => registerChannel(record, registration, registrationMode),
       },
     });
   };
