@@ -20,13 +20,13 @@ import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
 import { readSessionUpdatedAt, resolveStorePath } from "openclaw/plugin-sdk/config-runtime";
 import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
 import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+import { resolveChunkMode } from "openclaw/plugin-sdk/reply-chunking";
+import { finalizeInboundContext } from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import {
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
 } from "openclaw/plugin-sdk/reply-history";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
-import { resolveChunkMode } from "openclaw/plugin-sdk/reply-chunking";
-import { finalizeInboundContext } from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
@@ -38,6 +38,7 @@ import { resolveDiscordMaxLinesPerMessage } from "../accounts.js";
 import { chunkDiscordTextWithMode } from "../chunk.js";
 import { resolveDiscordDraftStreamingChunking } from "../draft-chunking.js";
 import { createDiscordDraftStream } from "../draft-stream.js";
+import { rewriteDiscordKnownMentions } from "../mentions.js";
 import { reactMessageDiscord, removeReactionDiscord } from "../send.js";
 import { editMessageDiscord } from "../send.messages.js";
 import { normalizeDiscordSlug } from "./allow-list.js";
@@ -652,7 +653,9 @@ export async function processDiscordMessage(
           const reply = resolveSendableOutboundReplyParts(payload);
           const hasMedia = reply.hasMedia;
           const finalText = payload.text;
-          const previewFinalText = resolvePreviewFinalText(finalText);
+          const previewFinalText = resolvePreviewFinalText(
+            finalText ? rewriteDiscordKnownMentions(finalText, { accountId }) : finalText,
+          );
           const previewMessageId = draftStream.messageId();
 
           // Try to finalize via preview edit (text-only, fits in 2000 chars, not an error)

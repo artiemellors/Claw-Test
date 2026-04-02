@@ -83,6 +83,8 @@ export function createDiscordMonitorClient(params: {
   createGatewaySupervisor: typeof createDiscordGatewaySupervisor;
   createAutoPresenceController: typeof createDiscordAutoPresenceController;
   isDisallowedIntentsError: (err: unknown) => boolean;
+  /** Proxy-aware fetch to use for all Carbon REST requests. */
+  restFetch?: typeof fetch;
 }) {
   let autoPresenceController: DiscordAutoPresenceController | null = null;
   const clientPlugins: Plugin[] = [
@@ -115,6 +117,7 @@ export function createDiscordMonitorClient(params: {
       token: params.token,
       autoDeploy: false,
       eventQueue: eventQueueOpts,
+      requestOptions: params.restFetch ? { fetch: params.restFetch } : undefined,
     },
     {
       commands: params.commands,
@@ -154,6 +157,8 @@ export async function fetchDiscordBotIdentity(params: {
   client: Pick<Client, "fetchUser">;
   runtime: RuntimeEnv;
   logStartupPhase: (phase: string, details?: string) => void;
+  /** Fallback bot user ID (application ID) to use when the REST call fails. */
+  applicationId?: string;
 }) {
   params.logStartupPhase("fetch-bot-identity:start");
   try {
@@ -167,8 +172,14 @@ export async function fetchDiscordBotIdentity(params: {
     return { botUserId, botUserName };
   } catch (err) {
     params.runtime.error?.(danger(`discord: failed to fetch bot identity: ${String(err)}`));
-    params.logStartupPhase("fetch-bot-identity:error", String(err));
-    return { botUserId: undefined, botUserName: undefined };
+    // Fall back to the application ID (= bot user ID in Discord) parsed from the token.
+    // This ensures mention detection works even when the Discord REST API is unreachable.
+    const botUserId = params.applicationId?.trim() || undefined;
+    params.logStartupPhase(
+      "fetch-bot-identity:error",
+      `${String(err)}; fallback botUserId=${botUserId ?? "<missing>"}`,
+    );
+    return { botUserId, botUserName: undefined };
   }
 }
 
