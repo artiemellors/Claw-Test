@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "../runtime-api.js";
 import { resolveConversationPath, resolveGraphConversationId } from "./graph-messages.js";
 import {
   deleteGraphRequest,
+  escapeOData,
   fetchGraphJson,
   patchGraphJson,
   postGraphJson,
@@ -36,7 +37,7 @@ export async function addParticipantMSTeams(
   const body = {
     "@odata.type": "#microsoft.graph.aadUserConversationMember",
     roles: params.role ? [params.role] : [],
-    "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${params.userId}')`,
+    "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${escapeOData(params.userId)}')`,
   };
 
   await postGraphJson<unknown>({
@@ -81,14 +82,18 @@ export async function removeParticipantMSTeams(
   // Paginate through members to find the membership ID for the target user.
   // Graph API paginates at 100 members; follow @odata.nextLink until found.
   const MAX_PAGES = 20;
+  const targetId = params.userId.toLowerCase().trim();
   let nextPath: string | undefined = `${conv.basePath}/members`;
+  type MembersPage = {
+    value?: GraphConversationMember[];
+    "@odata.nextLink"?: string;
+  };
   for (let page = 0; page < MAX_PAGES && nextPath; page++) {
-    const res = await fetchGraphJson<{
-      value?: GraphConversationMember[];
-      "@odata.nextLink"?: string;
-    }>({ token, path: nextPath });
+    const res: MembersPage = await fetchGraphJson<MembersPage>({ token, path: nextPath });
 
-    const found = (res.value ?? []).find((m) => m.userId === params.userId);
+    const found = (res.value ?? []).find(
+      (m: GraphConversationMember) => m.userId?.toLowerCase().trim() === targetId,
+    );
     if (found?.id) {
       await deleteGraphRequest({
         token,
@@ -98,13 +103,16 @@ export async function removeParticipantMSTeams(
     }
 
     // nextLink is an absolute URL; extract the relative path for fetchGraphJson
-    const nextLink = res["@odata.nextLink"];
+    const nextLink: string | undefined = res["@odata.nextLink"];
     nextPath = nextLink
       ? nextLink.replace("https://graph.microsoft.com/v1.0", "")
       : undefined;
   }
 
-  throw new Error(`User ${params.userId} is not a member of this conversation`);
+  const truncated = !!nextPath;
+  throw new Error(
+    `User ${params.userId} is not a member of this conversation${truncated ? " (not all members could be checked due to pagination limits)" : ""}`,
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@ export function escapeOData(value: string): string {
 async function requestGraph(params: {
   token: string;
   path: string;
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "DELETE" | "PATCH";
   root?: string;
   headers?: Record<string, string>;
   body?: unknown;
@@ -153,25 +153,14 @@ export async function patchGraphJson<T>(params: {
   path: string;
   body?: unknown;
 }): Promise<T> {
-  const res = await fetch(`${GRAPH_ROOT}${params.path}`, {
+  const res = await requestGraph({
+    token: params.token,
+    path: params.path,
     method: "PATCH",
-    headers: {
-      "User-Agent": buildUserAgent(),
-      Authorization: `Bearer ${params.token}`,
-      "Content-Type": "application/json",
-    },
-    body: params.body !== undefined ? JSON.stringify(params.body) : undefined,
+    body: params.body,
+    errorPrefix: "Graph PATCH",
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Graph PATCH ${params.path} failed (${res.status}): ${text || "unknown error"}`,
-    );
-  }
-  if (res.status === 204 || res.headers.get("content-length") === "0") {
-    return undefined as T;
-  }
-  return (await res.json()) as T;
+  return readOptionalGraphJson<T>(res);
 }
 
 export async function listChannelsForTeam(token: string, teamId: string): Promise<GraphChannel[]> {
