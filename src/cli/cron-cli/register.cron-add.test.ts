@@ -19,6 +19,17 @@ vi.mock("./shared.js", () => ({
   warnIfCronSchedulerDisabled: warnMock,
 }));
 
+// Mock schedule-options so we don't drag in shared.js parse functions
+vi.mock("./schedule-options.js", () => ({
+  addScheduleOptions: (cmd: Command) => cmd,
+  resolveCronCreateSchedule: vi.fn().mockReturnValue({
+    kind: "agentTurn",
+    every: 3600000,
+    requestedStaggerMs: undefined,
+  }),
+  resolveCronEditScheduleRequest: vi.fn().mockReturnValue({}),
+}));
+
 describe("cron add --dry-run", () => {
   let program: Command;
   let stdoutOutput: string;
