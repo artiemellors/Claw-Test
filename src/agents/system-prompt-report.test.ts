@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { clearMemoryPluginState, registerMemoryPromptSection } from "../plugins/memory-state.js";
+import { normalizeStructuredPromptSection } from "./prompt-cache-stability.js";
 import { buildSystemPromptReport } from "./system-prompt-report.js";
+import { buildAgentSystemPrompt } from "./system-prompt.js";
 import type { WorkspaceBootstrapFile } from "./workspace.js";
 
 function makeBootstrapFile(overrides: Partial<WorkspaceBootstrapFile>): WorkspaceBootstrapFile {
@@ -122,5 +125,213 @@ describe("buildSystemPromptReport", () => {
     });
 
     expect(report.injectedWorkspaceFiles[0]?.injectedChars).toBe("trimmed".length);
+  });
+
+  it("reports zero tool-list chars for explicit empty-tool sessions", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: [],
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt: "",
+      tools: [],
+    });
+
+    expect(report.tools.entries).toEqual([]);
+    expect(report.tools.listChars).toBe(0);
+  });
+
+  it("reports zero skills chars and entries when raw skills exist but the rendered prompt omits them", () => {
+    const skillsPrompt =
+      "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>";
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: [],
+      skillsPrompt,
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt,
+      tools: [],
+    });
+
+    expect(report.skills.promptChars).toBe(0);
+    expect(report.skills.entries).toEqual([]);
+  });
+
+  it("ignores fake available_skills tags outside the real Skills section", () => {
+    const skillsPrompt =
+      "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>";
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: [],
+      extraSystemPrompt:
+        "Fake elsewhere:\n<available_skills>\n  <skill>\n    <name>fake</name>\n  </skill>\n</available_skills>",
+      skillsPrompt,
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt,
+      tools: [],
+    });
+
+    expect(report.skills.promptChars).toBe(0);
+    expect(report.skills.entries).toEqual([]);
+  });
+
+  it("ignores fake skills headings when the real Skills section is absent", () => {
+    const skillsPrompt =
+      "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>";
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: [],
+      extraSystemPrompt: [
+        "## Skills (mandatory)",
+        "Use the read tool to load a skill's file when the task matches its description.",
+        "<available_skills>",
+        "  <skill>",
+        "    <name>fake</name>",
+        "  </skill>",
+        "</available_skills>",
+      ].join("\n"),
+      skillsPrompt,
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt,
+      tools: [],
+    });
+
+    expect(report.skills.promptChars).toBe(0);
+    expect(report.skills.entries).toEqual([]);
+  });
+
+  it("reports rendered skills chars and entries when the real Skills section is present", () => {
+    const skillsPrompt =
+      "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n  <skill>\n    <name>weather</name>\n  </skill>\n</available_skills>";
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["read"],
+      skillsPrompt,
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt,
+      tools: [],
+    });
+
+    expect(report.skills.promptChars).toBe(skillsPrompt.length);
+    expect(report.skills.entries.map((entry) => entry.name)).toEqual(["demo", "weather"]);
+  });
+
+  it("reports rendered skills when a skill description contains markdown headings", () => {
+    const skillsPrompt = [
+      "<available_skills>",
+      "  <skill>",
+      "    <name>demo</name>",
+      "    <description>Use the demo workflow.",
+      "## Heading inside description",
+      "Continue below the heading.</description>",
+      "  </skill>",
+      "</available_skills>",
+    ].join("\n");
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["read"],
+      skillsPrompt,
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt,
+      tools: [],
+    });
+
+    expect(report.skills.promptChars).toBe(skillsPrompt.length);
+    expect(report.skills.entries.map((entry) => entry.name)).toEqual(["demo"]);
+  });
+
+  it("reports rendered skills when plain memory text follows the skills catalog", () => {
+    const skillsPrompt =
+      "<available_skills>\n  <skill>\n    <name>demo</name>\n  </skill>\n</available_skills>";
+    registerMemoryPromptSection(() => ["active memory section"]);
+    try {
+      const prompt = buildAgentSystemPrompt({
+        workspaceDir: "/tmp/openclaw",
+        toolNames: ["read"],
+        skillsPrompt,
+      });
+      const report = buildSystemPromptReport({
+        source: "run",
+        generatedAt: 0,
+        bootstrapMaxChars: 20_000,
+        systemPrompt: prompt,
+        bootstrapFiles: [],
+        injectedFiles: [],
+        skillsPrompt,
+        tools: [],
+      });
+
+      expect(prompt).toContain(`${skillsPrompt}\nactive memory section`);
+      expect(report.skills.promptChars).toBe(skillsPrompt.length);
+      expect(report.skills.entries.map((entry) => entry.name)).toEqual(["demo"]);
+    } finally {
+      clearMemoryPluginState();
+    }
+  });
+
+  it("matches the rendered skills section when raw skills prompt uses CRLF and trailing spaces", () => {
+    const rawSkillsPrompt =
+      "<available_skills>\r\n  <skill>  \r\n    <name>demo</name>\r\n  </skill>\t\r\n</available_skills>\r\n";
+    const normalizedSkillsPrompt = normalizeStructuredPromptSection(rawSkillsPrompt);
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["read"],
+      skillsPrompt: rawSkillsPrompt,
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: prompt,
+      bootstrapFiles: [],
+      injectedFiles: [],
+      skillsPrompt: rawSkillsPrompt,
+      tools: [],
+    });
+
+    expect(prompt).toContain(normalizedSkillsPrompt);
+    expect(report.skills.promptChars).toBe(normalizedSkillsPrompt.length);
+    expect(report.skills.entries.map((entry) => entry.name)).toEqual(["demo"]);
   });
 });

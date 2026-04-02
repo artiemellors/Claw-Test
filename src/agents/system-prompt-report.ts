@@ -2,6 +2,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { SessionSystemPromptReport } from "../config/sessions/types.js";
 import { buildBootstrapInjectionStats } from "./bootstrap-budget.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
+import { normalizeStructuredPromptSection } from "./prompt-cache-stability.js";
 import type { WorkspaceBootstrapFile } from "./workspace.js";
 
 function extractBetween(
@@ -66,6 +67,36 @@ function buildToolsEntries(tools: AgentTool[]): SessionSystemPromptReport["tools
   });
 }
 
+const SKILLS_SECTION_HEADER_PATTERN = [
+  "## Skills \\(mandatory\\)",
+  "Before replying: scan <available_skills> <description> entries\\.",
+  "- If exactly one skill clearly applies: read its SKILL\\.md at <location> with `[^`]+`, then follow it\\.",
+  "- If multiple could apply: choose the most specific one, then read/follow it\\.",
+  "- If none clearly apply: do not read any SKILL\\.md\\.",
+  "Constraints: never read more than one skill up front; only read after selecting\\.",
+  "- When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, serialize bursts when possible, and respect 429/Retry-After\\.",
+].join("\\n");
+
+function extractSkillsPromptText(systemPrompt: string, rawSkillsPrompt: string): string {
+  const normalizedSkillsPrompt = normalizeStructuredPromptSection(rawSkillsPrompt);
+  if (!normalizedSkillsPrompt) {
+    return "";
+  }
+  const sectionPrefixPattern = new RegExp(`${SKILLS_SECTION_HEADER_PATTERN}\\n$`);
+  let searchStart = 0;
+  while (searchStart < systemPrompt.length) {
+    const promptIndex = systemPrompt.indexOf(normalizedSkillsPrompt, searchStart);
+    if (promptIndex === -1) {
+      return "";
+    }
+    if (sectionPrefixPattern.test(systemPrompt.slice(0, promptIndex))) {
+      return normalizedSkillsPrompt;
+    }
+    searchStart = promptIndex + normalizedSkillsPrompt.length;
+  }
+  return "";
+}
+
 export function buildSystemPromptReport(params: {
   source: SessionSystemPromptReport["source"];
   generatedAt: number;
@@ -93,7 +124,8 @@ export function buildSystemPromptReport(params: {
   const projectContextChars = projectContext.text.length;
   const toolsEntries = buildToolsEntries(params.tools);
   const toolsSchemaChars = toolsEntries.reduce((sum, t) => sum + (t.schemaChars ?? 0), 0);
-  const skillsEntries = parseSkillBlocks(params.skillsPrompt);
+  const renderedSkillsPrompt = extractSkillsPromptText(systemPrompt, params.skillsPrompt);
+  const skillsEntries = parseSkillBlocks(renderedSkillsPrompt);
 
   return {
     source: params.source,
@@ -117,7 +149,7 @@ export function buildSystemPromptReport(params: {
       injectedFiles: params.injectedFiles,
     }),
     skills: {
-      promptChars: params.skillsPrompt.length,
+      promptChars: renderedSkillsPrompt.length,
       entries: skillsEntries,
     },
     tools: {
