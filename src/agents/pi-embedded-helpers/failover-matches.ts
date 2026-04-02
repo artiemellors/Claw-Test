@@ -15,6 +15,14 @@ const ERROR_PATTERNS = {
     /\btpm\b/i,
     "tokens per minute",
     "tokens per day",
+    // Chinese provider rate-limit messages
+    "请求过于频繁",
+    "调用频率",
+    "频率限制",
+    "配额不足",
+    "配额已用尽",
+    "额度不足",
+    "额度已用尽",
   ],
   overloaded: [
     /overloaded_error|"type"\s*:\s*"overloaded_error"/i,
@@ -24,6 +32,9 @@ const ERROR_PATTERNS = {
     // provider-overload (#32828).
     /service[_ ]unavailable.*(?:overload|capacity|high[_ ]demand)|(?:overload|capacity|high[_ ]demand).*service[_ ]unavailable/i,
     "high demand",
+    // Chinese provider overloaded messages
+    "服务过载",
+    "当前负载过高",
   ],
   serverError: [
     "an error occurred while processing",
@@ -37,6 +48,13 @@ const ERROR_PATTERNS = {
     "upstream error",
     "upstream connect error",
     "connection reset",
+    // Chinese provider server error messages
+    "内部错误",
+    "服务器错误",
+    "服务器内部错误",
+    "系统错误",
+    "系统繁忙",
+    "系统异常",
   ],
   timeout: [
     "timeout",
@@ -49,6 +67,14 @@ const ERROR_PATTERNS = {
     "network request failed",
     "fetch failed",
     "socket hang up",
+    // Chinese provider error messages (ZhipuAI/GLM, Bailian, Kimi/Moonshot, DeepSeek, etc.)
+    "网络错误",
+    "网络异常",
+    "服务暂时不可用",
+    "服务繁忙",
+    "请求超时",
+    "连接超时",
+    "连接错误",
     /\beconn(?:refused|reset|aborted)\b/i,
     /\benetunreach\b/i,
     /\behostunreach\b/i,
@@ -79,6 +105,11 @@ const ERROR_PATTERNS = {
     "insufficient balance",
     "insufficient usd or diem balance",
     /requires?\s+more\s+credits/i,
+    // Chinese provider billing messages
+    "余额不足",
+    "账户余额不足",
+    "欠费",
+    "账户已欠费",
   ],
   authPermanent: [
     /api[_ ]?key[_ ]?(?:revoked|invalid|deactivated|deleted)/i,
@@ -110,6 +141,12 @@ const ERROR_PATTERNS = {
     "no credentials found",
     "no api key found",
     /\bfailed to (?:extract|parse|validate|decode)\b.*\btoken\b/,
+    // Chinese provider auth messages
+    "无权访问",
+    "认证失败",
+    "鉴权失败",
+    "密钥无效",
+    "apikey 无效",
   ],
   format: [
     "string should match pattern",
