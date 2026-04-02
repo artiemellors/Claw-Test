@@ -664,7 +664,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     token,
     guildEntries,
     allowFrom,
-    fetcher: discordRestFetch,
+    fetcher: discordRestFetch ?? fetch,
     runtime,
   });
   guildEntries = allowlistResolved.guildEntries;
@@ -700,7 +700,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
   const applicationId = await (fetchDiscordApplicationIdForTesting ?? fetchDiscordApplicationId)(
     token,
     4000,
-    discordRestFetch,
+    discordRestFetch ?? fetch,
   );
   if (!applicationId) {
     throw new Error("Failed to resolve Discord application id");
@@ -915,6 +915,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
         createDiscordGatewaySupervisorForTesting ?? createDiscordGatewaySupervisor,
       createAutoPresenceController: createDiscordAutoPresenceController,
       isDisallowedIntentsError: isDiscordDisallowedIntentsError,
+      restFetch: discordRestFetch,
     });
     lifecycleGateway = gateway;
     gatewaySupervisor = createdGatewaySupervisor;
