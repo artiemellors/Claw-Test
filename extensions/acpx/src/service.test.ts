@@ -9,7 +9,11 @@ import {
 } from "openclaw/plugin-sdk/acp-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpRuntime, OpenClawPluginServiceContext } from "../runtime-api.js";
-import { ACPX_BUNDLED_BIN, ACPX_PINNED_VERSION } from "./config.js";
+import {
+  ACPX_BUNDLED_BIN,
+  ACPX_PINNED_VERSION,
+  resolveDefaultQueueOwnerTtlSeconds,
+} from "./config.js";
 import { createAcpxRuntimeService } from "./service.js";
 
 const { ensureAcpxSpy } = vi.hoisted(() => ({
@@ -203,7 +207,7 @@ describe("createAcpxRuntimeService", () => {
     );
   });
 
-  it("uses a short default queue-owner TTL", async () => {
+  it("uses the platform default queue-owner TTL", async () => {
     const { runtime } = createRuntimeStub(true);
     const runtimeFactory = vi.fn(() => runtime);
     const service = createAcpxRuntimeService({
@@ -215,7 +219,7 @@ describe("createAcpxRuntimeService", () => {
 
     expect(runtimeFactory).toHaveBeenCalledWith(
       expect.objectContaining({
-        queueOwnerTtlSeconds: 0.1,
+        queueOwnerTtlSeconds: resolveDefaultQueueOwnerTtlSeconds(),
       }),
     );
   });

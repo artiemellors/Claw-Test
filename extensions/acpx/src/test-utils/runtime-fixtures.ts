@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import type { ResolvedAcpxPluginConfig } from "../config.js";
-import { ACPX_PINNED_VERSION } from "../config.js";
+import { ACPX_PINNED_VERSION, resolveDefaultQueueOwnerTtlSeconds } from "../config.js";
 import { AcpxRuntime } from "../runtime.js";
 
 export const NOOP_LOGGER = {
@@ -388,7 +388,8 @@ export async function createMockRuntimeFixture(params?: {
     nonInteractivePermissions: "fail",
     pluginToolsMcpBridge: false,
     strictWindowsCmdWrapper: true,
-    queueOwnerTtlSeconds: params?.queueOwnerTtlSeconds ?? 0.1,
+    queueOwnerTtlSeconds:
+      params?.queueOwnerTtlSeconds ?? resolveDefaultQueueOwnerTtlSeconds(),
     mcpServers: params?.mcpServers ?? {},
   };
 

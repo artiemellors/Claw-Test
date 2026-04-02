@@ -12,6 +12,7 @@ import {
   ACPX_PLUGIN_TOOLS_MCP_SERVER_NAME,
   ACPX_PINNED_VERSION,
   createAcpxPluginConfigSchema,
+  resolveDefaultQueueOwnerTtlSeconds,
   resolveAcpxPluginRoot,
   resolveAcpxPluginConfig,
   resolvePluginToolsMcpServerConfig,
@@ -58,7 +59,9 @@ describe("acpx plugin config parsing", () => {
       fs.writeFileSync(path.join(bundledPluginRoot, "openclaw.plugin.json"), "{}\n", "utf8");
 
       const moduleUrl = pathToFileURL(path.join(bundledPluginRoot, "index.js")).href;
-      expect(resolveAcpxPluginRoot(moduleUrl)).toBe(workspacePluginRoot);
+      expect(path.normalize(resolveAcpxPluginRoot(moduleUrl))).toBe(
+        path.normalize(workspacePluginRoot),
+      );
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });
     }
@@ -80,6 +83,7 @@ describe("acpx plugin config parsing", () => {
     expect(resolved.pluginToolsMcpBridge).toBe(false);
     expect(resolved.mcpServers).toEqual({});
     expect(resolved.strictWindowsCmdWrapper).toBe(true);
+    expect(resolved.queueOwnerTtlSeconds).toBe(resolveDefaultQueueOwnerTtlSeconds());
   });
 
   it("accepts command override and disables plugin-local auto-install", () => {
@@ -256,6 +260,11 @@ describe("acpx plugin config parsing", () => {
     });
 
     expect(resolved.strictWindowsCmdWrapper).toBe(true);
+  });
+
+  it("uses a higher default queue-owner TTL on Windows", () => {
+    expect(resolveDefaultQueueOwnerTtlSeconds("win32")).toBe(2);
+    expect(resolveDefaultQueueOwnerTtlSeconds("linux")).toBe(0.1);
   });
 
   it("rejects non-boolean strictWindowsCmdWrapper", () => {

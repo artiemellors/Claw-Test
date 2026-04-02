@@ -728,6 +728,7 @@ export class AcpSessionManager {
           let onCallerAbort: (() => void) | undefined;
           let activeTurnStarted = false;
           let sawTurnOutput = false;
+          let sawTurnDone = false;
           let retryFreshHandle = false;
           let skipPostTurnCleanup = false;
           try {
@@ -790,10 +791,12 @@ export class AcpSessionManager {
                   continue;
                 }
                 if (event.type === "error") {
-                  streamError = new AcpRuntimeError(
-                    normalizeAcpErrorCode(event.code),
-                    event.message?.trim() || "ACP turn failed before completion.",
-                  );
+                  const normalizedCode = normalizeAcpErrorCode(event.code);
+                  const normalizedMessage =
+                    event.message?.trim() || "ACP turn failed before completion.";
+                  streamError = new AcpRuntimeError(normalizedCode, normalizedMessage);
+                } else if (event.type === "done") {
+                  sawTurnDone = true;
                 } else if (event.type === "text_delta" || event.type === "tool_call") {
                   sawTurnOutput = true;
                   if (event.type === "text_delta" && event.stream !== "thought" && event.text) {
@@ -878,8 +881,10 @@ export class AcpSessionManager {
             retryFreshHandle = this.shouldRetryTurnWithFreshHandle({
               attempt,
               sessionKey,
+              backend: meta?.backend ?? resolvedMeta.backend,
               error: acpError,
               sawTurnOutput,
+              sawTurnDone,
             });
             if (retryFreshHandle) {
               continue;
@@ -1593,13 +1598,20 @@ export class AcpSessionManager {
   private shouldRetryTurnWithFreshHandle(params: {
     attempt: number;
     sessionKey: string;
+    backend?: string;
     error: AcpRuntimeError;
     sawTurnOutput: boolean;
+    sawTurnDone: boolean;
   }): boolean {
-    if (params.attempt > 0 || params.sawTurnOutput) {
+    if (params.attempt > 0 || params.sawTurnOutput || params.sawTurnDone) {
       return false;
     }
-    if (!this.isRecoverableAcpxExitError(params.error.message)) {
+    if (
+      !this.isRetryableAcpxStartupFailure({
+        backend: params.backend,
+        error: params.error,
+      })
+    ) {
       return false;
     }
     this.clearCachedRuntimeState(params.sessionKey);
@@ -1611,6 +1623,29 @@ export class AcpSessionManager {
 
   private isRecoverableAcpxExitError(message: string): boolean {
     return /^acpx exited with (code \d+|signal [a-z0-9]+)/i.test(message.trim());
+  }
+
+  private isRetryableAcpxStartupFailure(params: {
+    backend: string | undefined;
+    error: AcpRuntimeError;
+  }): boolean {
+    const backend = params.backend?.trim().toLowerCase();
+    if (backend !== "acpx") {
+      return false;
+    }
+    const normalized = params.error.message.trim();
+    if (this.isRecoverableAcpxExitError(normalized)) {
+      return true;
+    }
+    if (params.error.code !== "ACP_TURN_FAILED") {
+      return false;
+    }
+    return (
+      /^queue owner unavailable$/i.test(normalized) ||
+      /^queue owner unavailable\b.*\b(start(?:ing|up)?|initializ(?:e|ing|ation)|bootstrap)\b/i.test(
+        normalized,
+      )
+    );
   }
 
   private async evictIdleRuntimeHandles(params: { cfg: OpenClawConfig }): Promise<void> {

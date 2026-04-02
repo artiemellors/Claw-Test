@@ -116,8 +116,15 @@ export type ResolvedAcpxPluginConfig = {
 
 const DEFAULT_PERMISSION_MODE: AcpxPermissionMode = "approve-reads";
 const DEFAULT_NON_INTERACTIVE_POLICY: AcpxNonInteractivePermissionPolicy = "fail";
-const DEFAULT_QUEUE_OWNER_TTL_SECONDS = 0.1;
 const DEFAULT_STRICT_WINDOWS_CMD_WRAPPER = true;
+
+export function resolveDefaultQueueOwnerTtlSeconds(
+  platform: NodeJS.Platform = process.platform,
+): number {
+  // Windows spawn/wrapper overhead can make a 100ms owner TTL too aggressive
+  // for medium/complex prompt turns; keep other platforms unchanged.
+  return platform === "win32" ? 2 : 0.1;
+}
 
 type ParseResult =
   | { ok: true; value: AcpxPluginConfig | undefined }
@@ -324,7 +331,8 @@ export function resolveAcpxPluginConfig(params: {
     strictWindowsCmdWrapper:
       normalized.strictWindowsCmdWrapper ?? DEFAULT_STRICT_WINDOWS_CMD_WRAPPER,
     timeoutSeconds: normalized.timeoutSeconds,
-    queueOwnerTtlSeconds: normalized.queueOwnerTtlSeconds ?? DEFAULT_QUEUE_OWNER_TTL_SECONDS,
+    queueOwnerTtlSeconds:
+      normalized.queueOwnerTtlSeconds ?? resolveDefaultQueueOwnerTtlSeconds(),
     mcpServers,
   };
 }
