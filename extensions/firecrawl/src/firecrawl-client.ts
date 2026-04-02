@@ -8,10 +8,16 @@ import {
   resolveCacheTtlMs,
   truncateText,
   withStrictWebToolsEndpoint,
+  withTrustedWebToolsEndpoint,
   writeCache,
 } from "openclaw/plugin-sdk/provider-web-fetch";
 import { wrapExternalContent, wrapWebContent } from "openclaw/plugin-sdk/security-runtime";
 import {
+  assertHttpUrlTargetsPrivateNetwork,
+  type LookupFn,
+} from "openclaw/plugin-sdk/ssrf-runtime";
+import {
+  DEFAULT_FIRECRAWL_BASE_URL,
   resolveFirecrawlApiKey,
   resolveFirecrawlBaseUrl,
   resolveFirecrawlMaxAgeMs,
@@ -30,7 +36,10 @@ const SCRAPE_CACHE = new Map<
 >();
 const DEFAULT_SEARCH_COUNT = 5;
 const DEFAULT_SCRAPE_MAX_CHARS = 50_000;
-const ALLOWED_FIRECRAWL_HOSTS = new Set(["api.firecrawl.dev"]);
+const FIRECRAWL_HTTP_PRIVATE_ONLY_ERROR =
+  "Firecrawl HTTP base URL must target a private or loopback host. Use https:// for public hosts.";
+
+type FirecrawlEndpointMode = "strict" | "trusted";
 
 type FirecrawlSearchItem = {
   title: string;
@@ -63,14 +72,53 @@ export type FirecrawlScrapeParams = {
   timeoutSeconds?: number;
 };
 
-function resolveEndpoint(baseUrl: string, pathname: "/v2/search" | "/v2/scrape"): string {
-  const url = new URL(baseUrl.trim() || "https://api.firecrawl.dev");
-  if (url.protocol !== "https:") {
-    throw new Error("Firecrawl baseUrl must use https.");
+async function resolveFirecrawlEndpointMode(
+  baseUrl: string,
+  lookupFn?: LookupFn,
+): Promise<FirecrawlEndpointMode> {
+  const parsed = new URL(baseUrl);
+  const privateNetworkProbe = new URL(parsed.toString());
+  privateNetworkProbe.protocol = "http:";
+  try {
+    await assertHttpUrlTargetsPrivateNetwork(privateNetworkProbe.toString(), {
+      allowPrivateNetwork: true,
+      lookupFn,
+      errorMessage: FIRECRAWL_HTTP_PRIVATE_ONLY_ERROR,
+    });
+    return "trusted";
+  } catch {
+    return "strict";
   }
-  if (!ALLOWED_FIRECRAWL_HOSTS.has(url.hostname)) {
-    throw new Error(`Firecrawl baseUrl host is not allowed: ${url.hostname}`);
+}
+
+async function validateFirecrawlBaseUrl(
+  baseUrl: string,
+  lookupFn?: LookupFn,
+): Promise<FirecrawlEndpointMode> {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error("Firecrawl base URL must be a valid http:// or https:// URL.");
   }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Firecrawl base URL must use http:// or https://.");
+  }
+
+  const mode = await resolveFirecrawlEndpointMode(parsed.toString(), lookupFn);
+  if (parsed.protocol === "http:" && mode !== "trusted") {
+    throw new Error(FIRECRAWL_HTTP_PRIVATE_ONLY_ERROR);
+  }
+  return mode;
+}
+
+async function resolveEndpoint(
+  baseUrl: string,
+  pathname: "/v2/search" | "/v2/scrape",
+): Promise<string> {
+  const url = new URL(baseUrl.trim() || DEFAULT_FIRECRAWL_BASE_URL);
+  await validateFirecrawlBaseUrl(url.toString());
   url.username = "";
   url.password = "";
   url.search = "";
@@ -89,7 +137,10 @@ async function postFirecrawlJson<T>(
   },
   parse: (response: Response) => Promise<T>,
 ): Promise<T> {
-  return await withStrictWebToolsEndpoint(
+  const endpointMode = await validateFirecrawlBaseUrl(params.url);
+  const withEndpoint =
+    endpointMode === "trusted" ? withTrustedWebToolsEndpoint : withStrictWebToolsEndpoint;
+  return await withEndpoint(
     {
       url: params.url,
       timeoutSeconds: params.timeoutSeconds,
@@ -284,7 +335,7 @@ export async function runFirecrawlSearch(
   const start = Date.now();
   const payload = await postFirecrawlJson(
     {
-      url: resolveEndpoint(baseUrl, "/v2/search"),
+      url: await resolveEndpoint(baseUrl, "/v2/search"),
       timeoutSeconds,
       apiKey,
       body,
@@ -428,7 +479,7 @@ export async function runFirecrawlScrape(
 
   const payload = await postFirecrawlJson(
     {
-      url: resolveEndpoint(baseUrl, "/v2/scrape"),
+      url: await resolveEndpoint(baseUrl, "/v2/scrape"),
       timeoutSeconds,
       apiKey,
       errorLabel: "Firecrawl",
@@ -477,5 +528,6 @@ export const __testing = {
   parseFirecrawlScrapePayload,
   postFirecrawlJson,
   resolveEndpoint,
+  validateFirecrawlBaseUrl,
   resolveSearchItems,
 };
