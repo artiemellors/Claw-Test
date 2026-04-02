@@ -382,6 +382,100 @@ describe("gateway agent handler", () => {
     );
   });
 
+  it('treats request-level toolChoice "none" as non-structured output intent', async () => {
+    primeMainAgentRun();
+    mocks.registerAgentRunContext.mockClear();
+
+    await invokeAgent(
+      {
+        message: "test toolChoice none",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        streamParams: { toolChoice: "none" },
+        idempotencyKey: "test-idem-toolchoice-none",
+      },
+      {
+        reqId: "test-idem-toolchoice-none",
+      },
+    );
+
+    expect(mocks.registerAgentRunContext).toHaveBeenCalledWith(
+      "test-idem-toolchoice-none",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        requestedStructuredOutput: false,
+      }),
+    );
+  });
+
+  it('treats request-level toolChoice "auto" as non-structured output intent', async () => {
+    primeMainAgentRun();
+    mocks.registerAgentRunContext.mockClear();
+
+    await invokeAgent(
+      {
+        message: "test toolChoice auto",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        streamParams: { toolChoice: "auto" },
+        idempotencyKey: "test-idem-toolchoice-auto",
+      },
+      {
+        reqId: "test-idem-toolchoice-auto",
+      },
+    );
+
+    expect(mocks.registerAgentRunContext).toHaveBeenCalledWith(
+      "test-idem-toolchoice-auto",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        requestedStructuredOutput: false,
+      }),
+    );
+  });
+
+  it("disables structured output intent for ACP-backed sessions", async () => {
+    mockMainSessionEntry({
+      acp: {
+        backend: "acpx",
+        agent: "codex",
+        runtimeSessionName: "runtime-1",
+        mode: "persistent",
+        state: "idle",
+        lastActivityAt: Date.now(),
+      },
+    });
+    mocks.updateSessionStore.mockResolvedValue(undefined);
+    mocks.agentCommand.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 100 },
+    });
+    mocks.registerAgentRunContext.mockClear();
+
+    await invokeAgent(
+      {
+        message: "test acp structured intent",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        streamParams: {
+          toolChoice: "required",
+        },
+        idempotencyKey: "test-idem-acp-toolchoice-required",
+      },
+      {
+        reqId: "test-idem-acp-toolchoice-required",
+      },
+    );
+
+    expect(mocks.registerAgentRunContext).toHaveBeenCalledWith(
+      "test-idem-acp-toolchoice-required",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        requestedStructuredOutput: false,
+      }),
+    );
+  });
+
   it("rejects provider and model overrides for write-scoped callers", async () => {
     primeMainAgentRun();
     mocks.agentCommand.mockClear();

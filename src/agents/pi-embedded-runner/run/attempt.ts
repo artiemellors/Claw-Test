@@ -9,6 +9,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
+import { registerAgentRunContext } from "../../../infra/agent-events.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import {
   ensureGlobalUndiciEnvProxyDispatcher,
@@ -491,6 +492,7 @@ export async function runEmbeddedAttempt(
           return allTools;
         })();
     const toolsEnabled = supportsModelTools(params.model);
+    const builtInToolsEnabled = toolsEnabled && params.disableTools !== true;
     const tools = sanitizeToolsForGoogle({
       tools: toolsEnabled ? toolsRaw : [],
       provider: params.provider,
@@ -502,7 +504,7 @@ export async function runEmbeddedAttempt(
       model: params.model,
     });
     const clientTools = toolsEnabled ? params.clientTools : undefined;
-    const bundleMcpSessionRuntime = toolsEnabled
+    const bundleMcpSessionRuntime = builtInToolsEnabled
       ? await getOrCreateSessionMcpRuntime({
           sessionId: params.sessionId,
           sessionKey: params.sessionKey,
@@ -519,7 +521,7 @@ export async function runEmbeddedAttempt(
           ],
         })
       : undefined;
-    const bundleLspRuntime = toolsEnabled
+    const bundleLspRuntime = builtInToolsEnabled
       ? await createBundleLspToolRuntime({
           workspaceDir: effectiveWorkspace,
           cfg: params.config,
@@ -950,21 +952,25 @@ export async function runEmbeddedAttempt(
         model: params.model,
       });
 
-      const { effectiveExtraParams } = applyExtraParamsToAgent(
+      const effectiveStreamParams: Record<string, unknown> = {
+        ...params.streamParams,
+        ...(params.fastMode !== undefined ? { fastMode: params.fastMode } : {}),
+        ...(allowedToolNames.size === 0 ? { toolChoice: "none" } : {}),
+      };
+      const { effectiveExtraParams, requestedStructuredOutput } = applyExtraParamsToAgent(
         activeSession.agent,
         params.config,
         params.provider,
         params.modelId,
-        {
-          ...params.streamParams,
-          fastMode: params.fastMode,
-        },
+        effectiveStreamParams,
         params.thinkLevel,
         sessionAgentId,
         effectiveWorkspace,
         params.model,
+        allowedToolNames,
         agentDir,
       );
+      registerAgentRunContext(params.runId, { requestedStructuredOutput });
       const agentTransportOverride = resolveAgentTransportOverride({
         settingsManager,
         effectiveExtraParams,

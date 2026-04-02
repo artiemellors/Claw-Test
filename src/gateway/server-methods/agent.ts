@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { listAgentIds } from "../../agents/agent-scope.js";
 import type { AgentInternalEvent } from "../../agents/internal-events.js";
+import { isStructuredOutputToolChoice } from "../../agents/pi-embedded-runner/extra-params.js";
 import {
   normalizeSpawnedRunMetadata,
   resolveIngressWorkspaceOverrideForSpawnedRun,
 } from "../../agents/spawned-context.js";
 import { buildBareSessionResetPrompt } from "../../auto-reply/reply/session-reset-prompt.js";
 import { agentCommandFromIngress } from "../../commands/agent.js";
+import type { AgentStreamParams } from "../../commands/agent/types.js";
 import { loadConfig } from "../../config/config.js";
 import {
   mergeSessionEntry,
@@ -16,7 +18,10 @@ import {
   type SessionEntry,
   updateSessionStore,
 } from "../../config/sessions.js";
-import { registerAgentRunContext } from "../../infra/agent-events.js";
+import {
+  getAgentRequestedStructuredOutputIntent,
+  registerAgentRunContext,
+} from "../../infra/agent-events.js";
 import {
   resolveAgentDeliveryPlan,
   resolveAgentOutboundTarget,
@@ -75,6 +80,34 @@ import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 
 const RESET_COMMAND_RE = /^\/(new|reset)(?:\s+([\s\S]*))?$/i;
+const AGENT_WAIT_DEDUPE_METADATA_GRACE_MS = 5_000;
+
+function mergeAgentWaitStructuredMetadata<T extends AgentWaitTerminalSnapshot>(
+  snapshot: T,
+  dedupeSnapshot: AgentWaitTerminalSnapshot | null | undefined,
+): T {
+  if (!dedupeSnapshot) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    stopReason: snapshot.stopReason ?? dedupeSnapshot.stopReason,
+    pendingToolCalls: snapshot.pendingToolCalls ?? dedupeSnapshot.pendingToolCalls,
+  };
+}
+
+function isMissingAgentWaitStructuredMetadata(
+  snapshot: AgentWaitTerminalSnapshot,
+  requestedStructuredOutput: boolean,
+): boolean {
+  if (!requestedStructuredOutput) {
+    return false;
+  }
+  if (snapshot.stopReason === "tool_calls") {
+    return snapshot.pendingToolCalls === undefined;
+  }
+  return snapshot.stopReason === undefined && snapshot.status === "ok";
+}
 
 function resolveSenderIsOwnerFromClient(client: GatewayRequestHandlerOptions["client"]): boolean {
   const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
@@ -302,6 +335,16 @@ export const agentHandlers: GatewayRequestHandlers = {
       lane?: string;
       extraSystemPrompt?: string;
       internalEvents?: AgentInternalEvent[];
+      clientTools?: Array<{
+        type: "function";
+        function: {
+          name: string;
+          description?: string;
+          parameters?: Record<string, unknown>;
+        };
+      }>;
+      disableTools?: boolean;
+      streamParams?: AgentStreamParams;
       idempotencyKey: string;
       timeout?: number;
       bestEffortDeliver?: boolean;
@@ -603,6 +646,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       resolvedSessionKey = canonicalSessionKey;
       const agentId = resolveAgentIdFromSessionKey(canonicalSessionKey);
       const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
+      const isAcpBackedSession = Boolean(entry?.acp);
       if (storePath) {
         const persisted = await updateSessionStore(storePath, (store) => {
           const { primaryKey } = migrateAndPruneGatewaySessionStoreKey({
@@ -625,7 +669,12 @@ export const agentHandlers: GatewayRequestHandlers = {
           bestEffortDeliver = true;
         }
       }
-      registerAgentRunContext(idem, { sessionKey: canonicalSessionKey });
+      const requestedStructuredOutput =
+        !isAcpBackedSession && isStructuredOutputToolChoice(request.streamParams?.toolChoice);
+      registerAgentRunContext(idem, {
+        sessionKey: canonicalSessionKey,
+        requestedStructuredOutput,
+      });
     }
 
     const runId = idem;
@@ -837,6 +886,9 @@ export const agentHandlers: GatewayRequestHandlers = {
         lane: request.lane,
         extraSystemPrompt: request.extraSystemPrompt,
         internalEvents: request.internalEvents,
+        clientTools: request.clientTools,
+        disableTools: request.disableTools,
+        streamParams: request.streamParams,
         inputProvenance,
         // Internal-only: allow workspace override for spawned subagent runs.
         workspaceDir: resolveIngressWorkspaceOverrideForSpawnedRun({
@@ -924,6 +976,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       typeof p.timeoutMs === "number" && Number.isFinite(p.timeoutMs)
         ? Math.max(0, Math.floor(p.timeoutMs))
         : 30_000;
+    const waitDeadlineAt = Date.now() + timeoutMs;
     const hasActiveChatRun = context.chatAbortControllers.has(runId);
 
     const cachedGatewaySnapshot = readTerminalSnapshotFromGatewayDedupe({
@@ -938,6 +991,8 @@ export const agentHandlers: GatewayRequestHandlers = {
         startedAt: cachedGatewaySnapshot.startedAt,
         endedAt: cachedGatewaySnapshot.endedAt,
         error: cachedGatewaySnapshot.error,
+        stopReason: cachedGatewaySnapshot.stopReason,
+        pendingToolCalls: cachedGatewaySnapshot.pendingToolCalls,
       });
       return;
     }
@@ -969,6 +1024,54 @@ export const agentHandlers: GatewayRequestHandlers = {
       first.snapshot;
     if (snapshot) {
       if (first.source === "lifecycle") {
+        snapshot = mergeAgentWaitStructuredMetadata(
+          snapshot,
+          readTerminalSnapshotFromGatewayDedupe({
+            dedupe: context.dedupe,
+            runId,
+            ignoreAgentTerminalSnapshot: hasActiveChatRun,
+          }),
+        );
+        if (snapshot.stopReason === undefined) {
+          const immediateDedupeMetadata =
+            (await Promise.race([
+              dedupePromise,
+              Promise.resolve<AgentWaitTerminalSnapshot | null>(null),
+            ])) ?? null;
+          snapshot = mergeAgentWaitStructuredMetadata(snapshot, immediateDedupeMetadata);
+        }
+        if (
+          isMissingAgentWaitStructuredMetadata(
+            snapshot,
+            getAgentRequestedStructuredOutputIntent(runId) === true,
+          )
+        ) {
+          const remainingTimeoutMs = waitDeadlineAt - Date.now();
+          let dedupeMetadata: AgentWaitTerminalSnapshot | null = null;
+          if (remainingTimeoutMs > 0) {
+            let graceTimer: ReturnType<typeof setTimeout> | null = null;
+            dedupeMetadata =
+              (await Promise.race([
+                dedupePromise.finally(() => {
+                  if (graceTimer != null) {
+                    clearTimeout(graceTimer);
+                  }
+                }),
+                new Promise<null>((resolve) => {
+                  graceTimer = setTimeout(
+                    () => resolve(null),
+                    Math.min(
+                      remainingTimeoutMs,
+                      AGENT_WAIT_DEDUPE_METADATA_GRACE_MS,
+                      2_147_483_647,
+                    ),
+                  );
+                  graceTimer.unref?.();
+                }),
+              ])) ?? null;
+          }
+          snapshot = mergeAgentWaitStructuredMetadata(snapshot, dedupeMetadata);
+        }
         dedupeAbortController.abort();
       } else {
         lifecycleAbortController.abort();
@@ -992,6 +1095,8 @@ export const agentHandlers: GatewayRequestHandlers = {
       startedAt: snapshot.startedAt,
       endedAt: snapshot.endedAt,
       error: snapshot.error,
+      stopReason: snapshot.stopReason,
+      pendingToolCalls: snapshot.pendingToolCalls,
     });
   },
 };

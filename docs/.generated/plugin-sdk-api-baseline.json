@@ -460,7 +460,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 54,
+            "line": 65,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -622,7 +622,7 @@
           "exportName": "SubagentRunParams",
           "kind": "type",
           "source": {
-            "line": 8,
+            "line": 10,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -631,7 +631,7 @@
           "exportName": "SubagentRunResult",
           "kind": "type",
           "source": {
-            "line": 19,
+            "line": 24,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -4071,7 +4071,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 54,
+            "line": 65,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -5546,7 +5546,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 54,
+            "line": 65,
             "path": "src/plugins/runtime/types.ts"
           }
         }
@@ -6081,7 +6081,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 54,
+            "line": 65,
             "path": "src/plugins/runtime/types.ts"
           }
         },

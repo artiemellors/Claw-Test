@@ -77,6 +77,7 @@ import {
   resolveDefaultModelForAgent,
   resolveThinkingDefault,
 } from "./model-selection.js";
+import { isStructuredOutputToolChoice } from "./pi-embedded-runner/extra-params.js";
 import { buildWorkspaceSkillSnapshot } from "./skills.js";
 import { getSkillsSnapshotVersion } from "./skills/refresh.js";
 import { normalizeSpawnedRunMetadata } from "./spawned-context.js";
@@ -357,6 +358,9 @@ async function agentCommandInternal(
     acpResolution,
   } = prepared;
   let sessionEntry = prepared.sessionEntry;
+  const initialRequestedStructuredOutput = isStructuredOutputToolChoice(
+    opts.streamParams?.toolChoice,
+  );
 
   try {
     if (opts.deliver === true) {
@@ -699,6 +703,13 @@ async function agentCommandInternal(
         });
       }
     }
+    if (sessionKey) {
+      registerAgentRunContext(runId, {
+        sessionKey,
+        verboseLevel: resolvedVerboseLevel,
+        requestedStructuredOutput: initialRequestedStructuredOutput,
+      });
+    }
     let sessionFile: string | undefined;
     if (sessionStore && sessionKey) {
       const resolvedSessionFile = await resolveSessionTranscriptFile({
@@ -760,6 +771,13 @@ async function agentCommandInternal(
         run: async (providerOverride, modelOverride, runOptions) => {
           const isFallbackRetry = fallbackAttemptIndex > 0;
           fallbackAttemptIndex += 1;
+          if (sessionKey) {
+            registerAgentRunContext(runId, {
+              sessionKey,
+              verboseLevel: resolvedVerboseLevel,
+              requestedStructuredOutput: initialRequestedStructuredOutput,
+            });
+          }
           return runAgentAttempt({
             providerOverride,
             modelOverride,

@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   clearAgentRunContext,
   emitAgentEvent,
+  getAgentRequestedStructuredOutputIntent,
   getAgentRunContext,
   onAgentEvent,
   registerAgentRunContext,
@@ -22,11 +23,57 @@ describe("agent-events sequencing", () => {
     resetAgentEventsForTest();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   test("stores and clears run context", async () => {
-    registerAgentRunContext("run-1", { sessionKey: "main" });
+    resetAgentRunContextForTest();
+    registerAgentRunContext("run-1", { sessionKey: "main", requestedStructuredOutput: true });
     expect(getAgentRunContext("run-1")?.sessionKey).toBe("main");
     clearAgentRunContext("run-1");
     expect(getAgentRunContext("run-1")).toBeUndefined();
+    expect(getAgentRequestedStructuredOutputIntent("run-1")).toBe(true);
+  });
+
+  test("retains only true structured-output intent across cleanup", async () => {
+    resetAgentRunContextForTest();
+    registerAgentRunContext("run-false", {
+      sessionKey: "main",
+      requestedStructuredOutput: false,
+    });
+    clearAgentRunContext("run-false");
+    expect(getAgentRequestedStructuredOutputIntent("run-false")).toBeUndefined();
+
+    registerAgentRunContext("run-toggle", {
+      sessionKey: "main",
+      requestedStructuredOutput: true,
+    });
+    registerAgentRunContext("run-toggle", {
+      requestedStructuredOutput: false,
+    });
+    clearAgentRunContext("run-toggle");
+    expect(getAgentRequestedStructuredOutputIntent("run-toggle")).toBeUndefined();
+  });
+
+  test("refreshes retained structured-output intent when live context is cleared", async () => {
+    resetAgentRunContextForTest();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-29T00:00:00.000Z"));
+
+    registerAgentRunContext("run-long", {
+      sessionKey: "main",
+      requestedStructuredOutput: true,
+    });
+
+    vi.advanceTimersByTime(11 * 60_000);
+    clearAgentRunContext("run-long");
+
+    expect(getAgentRequestedStructuredOutputIntent("run-long")).toBe(true);
+
+    vi.advanceTimersByTime(11 * 60_000);
+    expect(getAgentRequestedStructuredOutputIntent("run-long")).toBeUndefined();
   });
 
   test("maintains monotonic seq per runId", async () => {
