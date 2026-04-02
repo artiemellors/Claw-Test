@@ -35,6 +35,10 @@ const expectEmbeddingErrorResponse = (respond: ReturnType<typeof vi.fn>, error: 
     true,
     {
       agentId: "main",
+      runtime: {
+        ok: false,
+        error,
+      },
       embedding: {
         ok: false,
         error,
@@ -74,6 +78,7 @@ describe("doctor.memory.status", () => {
       {
         agentId: "main",
         provider: "gemini",
+        runtime: { ok: true },
         embedding: { ok: true },
       },
       undefined,

@@ -7,6 +7,10 @@ import type { GatewayRequestHandlers } from "./types.js";
 export type DoctorMemoryStatusPayload = {
   agentId: string;
   provider?: string;
+  runtime: {
+    ok: boolean;
+    error?: string;
+  };
   embedding: {
     ok: boolean;
     error?: string;
@@ -25,6 +29,10 @@ export const doctorHandlers: GatewayRequestHandlers = {
     if (!manager) {
       const payload: DoctorMemoryStatusPayload = {
         agentId,
+        runtime: {
+          ok: false,
+          error: error ?? "memory search unavailable",
+        },
         embedding: {
           ok: false,
           error: error ?? "memory search unavailable",
@@ -43,12 +51,19 @@ export const doctorHandlers: GatewayRequestHandlers = {
       const payload: DoctorMemoryStatusPayload = {
         agentId,
         provider: status.provider,
+        runtime: {
+          ok: true,
+        },
         embedding,
       };
       respond(true, payload, undefined);
     } catch (err) {
       const payload: DoctorMemoryStatusPayload = {
         agentId,
+        runtime: {
+          ok: false,
+          error: `gateway memory probe failed: ${formatError(err)}`,
+        },
         embedding: {
           ok: false,
           error: `gateway memory probe failed: ${formatError(err)}`,
