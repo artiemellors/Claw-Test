@@ -392,6 +392,8 @@ importers:
 
   extensions/github-copilot: {}
 
+  extensions/gmicloud: {}
+
   extensions/google: {}
 
   extensions/googlechat:

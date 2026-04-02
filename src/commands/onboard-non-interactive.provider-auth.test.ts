@@ -564,6 +564,18 @@ vi.mock("./onboard-non-interactive/local/auth-choice.plugin-providers.js", async
       }),
     ],
     [
+      "gmicloud-api-key",
+      createApiKeyChoice({
+        providerId: "gmicloud",
+        label: "GMI Cloud",
+        choiceId: "gmicloud-api-key",
+        optionKey: "gmicloudApiKey",
+        flagName: "--gmicloud-api-key",
+        envVar: "GMI_CLOUD_API_KEY",
+        defaultModel: "gmicloud/anthropic/claude-opus-4.6",
+      }),
+    ],
+    [
       "modelstudio-api-key",
       createApiKeyChoice({
         providerId: "modelstudio",
@@ -656,7 +668,12 @@ let clearPluginManifestRegistryCache: typeof import("../plugins/manifest-registr
 
 type ProviderAuthConfigSnapshot = {
   auth?: { profiles?: Record<string, { provider?: string; mode?: string }> };
-  agents?: { defaults?: { model?: { primary?: string } } };
+  agents?: {
+    defaults?: {
+      model?: { primary?: string };
+      models?: Record<string, unknown>;
+    };
+  };
   models?: {
     providers?: Record<
       string,
@@ -1388,6 +1405,27 @@ describe("onboard (non-interactive): provider auth", () => {
         profileId: "qianfan:default",
         provider: "qianfan",
         key: "qianfan-test-key",
+      });
+    });
+  });
+
+  it("infers GMI Cloud auth choice from --gmicloud-api-key and sets default model", async () => {
+    await withOnboardEnv("openclaw-onboard-gmicloud-infer-", async (env) => {
+      const cfg = await runOnboardingAndReadConfig(env, {
+        gmicloudApiKey: "gmicloud-test-key", // pragma: allowlist secret
+      });
+
+      expect(cfg.auth?.profiles?.["gmicloud:default"]?.provider).toBe("gmicloud");
+      expect(cfg.auth?.profiles?.["gmicloud:default"]?.mode).toBe("api_key");
+      expect(cfg.agents?.defaults?.model?.primary).toBe("gmicloud/anthropic/claude-opus-4.6");
+      expect(cfg.agents?.defaults?.models?.["gmicloud/anthropic/claude-opus-4.6"]).toBeDefined();
+      expect(
+        cfg.agents?.defaults?.models?.["gmicloud/deepseek-ai/DeepSeek-V3-0324"],
+      ).toBeUndefined();
+      await expectApiKeyProfile({
+        profileId: "gmicloud:default",
+        provider: "gmicloud",
+        key: "gmicloud-test-key",
       });
     });
   });
