@@ -7,6 +7,7 @@ import { resolveAgentMainSessionKey, resolveMainSessionKey } from "../../config/
 import { callGateway } from "../../gateway/call.js";
 import { sleepWithAbort } from "../../infra/backoff.js";
 import {
+  DeliveryError,
   deliverOutboundPayloads,
   type OutboundDeliveryResult,
 } from "../../infra/outbound/deliver.js";
@@ -322,7 +323,12 @@ async function retryTransientDirectCronDelivery<T>(params: {
       return await params.run();
     } catch (err) {
       const delayMs = retryDelaysMs[retryIndex];
-      if (delayMs == null || !isTransientDirectCronDeliveryError(err) || params.signal?.aborted) {
+      if (
+        delayMs == null ||
+        !isTransientDirectCronDeliveryError(err) ||
+        params.signal?.aborted ||
+        err instanceof DeliveryError
+      ) {
         throw err;
       }
       const nextAttempt = retryIndex + 2;
@@ -463,7 +469,7 @@ export async function dispatchCronDelivery(
           // See: https://github.com/openclaw/openclaw/issues/40545
           skipQueue: true,
         });
-      const deliveryResults = options?.retryTransient
+      const deliveryOutcome = options?.retryTransient
         ? await retryTransientDirectCronDelivery({
             jobId: params.job.id,
             signal: params.abortSignal,
@@ -471,7 +477,11 @@ export async function dispatchCronDelivery(
           })
         : await runDelivery();
       // Only mark delivered when ALL payloads succeeded (no partial failure).
-      delivered = deliveryResults.length > 0 && !hadPartialFailure;
+      // Hook cancellation is intentional policy, not a failure — treat as delivered
+      // so the job is cached and not replayed (#57766).
+      delivered =
+        (deliveryOutcome.results.length > 0 || deliveryOutcome.allCancelledByHook) &&
+        !hadPartialFailure;
       // Intentionally leave partial success uncached: replay may duplicate the
       // successful subset, but caching it here would permanently drop the
       // failed payloads by converting the replay into delivered=true.
@@ -486,10 +496,20 @@ export async function dispatchCronDelivery(
         });
       }
       if (delivered) {
-        rememberCompletedDirectCronDelivery(deliveryIdempotencyKey, deliveryResults);
+        rememberCompletedDirectCronDelivery(deliveryIdempotencyKey, deliveryOutcome.results);
       }
       return null;
     } catch (err) {
+      if (err instanceof DeliveryError && err.sentBeforeError.length > 0) {
+        // Partial send: cache as delivered to prevent scheduler replay from
+        // duplicating the already-sent payloads. Accepts truncation over
+        // duplication — same trade-off bestEffort makes (#57766).
+        rememberCompletedDirectCronDelivery(deliveryIdempotencyKey, err.sentBeforeError);
+        logError(
+          `[cron:${params.job.id}] partial delivery: ${err.sentBeforeError.length} payload(s) sent before failure: ${err.message}`,
+        );
+        return null;
+      }
       if (!params.deliveryBestEffort) {
         return params.withRunSession({
           status: "error",
