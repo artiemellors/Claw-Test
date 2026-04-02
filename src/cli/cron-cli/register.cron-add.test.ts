@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultRuntime } from "../../runtime.js";
 import { registerCronAddCommand } from "./register.cron-add.js";
 
 const callGatewayMock = vi.hoisted(() => vi.fn());
@@ -32,26 +33,23 @@ vi.mock("./schedule-options.js", () => ({
 
 describe("cron add --dry-run", () => {
   let program: Command;
-  let stdoutOutput: string;
+  let writeStdoutSpy: ReturnType<typeof vi.spyOn>;
+  let writeJsonSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     program = new Command().exitOverride();
-    program.configureOutput({
-      writeOut: (str) => {
-        stdoutOutput += str;
-      },
-      writeErr: () => {},
-    });
-    stdoutOutput = "";
+    program.configureOutput({ writeErr: () => {} });
     callGatewayMock.mockReset();
     warnMock.mockReset();
+    writeStdoutSpy = vi.spyOn(defaultRuntime, "writeStdout").mockImplementation(() => {});
+    writeJsonSpy = vi.spyOn(defaultRuntime, "writeJson").mockImplementation(() => {});
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("prints params JSON and skips RPC when --dry-run is passed", async () => {
+  it("prints params preview and skips RPC when --dry-run is passed", async () => {
     const cron = program.command("cron");
     registerCronAddCommand(cron);
 
@@ -74,12 +72,15 @@ describe("cron add --dry-run", () => {
 
     expect(callGatewayMock).not.toHaveBeenCalled();
     expect(warnMock).not.toHaveBeenCalled();
-    expect(stdoutOutput).toMatch(/Dry run/);
-    expect(stdoutOutput).toMatch(/"name":\s*"my-job"/);
-    expect(stdoutOutput).toMatch(/"kind":\s*"agentTurn"/);
+    expect(writeJsonSpy).not.toHaveBeenCalled();
+    expect(writeStdoutSpy).toHaveBeenCalledOnce();
+    const output = writeStdoutSpy.mock.calls[0][0] as string;
+    expect(output).toMatch(/Dry run/);
+    expect(output).toMatch(/"name":\s*"my-job"/);
+    expect(output).toMatch(/"kind":\s*"agentTurn"/);
   });
 
-  it("prints raw JSON when --dry-run --json are both passed", async () => {
+  it("emits raw JSON via writeJson when --dry-run --json are both passed", async () => {
     const cron = program.command("cron");
     registerCronAddCommand(cron);
 
@@ -102,7 +103,9 @@ describe("cron add --dry-run", () => {
     );
 
     expect(callGatewayMock).not.toHaveBeenCalled();
-    const parsed = JSON.parse(stdoutOutput);
-    expect(parsed).toMatchObject({ name: "my-job" });
+    expect(writeStdoutSpy).not.toHaveBeenCalled();
+    expect(writeJsonSpy).toHaveBeenCalledOnce();
+    const params = writeJsonSpy.mock.calls[0][0] as Record<string, unknown>;
+    expect(params).toMatchObject({ name: "my-job" });
   });
 });

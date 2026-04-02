@@ -256,10 +256,13 @@ export function registerCronAddCommand(cron: Command) {
           };
 
           if (opts.dryRun) {
-            const output = opts.json
-              ? JSON.stringify(params, null, 2)
-              : `Dry run — job would be created with the following parameters:\n${JSON.stringify(params, null, 2)}`;
-            process.stdout.write(output + "\n");
+            if (opts.json) {
+              defaultRuntime.writeJson(params);
+            } else {
+              defaultRuntime.writeStdout(
+                `Dry run — job would be created with the following parameters:\n${JSON.stringify(params, null, 2)}\n`,
+              );
+            }
             return;
           }
 
