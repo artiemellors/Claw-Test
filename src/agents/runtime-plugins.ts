@@ -11,14 +11,16 @@ export function ensureRuntimePluginsLoaded(params: {
     typeof params.workspaceDir === "string" && params.workspaceDir.trim()
       ? resolveUserPath(params.workspaceDir)
       : undefined;
-  const loadOptions = {
+  const loadOptions: Parameters<typeof resolveRuntimePluginRegistry>[0] = {
     config: params.config,
     workspaceDir,
-    runtimeOptions: params.allowGatewaySubagentBinding
-      ? {
-          allowGatewaySubagentBinding: true,
-        }
-      : undefined,
   };
+  if (params.allowGatewaySubagentBinding === true) {
+    loadOptions.runtimeOptions = {
+      allowGatewaySubagentBinding: true,
+    };
+  } else if (params.allowGatewaySubagentBinding === undefined) {
+    loadOptions.inheritSharedRuntimeOptions = true;
+  }
   resolveRuntimePluginRegistry(loadOptions);
 }

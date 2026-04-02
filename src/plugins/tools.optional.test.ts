@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createEmptyPluginRegistry } from "./registry-empty.js";
 
 type MockRegistryToolEntry = {
   pluginId: string;
@@ -22,6 +23,7 @@ vi.mock("../config/plugin-auto-enable.js", () => ({
 let resolvePluginTools: typeof import("./tools.js").resolvePluginTools;
 let resetPluginRuntimeStateForTest: typeof import("./runtime.js").resetPluginRuntimeStateForTest;
 let setActivePluginRegistry: typeof import("./runtime.js").setActivePluginRegistry;
+let clearSharedPluginRuntimeOptions: typeof import("./runtime/shared-runtime-options.js").clearSharedPluginRuntimeOptions;
 
 function makeTool(name: string) {
   return {
@@ -60,7 +62,9 @@ function createResolveToolsParams(params?: {
     ...(params?.existingToolNames ? { existingToolNames: params.existingToolNames } : {}),
     ...(params?.env ? { env: params.env } : {}),
     ...(params?.suppressNameConflicts ? { suppressNameConflicts: true } : {}),
-    ...(params?.allowGatewaySubagentBinding ? { allowGatewaySubagentBinding: true } : {}),
+    ...(params && "allowGatewaySubagentBinding" in params
+      ? { allowGatewaySubagentBinding: params.allowGatewaySubagentBinding }
+      : {}),
   };
 }
 
@@ -151,8 +155,8 @@ function resolveAutoEnabledOptionalDemoTools() {
 
 function createOptionalDemoActiveRegistry() {
   return {
+    ...createEmptyPluginRegistry(),
     tools: [createOptionalDemoEntry()],
-    diagnostics: [],
   };
 }
 
@@ -206,10 +210,13 @@ describe("resolvePluginTools optional tools", () => {
       changes: [],
     }));
     ({ resetPluginRuntimeStateForTest, setActivePluginRegistry } = await import("./runtime.js"));
+    ({ clearSharedPluginRuntimeOptions } = await import("./runtime/shared-runtime-options.js"));
     resetPluginRuntimeStateForTest();
+    clearSharedPluginRuntimeOptions();
     ({ resolvePluginTools } = await import("./tools.js"));
     ({ resetPluginRuntimeStateForTest, setActivePluginRegistry } = await import("./runtime.js"));
     resetPluginRuntimeStateForTest();
+    clearSharedPluginRuntimeOptions();
   });
 
   afterEach(() => {
@@ -310,6 +317,34 @@ describe("resolvePluginTools optional tools", () => {
     expectLoaderCall(expectedLoaderCall);
   });
 
+  it("does not inherit shared runtime options when gateway subagent binding is explicitly false", () => {
+    setOptionalDemoRegistry();
+
+    resolvePluginTools(
+      createResolveToolsParams({
+        allowGatewaySubagentBinding: false,
+        toolAllowlist: ["optional_tool"],
+      }),
+    );
+
+    expectLoaderCall({
+      config: expect.any(Object),
+      workspaceDir: "/tmp",
+      env: process.env,
+      logger: expect.any(Object),
+    });
+    expect(loadOpenClawPluginsMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        inheritSharedRuntimeOptions: true,
+      }),
+    );
+    expect(loadOpenClawPluginsMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        runtimeOptions: expect.anything(),
+      }),
+    );
+  });
+
   it.each([
     {
       name: "loads plugin tools from the auto-enabled config snapshot",
@@ -389,14 +424,7 @@ describe("resolvePluginTools optional tools", () => {
   });
 
   it("reloads when gateway binding would otherwise reuse a default-mode active registry", () => {
-    setActivePluginRegistry(
-      {
-        tools: [],
-        diagnostics: [],
-      } as never,
-      "default-registry",
-      "default",
-    );
+    setActivePluginRegistry(createEmptyPluginRegistry(), "default-registry", "default");
     setOptionalDemoRegistry();
 
     resolvePluginTools({

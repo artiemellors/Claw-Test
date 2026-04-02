@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveUserPath } from "../utils.js";
 
 const hoisted = vi.hoisted(() => ({
   resolveRuntimePluginRegistry: vi.fn(),
@@ -41,10 +42,40 @@ describe("ensureRuntimePluginsLoaded", () => {
 
     expect(hoisted.resolveRuntimePluginRegistry).toHaveBeenCalledWith({
       config: {} as never,
-      workspaceDir: "/tmp/workspace",
+      workspaceDir: resolveUserPath("/tmp/workspace"),
       runtimeOptions: {
         allowGatewaySubagentBinding: true,
       },
+    });
+  });
+
+  it("inherits shared runtime options when gateway binding is unspecified", async () => {
+    const { ensureRuntimePluginsLoaded } = await import("./runtime-plugins.js");
+
+    ensureRuntimePluginsLoaded({
+      config: {} as never,
+      workspaceDir: "/tmp/workspace",
+    });
+
+    expect(hoisted.resolveRuntimePluginRegistry).toHaveBeenCalledWith({
+      config: {} as never,
+      workspaceDir: resolveUserPath("/tmp/workspace"),
+      inheritSharedRuntimeOptions: true,
+    });
+  });
+
+  it("does not inherit shared runtime options when gateway subagent binding is explicitly false", async () => {
+    const { ensureRuntimePluginsLoaded } = await import("./runtime-plugins.js");
+
+    ensureRuntimePluginsLoaded({
+      config: {} as never,
+      workspaceDir: "/tmp/workspace",
+      allowGatewaySubagentBinding: false,
+    });
+
+    expect(hoisted.resolveRuntimePluginRegistry).toHaveBeenCalledWith({
+      config: {} as never,
+      workspaceDir: resolveUserPath("/tmp/workspace"),
     });
   });
 });

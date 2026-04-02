@@ -28,6 +28,12 @@ export type SubagentWaitParams = {
 export type SubagentWaitResult = {
   status: "ok" | "error" | "timeout";
   error?: string;
+  stopReason?: string;
+  pendingToolCalls?: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>;
 };
 
 export type SubagentGetSessionMessagesParams = {

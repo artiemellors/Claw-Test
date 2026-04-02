@@ -10,6 +10,10 @@ import {
   createPluginRuntime,
   setGatewaySubagentRuntime,
 } from "./index.js";
+import {
+  getSharedPluginRuntimeOptions,
+  setSharedPluginRuntimeOptions,
+} from "./shared-runtime-options.js";
 
 function createCommandResult() {
   return {
@@ -264,5 +268,13 @@ describe("plugin runtime command execution", () => {
       runId: "run-1",
     });
     expect(run).toHaveBeenCalledWith({ sessionKey: "s-2", message: "hello" });
+  });
+
+  it("clears shared runtime options when the gateway runtime is reset", () => {
+    setSharedPluginRuntimeOptions({ allowGatewaySubagentBinding: true });
+
+    clearGatewaySubagentRuntime();
+
+    expect(getSharedPluginRuntimeOptions()).toBeUndefined();
   });
 });

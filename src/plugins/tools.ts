@@ -88,18 +88,21 @@ export function resolvePluginTools(params: {
     return [];
   }
 
-  const runtimeOptions = params.allowGatewaySubagentBinding
-    ? { allowGatewaySubagentBinding: true as const }
-    : undefined;
-  const loadOptions = {
+  const loadOptions: Parameters<typeof resolveRuntimePluginRegistry>[0] = {
     config: effectiveConfig,
     activationSourceConfig: baseConfig,
     autoEnabledReasons: autoEnabled.autoEnabledReasons,
     workspaceDir: params.context.workspaceDir,
-    runtimeOptions,
     env,
     logger: createPluginLoaderLogger(log),
   };
+  if (params.allowGatewaySubagentBinding === true) {
+    loadOptions.runtimeOptions = {
+      allowGatewaySubagentBinding: true,
+    };
+  } else if (params.allowGatewaySubagentBinding === undefined) {
+    loadOptions.inheritSharedRuntimeOptions = true;
+  }
   const registry = resolvePluginToolRegistry({
     loadOptions,
     allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,

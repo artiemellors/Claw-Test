@@ -82,12 +82,14 @@ const createRegistry = (diagnostics: PluginDiagnostic[]): PluginRegistry => ({
 type ServerPluginsModule = typeof import("./server-plugins.js");
 type ServerPluginBootstrapModule = typeof import("./server-plugin-bootstrap.js");
 type PluginRuntimeModule = typeof import("../plugins/runtime/index.js");
+type SharedRuntimeOptionsModule = typeof import("../plugins/runtime/shared-runtime-options.js");
 type GatewayRequestScopeModule = typeof import("../plugins/runtime/gateway-request-scope.js");
 type MethodScopesModule = typeof import("./method-scopes.js");
 
 let serverPluginsModule: ServerPluginsModule;
 let serverPluginBootstrapModule: ServerPluginBootstrapModule;
 let runtimeModule: PluginRuntimeModule;
+let sharedRuntimeOptionsModule: SharedRuntimeOptionsModule;
 let gatewayRequestScopeModule: GatewayRequestScopeModule;
 let methodScopesModule: MethodScopesModule;
 
@@ -124,6 +126,7 @@ async function loadTestModules() {
   serverPluginsModule = await import("./server-plugins.js");
   serverPluginBootstrapModule = await import("./server-plugin-bootstrap.js");
   runtimeModule = await import("../plugins/runtime/index.js");
+  sharedRuntimeOptionsModule = await import("../plugins/runtime/shared-runtime-options.js");
   gatewayRequestScopeModule = await import("../plugins/runtime/gateway-request-scope.js");
   methodScopesModule = await import("./method-scopes.js");
 }
@@ -199,6 +202,7 @@ beforeEach(() => {
   primeConfiguredBindingRegistry.mockClear().mockReturnValue({ bindingCount: 0, channelCount: 0 });
   handleGatewayRequest.mockReset();
   runtimeModule.clearGatewaySubagentRuntime();
+  sharedRuntimeOptionsModule.clearSharedPluginRuntimeOptions();
   handleGatewayRequest.mockImplementation(async (opts: HandleGatewayRequestOptions) => {
     switch (opts.req.method) {
       case "agent":
@@ -221,6 +225,7 @@ beforeEach(() => {
 
 afterEach(() => {
   runtimeModule.clearGatewaySubagentRuntime();
+  sharedRuntimeOptionsModule.clearSharedPluginRuntimeOptions();
 });
 
 describe("loadGatewayPlugins", () => {
@@ -367,6 +372,15 @@ describe("loadGatewayPlugins", () => {
     }).subagent;
     expect(typeof subagent?.getSessionMessages).toBe("function");
     expect(typeof subagent?.getSession).toBe("function");
+  });
+
+  test("stores gateway binding in shared runtime options instead of a concrete subagent", async () => {
+    loadOpenClawPlugins.mockReturnValue(createRegistry([]));
+    loadGatewayPluginsForTest({ pluginIds: [] });
+
+    expect(sharedRuntimeOptionsModule.getSharedPluginRuntimeOptions()).toEqual({
+      allowGatewaySubagentBinding: true,
+    });
   });
 
   test("forwards provider and model overrides when the request scope is authorized", async () => {
@@ -547,7 +561,7 @@ describe("loadGatewayPlugins", () => {
     expect(getLastDispatchedClientScopes()).not.toContain("operator.admin");
   });
 
-  test("allows fallback session reads with synthetic write scope", async () => {
+  test("allows fallback session reads with synthetic read scope", async () => {
     const serverPlugins = serverPluginsModule;
     const runtime = await createSubagentRuntime(serverPlugins);
     serverPlugins.setFallbackGatewayContext(createTestContext("synthetic-session-read"));
@@ -573,8 +587,28 @@ describe("loadGatewayPlugins", () => {
       messages: [{ id: "m-1" }],
     });
 
-    expect(getLastDispatchedClientScopes()).toEqual(["operator.write"]);
+    expect(getLastDispatchedClientScopes()).toEqual(["operator.read"]);
     expect(getLastDispatchedClientScopes()).not.toContain("operator.admin");
+  });
+
+  test("drops malformed pendingToolCalls from waitForRun responses", async () => {
+    const serverPlugins = serverPluginsModule;
+    const runtime = await createSubagentRuntime(serverPlugins);
+    serverPlugins.setFallbackGatewayContext(createTestContext("malformed-pending-tool-calls"));
+
+    handleGatewayRequest.mockImplementationOnce(async (opts: HandleGatewayRequestOptions) => {
+      opts.respond(true, {
+        status: "ok",
+        pendingToolCalls: [
+          { id: "tool-1", name: "valid_tool", arguments: '{"ok":true}' },
+          { id: "tool-2", name: "invalid_tool", arguments: 123 },
+        ],
+      });
+    });
+
+    await expect(runtime.waitForRun({ runId: "run-malformed" })).resolves.toEqual({
+      status: "ok",
+    });
   });
 
   test("rejects fallback session deletion without minting admin scope", async () => {
