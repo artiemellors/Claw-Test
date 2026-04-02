@@ -460,12 +460,13 @@ export async function statusCommand(
     }
     if (!memory) {
       const slot = memoryPlugin.slot ? `plugin ${memoryPlugin.slot}` : "plugin";
+      const gatewayMemoryProvider = gatewayMemoryStatus?.provider;
       const gatewayRuntimeOk =
         gatewayMemoryStatus?.runtime?.ok ?? gatewayMemoryStatus?.embedding?.ok ?? false;
       if (gatewayRuntimeOk) {
         const provider =
-          typeof gatewayMemoryStatus.provider === "string" && gatewayMemoryStatus.provider.trim()
-            ? ` · provider ${gatewayMemoryStatus.provider}`
+          typeof gatewayMemoryProvider === "string" && gatewayMemoryProvider.trim()
+            ? ` · provider ${gatewayMemoryProvider}`
             : "";
         return `${muted(`enabled (${slot})`)} · ${ok("gateway active")}${provider}`;
       }
