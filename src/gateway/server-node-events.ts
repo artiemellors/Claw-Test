@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
+import { resolveEventSessionKey } from "../routing/session-key.js";
 import type { NodeEvent, NodeEventContext } from "./server-node-events-types.js";
 import {
   agentCommandFromIngress,
@@ -632,11 +633,16 @@ export const handleNodeEvent = async (ctx: NodeEventContext, nodeId: string, evt
         }
       }
 
-      enqueueSystemEvent(text, { sessionKey, contextKey: runId ? `exec:${runId}` : "exec" });
+      enqueueSystemEvent(text, {
+        sessionKey: resolveEventSessionKey(sessionKey, cfg.session?.mainKey),
+        contextKey: runId ? `exec:${runId}` : "exec",
+      });
       // Scope wakes only for canonical agent sessions. Synthetic node-* fallback
       // keys should keep legacy unscoped behavior so enabled non-main heartbeat
       // agents still run when no explicit agent session is provided.
-      requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
+      requestHeartbeatNow(
+        scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }, cfg.session?.mainKey),
+      );
       return;
     }
     case "push.apns.register": {

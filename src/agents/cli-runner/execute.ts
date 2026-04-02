@@ -4,7 +4,7 @@ import { requestHeartbeatNow as requestHeartbeatNowImpl } from "../../infra/hear
 import { sanitizeHostExecEnv } from "../../infra/host-env-security.js";
 import { enqueueSystemEvent as enqueueSystemEventImpl } from "../../infra/system-events.js";
 import { getProcessSupervisor as getProcessSupervisorImpl } from "../../process/supervisor/index.js";
-import { scopedHeartbeatWakeOptions } from "../../routing/session-key.js";
+import { resolveEventSessionKey, scopedHeartbeatWakeOptions } from "../../routing/session-key.js";
 import { prependBootstrapPromptWarning } from "../bootstrap-budget.js";
 import { parseCliOutput, type CliOutput } from "../cli-output.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
@@ -237,9 +237,18 @@ export async function executePreparedCliRun(
               "It may have been waiting for interactive input or an approval prompt.",
               "For Claude Code, prefer --permission-mode bypassPermissions --print.",
             ].join(" ");
-            executeDeps.enqueueSystemEvent(stallNotice, { sessionKey: params.sessionKey });
+            executeDeps.enqueueSystemEvent(stallNotice, {
+              sessionKey: resolveEventSessionKey(
+                params.sessionKey,
+                params.config?.session?.mainKey,
+              ),
+            });
             executeDeps.requestHeartbeatNow(
-              scopedHeartbeatWakeOptions(params.sessionKey, { reason: "cli:watchdog:stall" }),
+              scopedHeartbeatWakeOptions(
+                params.sessionKey,
+                { reason: "cli:watchdog:stall" },
+                params.config?.session?.mainKey,
+              ),
             );
           }
           throw new FailoverError(timeoutReason, {

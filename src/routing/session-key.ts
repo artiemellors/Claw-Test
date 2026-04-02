@@ -1,5 +1,10 @@
 import type { ChatType } from "../channels/chat-type.js";
-import { parseAgentSessionKey, type ParsedAgentSessionKey } from "../sessions/session-key-utils.js";
+import {
+  isCronRunSessionKey,
+  isCronSessionKey,
+  parseAgentSessionKey,
+  type ParsedAgentSessionKey,
+} from "../sessions/session-key-utils.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "./account-id.js";
 
 export {
@@ -33,8 +38,37 @@ function normalizeToken(value: string | undefined | null): string {
 export function scopedHeartbeatWakeOptions<T extends object>(
   sessionKey: string,
   wakeOptions: T,
+  mainKey?: string,
 ): T | (T & { sessionKey: string }) {
-  return parseAgentSessionKey(sessionKey) ? { ...wakeOptions, sessionKey } : wakeOptions;
+  if (!parseAgentSessionKey(sessionKey)) {
+    return wakeOptions;
+  }
+  if (isCronRunSessionKey(sessionKey)) {
+    // Ephemeral cron run sessions (agent:X:cron:job:run:uuid) are transient —
+    // remap to the agent's main session key so heartbeat can find the events.
+    // Durable cron base sessions (agent:X:cron:job) keep their own key.
+    const parsed = parseAgentSessionKey(sessionKey);
+    if (parsed) {
+      const agentMainKey = buildAgentMainSessionKey({ agentId: parsed.agentId, mainKey });
+      return { ...wakeOptions, sessionKey: agentMainKey };
+    }
+    return wakeOptions;
+  }
+  return { ...wakeOptions, sessionKey };
+}
+
+/**
+ * Resolve the event-enqueue session key. For cron sessions, remap to the
+ * agent's main session key so heartbeat can find the events.
+ */
+export function resolveEventSessionKey(sessionKey: string, mainKey?: string): string {
+  if (isCronRunSessionKey(sessionKey)) {
+    const parsed = parseAgentSessionKey(sessionKey);
+    if (parsed) {
+      return buildAgentMainSessionKey({ agentId: parsed.agentId, mainKey });
+    }
+  }
+  return sessionKey;
 }
 
 export function normalizeMainKey(value: string | undefined | null): string {
