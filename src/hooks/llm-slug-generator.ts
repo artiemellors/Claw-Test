@@ -11,8 +11,9 @@ import {
   resolveAgentDir,
   resolveAgentEffectiveModelPrimary,
 } from "../agents/agent-scope.js";
+import { runCliAgent } from "../agents/cli-runner.js";
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from "../agents/defaults.js";
-import { parseModelRef } from "../agents/model-selection.js";
+import { isCliProvider, parseModelRef } from "../agents/model-selection.js";
 import { runEmbeddedPiAgent } from "../agents/pi-embedded.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -50,20 +51,36 @@ Reply with ONLY the slug, nothing else. Examples: "vendor-pitch", "api-design", 
     const provider = parsed?.provider ?? DEFAULT_PROVIDER;
     const model = parsed?.model ?? DEFAULT_MODEL;
 
-    const result = await runEmbeddedPiAgent({
-      sessionId: `slug-generator-${Date.now()}`,
-      sessionKey: "temp:slug-generator",
-      agentId,
-      sessionFile: tempSessionFile,
-      workspaceDir,
-      agentDir,
-      config: params.cfg,
-      prompt,
-      provider,
-      model,
-      timeoutMs: 15_000, // 15 second timeout
-      runId: `slug-gen-${Date.now()}`,
-    });
+    const sessionId = `slug-generator-${Date.now()}`;
+    const runId = `slug-gen-${Date.now()}`;
+    const result = isCliProvider(provider, params.cfg)
+      ? await runCliAgent({
+          sessionId,
+          sessionKey: "temp:slug-generator",
+          agentId,
+          sessionFile: tempSessionFile,
+          workspaceDir,
+          config: params.cfg,
+          prompt,
+          provider,
+          model,
+          timeoutMs: 15_000,
+          runId,
+        })
+      : await runEmbeddedPiAgent({
+          sessionId,
+          sessionKey: "temp:slug-generator",
+          agentId,
+          sessionFile: tempSessionFile,
+          workspaceDir,
+          agentDir,
+          config: params.cfg,
+          prompt,
+          provider,
+          model,
+          timeoutMs: 15_000,
+          runId,
+        });
 
     // Extract text from payloads
     if (result.payloads && result.payloads.length > 0) {
