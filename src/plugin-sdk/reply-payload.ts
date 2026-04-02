@@ -2,7 +2,6 @@ import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import { readStringValue } from "../shared/string-coerce.js";
-export { resolveToolDeliveryPayload } from "../auto-reply/reply/reply-payloads.js";
 
 function extractToolDeliveryMediaUrls(payload: ReplyPayload): {
   audioAsVoice?: boolean;
