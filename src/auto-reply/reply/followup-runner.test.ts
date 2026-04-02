@@ -739,6 +739,15 @@ describe("createFollowupRunner CLI backend dispatch", () => {
 
     const queued = createQueuedRun({
       run: {
+        config: {
+          agents: {
+            defaults: {
+              cliBackends: {
+                "claude-cli": {},
+              },
+            },
+          },
+        },
         provider: "claude-cli",
         model: "opus",
       },
@@ -754,6 +763,71 @@ describe("createFollowupRunner CLI backend dispatch", () => {
       }),
     );
     expect(runEmbeddedPiAgentMock).not.toHaveBeenCalled();
+    expect(onBlockReply).toHaveBeenCalled();
+  });
+
+  it("reuses the latest CLI session binding from the active session entry", async () => {
+    const onBlockReply = vi.fn(async () => {});
+    const staleSessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+    };
+    const sessionStore: Record<string, SessionEntry> = {
+      main: {
+        ...staleSessionEntry,
+        cliSessionBindings: {
+          "claude-cli": {
+            sessionId: "cli-session-current",
+          },
+        },
+      },
+    };
+    runCliAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "cli reply" }],
+      meta: {
+        agentMeta: {
+          sessionId: "cli-session-current",
+          provider: "claude-cli",
+          model: "opus",
+          cliSessionBinding: { sessionId: "cli-session-current" },
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionEntry: staleSessionEntry,
+      sessionStore,
+      sessionKey: "main",
+      defaultModel: "claude-cli/opus",
+    });
+
+    const queued = createQueuedRun({
+      run: {
+        config: {
+          agents: {
+            defaults: {
+              cliBackends: {
+                "claude-cli": {},
+              },
+            },
+          },
+        },
+        provider: "claude-cli",
+        model: "opus",
+      },
+    });
+
+    await runner(queued);
+
+    expect(runCliAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cliSessionId: "cli-session-current",
+        cliSessionBinding: { sessionId: "cli-session-current" },
+      }),
+    );
     expect(onBlockReply).toHaveBeenCalled();
   });
 });
