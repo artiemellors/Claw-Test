@@ -8,18 +8,14 @@ import { truncateUtf16Safe } from "../../utils.js";
 import { isWebchatClient } from "../../utils/message-channel.js";
 import type { AuthRateLimiter } from "../auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "../auth.js";
-import { getPreauthHandshakeTimeoutMsFromEnv } from "../handshake-timeouts.js";
 import { isLoopbackAddress } from "../net.js";
+import { getHandshakeTimeoutMs } from "../server-constants.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../server-methods/types.js";
 import { formatError } from "../server-utils.js";
 import { logWs } from "../ws-log.js";
 import { getHealthVersion, incrementPresenceVersion } from "./health-state.js";
-import type { PreauthConnectionBudget } from "./preauth-connection-budget.js";
 import { broadcastPresenceSnapshot } from "./presence-events.js";
-import {
-  attachGatewayWsMessageHandler,
-  type WsOriginCheckMetrics,
-} from "./ws-connection/message-handler.js";
+import { attachGatewayWsMessageHandler } from "./ws-connection/message-handler.js";
 import type { GatewayWsClient } from "./ws-types.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -59,10 +55,9 @@ const sanitizeLogValue = (value: string | undefined): string | undefined => {
   return truncateUtf16Safe(cleaned, LOG_HEADER_MAX_LEN);
 };
 
-export type GatewayWsSharedHandlerParams = {
+export function attachGatewayWsConnectionHandler(params: {
   wss: WebSocketServer;
   clients: Set<GatewayWsClient>;
-  preauthConnectionBudget: PreauthConnectionBudget;
   port: number;
   gatewayHost?: string;
   canvasHostEnabled: boolean;
@@ -70,13 +65,8 @@ export type GatewayWsSharedHandlerParams = {
   resolvedAuth: ResolvedGatewayAuth;
   /** Optional rate limiter for auth brute-force protection. */
   rateLimiter?: AuthRateLimiter;
-  /** Browser-origin fallback limiter (loopback is never exempt). */
-  browserRateLimiter?: AuthRateLimiter;
   gatewayMethods: string[];
   events: string[];
-};
-
-export type AttachGatewayWsConnectionHandlerParams = GatewayWsSharedHandlerParams & {
   logGateway: SubsystemLogger;
   logHealth: SubsystemLogger;
   logWsControl: SubsystemLogger;
@@ -90,20 +80,16 @@ export type AttachGatewayWsConnectionHandlerParams = GatewayWsSharedHandlerParam
     },
   ) => void;
   buildRequestContext: () => GatewayRequestContext;
-};
-
-export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnectionHandlerParams) {
+}) {
   const {
     wss,
     clients,
-    preauthConnectionBudget,
     port,
     gatewayHost,
     canvasHostEnabled,
     canvasHostServerPort,
     resolvedAuth,
     rateLimiter,
-    browserRateLimiter,
     gatewayMethods,
     events,
     logGateway,
@@ -113,26 +99,42 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
     broadcast,
     buildRequestContext,
   } = params;
-  const originCheckMetrics: WsOriginCheckMetrics = { hostHeaderFallbackAccepted: 0 };
+  const maxConnections = (() => {
+    const raw =
+      process.env.MAX_WS_CONNECTIONS?.trim() || process.env.MAX_SSE_CONNECTIONS?.trim();
+    if (!raw) return 100;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 100;
+  })();
+  const maxPerIp = (() => {
+    const raw = process.env.MAX_WS_PER_IP?.trim() || process.env.MAX_SSE_PER_IP?.trim();
+    if (!raw) return 5;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+  })();
+  const idleTimeoutMs = (() => {
+    const raw =
+      process.env.WS_IDLE_TIMEOUT_SECONDS?.trim() ||
+      process.env.SSE_IDLE_TIMEOUT_SECONDS?.trim();
+    if (!raw) return 120_000;
+    const seconds = Number.parseInt(raw, 10);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 120_000;
+  })();
+  const perIpCounts = new Map<string, number>();
 
   wss.on("connection", (socket, upgradeReq) => {
+    if (clients.size >= maxConnections) {
+      try {
+        socket.close(1013, "server overloaded");
+      } catch {}
+      return;
+    }
     let client: GatewayWsClient | null = null;
     let closed = false;
     const openedAt = Date.now();
     const connId = randomUUID();
     const remoteAddr = (socket as WebSocket & { _socket?: { remoteAddress?: string } })._socket
       ?.remoteAddress;
-    const preauthBudgetKey = (
-      socket as WebSocket & {
-        __openclawPreauthBudgetClaimed?: boolean;
-        __openclawPreauthBudgetKey?: string;
-      }
-    ).__openclawPreauthBudgetKey;
-    (
-      socket as WebSocket & {
-        __openclawPreauthBudgetClaimed?: boolean;
-      }
-    ).__openclawPreauthBudgetClaimed = true;
     const headerValue = (value: string | string[] | undefined) =>
       Array.isArray(value) ? value[0] : value;
     const requestHost = headerValue(upgradeReq.headers.host);
@@ -154,7 +156,6 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
 
     logWs("in", "open", { connId, remoteAddr });
     let handshakeState: "pending" | "connected" | "failed" = "pending";
-    let holdsPreauthBudget = true;
     let closeCause: string | undefined;
     let closeMeta: Record<string, unknown> = {};
     let lastFrameType: string | undefined;
@@ -168,14 +169,6 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       if (meta && Object.keys(meta).length > 0) {
         closeMeta = { ...closeMeta, ...meta };
       }
-    };
-
-    const releasePreauthBudget = () => {
-      if (!holdsPreauthBudget) {
-        return;
-      }
-      holdsPreauthBudget = false;
-      preauthConnectionBudget.release(preauthBudgetKey);
     };
 
     const setLastFrameMeta = (meta: { type?: string; method?: string; id?: string }) => {
@@ -201,23 +194,66 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       payload: { nonce: connectNonce, ts: Date.now() },
     });
 
+    const ipKey = remoteAddr ?? "unknown";
+    const incPerIp = () => {
+      const prev = perIpCounts.get(ipKey) ?? 0;
+      perIpCounts.set(ipKey, prev + 1);
+    };
+    const decPerIp = () => {
+      const prev = perIpCounts.get(ipKey) ?? 0;
+      if (prev <= 1) {
+        perIpCounts.delete(ipKey);
+      } else {
+        perIpCounts.set(ipKey, prev - 1);
+      }
+    };
+    const perIpNow = perIpCounts.get(ipKey) ?? 0;
+    if (perIpNow >= maxPerIp) {
+      try {
+        socket.close(1013, "too many connections from ip");
+      } catch {}
+      return;
+    }
+    incPerIp();
+
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const resetIdle = () => {
+      if (idleTimeoutMs <= 0) return;
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      idleTimer = setTimeout(() => {
+        setCloseCause("idle-timeout", { idleMs: idleTimeoutMs });
+        try {
+          socket.close(1000, "idle timeout");
+        } catch {}
+      }, idleTimeoutMs);
+    };
+    resetIdle();
+    socket.on("message", () => {
+      resetIdle();
+    });
+
     const close = (code = 1000, reason?: string) => {
       if (closed) {
         return;
       }
       closed = true;
       clearTimeout(handshakeTimer);
-      releasePreauthBudget();
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
       if (client) {
         clients.delete(client);
       }
+      decPerIp();
       try {
         socket.close(code, reason);
       } catch {
         /* ignore */
       }
     };
-
     socket.once("error", (err) => {
       logWsControl.warn(`error conn=${connId} remote=${remoteAddr ?? "?"}: ${formatError(err)}`);
       close();
@@ -266,9 +302,8 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
         upsertPresence(client.presenceKey, { reason: "disconnect" });
         broadcastPresenceSnapshot({ broadcast, incrementPresenceVersion, getHealthVersion });
       }
-      const context = buildRequestContext();
-      context.unsubscribeAllSessionEvents(connId);
       if (client?.connect?.role === "node") {
+        const context = buildRequestContext();
         const nodeId = context.nodeRegistry.unregister(connId);
         if (nodeId) {
           removeRemoteNodeInfo(nodeId);
@@ -289,7 +324,7 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       close();
     });
 
-    const handshakeTimeoutMs = getPreauthHandshakeTimeoutMsFromEnv();
+    const handshakeTimeoutMs = getHandshakeTimeoutMs();
     const handshakeTimer = setTimeout(() => {
       if (!client) {
         handshakeState = "failed";
@@ -315,7 +350,6 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       connectNonce,
       resolvedAuth,
       rateLimiter,
-      browserRateLimiter,
       gatewayMethods,
       events,
       extraHandlers,
@@ -326,7 +360,6 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       clearHandshakeTimer: () => clearTimeout(handshakeTimer),
       getClient: () => client,
       setClient: (next) => {
-        releasePreauthBudget();
         client = next;
         clients.add(next);
       },
@@ -335,7 +368,6 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
       },
       setCloseCause,
       setLastFrameMeta,
-      originCheckMetrics,
       logGateway,
       logHealth,
       logWsControl,

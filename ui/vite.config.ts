@@ -35,8 +35,21 @@ export default defineConfig(() => {
       chunkSizeWarningLimit: 1024,
     },
     server: {
-      host: true,
-      port: 5173,
+      host: (() => {
+        const raw = process.env.HOSTNAME?.trim();
+        if (raw && raw.length > 0) {
+          return raw;
+        }
+        return "127.0.0.1";
+      })(),
+      port: (() => {
+        const raw = process.env.PORT?.trim();
+        if (!raw) {
+          return 18790;
+        }
+        const parsed = Number.parseInt(raw, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 18790;
+      })(),
       strictPort: true,
     },
     plugins: [
