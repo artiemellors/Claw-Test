@@ -42,7 +42,8 @@ function formatPatchValue(val: unknown): string {
   if (val === null) { return theme.muted("(cleared)"); }
   if (val === undefined) { return theme.muted("(unchanged)"); }
   if (typeof val === "object") { return JSON.stringify(sortObjectKeys(val)); }
-  return String(val);
+  // val is narrowed to string | number | boolean | bigint | symbol here
+  return String(val as string | number | boolean | bigint | symbol);
 }
 
 // Mirror the merge semantics of applyJobPatch so the preview diff is accurate.
@@ -135,7 +136,7 @@ function computeDisplayAfter(
     typeof existingVal === "object" &&
     !Array.isArray(existingVal)
   ) {
-    return { ...(existingVal as object), ...(patchVal as object) };
+    return { ...existingVal, ...patchVal };
   }
   return patchVal;
 }
