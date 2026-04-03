@@ -103,8 +103,16 @@ function computeDisplayAfterPayload(
   if (p["kind"] !== e["kind"]) {
     return patchVal;
   }
-  // Same kind: real update merges fields — mirror that here
-  return { ...e, ...p };
+  // Same kind: real update merges fields — mirror that here.
+  // Also mirror the null-as-delete semantics used by mergeCronPayload:
+  // a null patch value means "clear this field", so remove it from the preview.
+  const merged: Record<string, unknown> = { ...e, ...p };
+  for (const k of Object.keys(merged)) {
+    if (merged[k] === null) {
+      delete merged[k];
+    }
+  }
+  return merged;
 }
 
 function computeDisplayAfter(
