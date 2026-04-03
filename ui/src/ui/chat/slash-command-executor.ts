@@ -15,7 +15,11 @@ import {
   isSubagentSessionKey,
   parseAgentSessionKey,
 } from "../../../../src/routing/session-key.js";
-import { createChatModelOverride, resolvePreferredServerChatModel } from "../chat-model-ref.ts";
+import {
+  createChatModelOverride,
+  resolveChatModelOverride,
+  resolvePreferredServerChatModel,
+} from "../chat-model-ref.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
 import type {
   AgentsListResult,
@@ -142,12 +146,13 @@ async function executeModel(
   args: string,
   context: SlashCommandContext,
 ): Promise<SlashCommandResult> {
-  const modelCatalog = context.chatModelCatalog ?? context.modelCatalog;
+  const modelCatalog = context.chatModelCatalog ?? context.modelCatalog ?? [];
+  const hasModelCatalog = modelCatalog.length > 0;
   if (!args) {
     try {
       const [sessions, models] = await Promise.all([
         client.request<SessionsListResult>("sessions.list", {}),
-        modelCatalog ? Promise.resolve(modelCatalog) : loadModelCatalog(client),
+        hasModelCatalog ? Promise.resolve(modelCatalog) : loadModelCatalog(client),
       ]);
       const session = resolveCurrentSession(sessions, sessionKey);
       const model = session?.model || sessions?.defaults?.model || "default";
@@ -168,22 +173,26 @@ async function executeModel(
   }
 
   try {
-    const [patched, resolvedModelCatalog] = await Promise.all([
-      client.request<SessionsPatchResult>("sessions.patch", {
-        key: sessionKey,
-        model: args.trim(),
-      }),
-      modelCatalog
-        ? Promise.resolve(modelCatalog)
-        : loadModelCatalog(client, { allowFailure: true }),
-    ]);
+    const modelArg = args.trim();
+    const resolvedModelCatalog =
+      hasModelCatalog
+        ? modelCatalog
+        :
+      (modelArg.includes("/") ? [] : await loadModelCatalog(client, { allowFailure: true }));
+    const requestedValue =
+      resolveChatModelOverride(createChatModelOverride(modelArg), resolvedModelCatalog).value ||
+      modelArg;
+    const patched = await client.request<SessionsPatchResult>("sessions.patch", {
+      key: sessionKey,
+      model: requestedValue,
+    });
     const resolvedValue = resolvePreferredServerChatModel(
-      patched.resolved?.model ?? args.trim(),
+      patched.resolved?.model ?? requestedValue,
       patched.resolved?.modelProvider,
       resolvedModelCatalog,
     ).value;
     return {
-      content: `Model set to \`${args.trim()}\`.`,
+      content: `Model set to \`${modelArg}\`.`,
       action: "refresh",
       sessionPatch: { modelOverride: createChatModelOverride(resolvedValue) },
     };

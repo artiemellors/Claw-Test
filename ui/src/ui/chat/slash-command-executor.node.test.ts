@@ -276,12 +276,6 @@ describe("executeSlashCommand directives", () => {
       if (method === "sessions.patch") {
         return createResolvedModelPatch("gpt-5-mini", "openai");
       }
-      if (method === "models.list") {
-        return { models: createModelCatalog(OPENAI_GPT5_MINI_MODEL) };
-      }
-      if (method === "models.list") {
-        return { models: [{ id: "gpt-5-mini", name: "gpt-5-mini", provider: "openai" }] };
-      }
       throw new Error(`unexpected method: ${method}`);
     });
 
@@ -297,7 +291,7 @@ describe("executeSlashCommand directives", () => {
 
     expect(request).toHaveBeenCalledWith("sessions.patch", {
       key: "main",
-      model: "gpt-5-mini",
+      model: "openai/gpt-5-mini",
     });
     expect(result.sessionPatch?.modelOverride).toEqual({
       kind: "qualified",
@@ -329,9 +323,44 @@ describe("executeSlashCommand directives", () => {
       },
     );
 
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "openai/gpt-5-mini",
+    });
     expect(result.sessionPatch?.modelOverride).toEqual({
       kind: "qualified",
       value: "openai/gpt-5-mini",
+    });
+  });
+
+  it("uses the selected model's own provider when switching between providers", async () => {
+    const request = vi.fn(async (method: string, _payload?: unknown) => {
+      if (method === "sessions.patch") {
+        return createResolvedModelPatch("gemini-2.5-pro", "google");
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "main",
+      "model",
+      "gemini-2.5-pro",
+      {
+        chatModelCatalog: [
+          { id: "claude-opus-4-6", provider: "anthropic", name: "Claude Opus" },
+          { id: "gemini-2.5-pro", provider: "google", name: "Gemini 2.5 Pro" },
+        ],
+      },
+    );
+
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "google/gemini-2.5-pro",
+    });
+    expect(result.sessionPatch?.modelOverride).toEqual({
+      kind: "qualified",
+      value: "google/gemini-2.5-pro",
     });
   });
 
@@ -353,6 +382,10 @@ describe("executeSlashCommand directives", () => {
       "deepseek-chat",
     );
 
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "deepseek/deepseek-chat",
+    });
     expect(result.sessionPatch?.modelOverride).toEqual({
       kind: "qualified",
       value: "deepseek/deepseek-chat",
@@ -377,6 +410,10 @@ describe("executeSlashCommand directives", () => {
       "gpt-5-mini",
     );
 
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "gpt-5-mini",
+    });
     expect(result.sessionPatch?.modelOverride).toEqual({
       kind: "qualified",
       value: "openai/gpt-5-mini",
@@ -399,12 +436,47 @@ describe("executeSlashCommand directives", () => {
       { modelCatalog: createModelCatalog(OPENAI_GPT5_MINI_MODEL) },
     );
 
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "openai/gpt-5-mini",
+    });
     expect(result.sessionPatch?.modelOverride).toEqual({
       kind: "qualified",
       value: "openai/gpt-5-mini",
     });
     expect(request).toHaveBeenCalledTimes(1);
     expect(request).not.toHaveBeenCalledWith("models.list", {});
+  });
+
+  it("falls back to the bare model when the catalog is ambiguous", async () => {
+    const request = vi.fn(async (method: string, _payload?: unknown) => {
+      if (method === "sessions.patch") {
+        return createResolvedModelPatch("gpt-5-mini", "openai");
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const result = await executeSlashCommand(
+      { request } as unknown as GatewayBrowserClient,
+      "main",
+      "model",
+      "gpt-5-mini",
+      {
+        chatModelCatalog: [
+          { id: "gpt-5-mini", provider: "openai", name: "GPT-5 Mini" },
+          { id: "gpt-5-mini", provider: "azure-openai", name: "GPT-5 Mini" },
+        ],
+      },
+    );
+
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "gpt-5-mini",
+    });
+    expect(result.sessionPatch?.modelOverride).toEqual({
+      kind: "qualified",
+      value: "openai/gpt-5-mini",
+    });
   });
   it("resolves the legacy main alias for /usage", async () => {
     const request = vi.fn(async (method: string, _payload?: unknown) => {
