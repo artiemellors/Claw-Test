@@ -356,6 +356,39 @@ export function appendBootstrapPromptWarning(
 // Backward-compatible alias while older callers still import the prepend name.
 export const prependBootstrapPromptWarning = appendBootstrapPromptWarning;
 
+/**
+ * Builds concise user-visible warning strings for bootstrap files that were
+ * truncated by more than `warnPct` percent. Returns an empty array when there
+ * is nothing worth surfacing.
+ */
+export function buildBootstrapTruncationUserWarnings(params: {
+  analysis: BootstrapBudgetAnalysis;
+  /** Minimum truncation percentage (0–100) to trigger a warning. Default: 10. */
+  warnPct?: number;
+}): string[] {
+  if (!params.analysis.hasTruncation) {
+    return [];
+  }
+  const threshold = typeof params.warnPct === "number" && Number.isFinite(params.warnPct)
+    ? Math.max(0, Math.floor(params.warnPct))
+    : 10;
+  const warnings: string[] = [];
+  for (const file of params.analysis.truncatedFiles) {
+    const pct =
+      file.rawChars > 0
+        ? Math.round(((file.rawChars - file.injectedChars) / file.rawChars) * 100)
+        : 0;
+    if (pct < threshold) {
+      continue;
+    }
+    const removed = file.rawChars - file.injectedChars;
+    warnings.push(
+      `⚠️ Bootstrap truncation: ${file.name} truncated ${pct}% (${removed}/${file.rawChars} chars removed). Consider raising bootstrapMaxChars.`,
+    );
+  }
+  return warnings;
+}
+
 export function buildBootstrapTruncationReportMeta(params: {
   analysis: BootstrapBudgetAnalysis;
   warningMode: BootstrapPromptWarningMode;
