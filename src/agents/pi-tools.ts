@@ -378,7 +378,6 @@ export function createOpenClawCodingTools(options?: {
   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
   const workspaceRoot = resolveWorkspaceRoot(options?.workspaceDir);
   const workspaceOnly = fsPolicy.workspaceOnly;
-  const hostUsesIncludedWorkDirs = !sandboxRoot && includedWorkDirs.length > 0;
   const applyPatchConfig = execConfig.applyPatch;
   // Secure by default: apply_patch is workspace-contained unless explicitly disabled.
   // (tools.fs.workspaceOnly is a separate umbrella flag for read/write/edit/apply_patch.)
@@ -436,7 +435,8 @@ export function createOpenClawCodingTools(options?: {
         return [];
       }
       const wrapped = createHostWorkspaceWriteTool(workspaceRoot, {
-        workspaceOnly: workspaceOnly && !hostUsesIncludedWorkDirs,
+        workspaceOnly,
+        allowedRoots: includedWorkDirs,
       });
       return [
         workspaceOnly
@@ -451,7 +451,8 @@ export function createOpenClawCodingTools(options?: {
         return [];
       }
       const wrapped = createHostWorkspaceEditTool(workspaceRoot, {
-        workspaceOnly: workspaceOnly && !hostUsesIncludedWorkDirs,
+        workspaceOnly,
+        allowedRoots: includedWorkDirs,
       });
       return [
         workspaceOnly

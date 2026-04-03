@@ -11581,6 +11581,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
     },
     "agents.list[].includedWorkDirs": {
       label: "Agent Included Work Dirs",
+      help: "Optional list of additional work directories accessible to this agent.",
       tags: ["storage"],
     },
     "agents.list[].runtime": {

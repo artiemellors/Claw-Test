@@ -203,6 +203,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional allowlist of skills for this agent (omit = all skills; empty = no skills).",
   "agents.list[].skills":
     "Optional allowlist of skills for this agent (omit = all skills; empty = no skills).",
+  "agents.list[].includedWorkDirs":
+    "Optional list of additional work directories accessible to this agent.",
   agents:
     "Agent runtime configuration root covering defaults and explicit agent entries used for routing and execution context. Keep this section explicit so model/tool behavior stays predictable across multi-agent workflows.",
   "agents.defaults":
