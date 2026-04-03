@@ -110,4 +110,12 @@ describe("exec approval transport timeout (#12098)", () => {
     const callOpts = callGatewaySpy.mock.calls[0][0];
     expect(callOpts.timeoutMs).toBe(approvalTransportFloorMs);
   });
+
+  it("throws for invalid shared gateway CLI timeout values", async () => {
+    await expect(
+      callGatewayCli("exec.approval.request", { timeout: "0" } as never, {
+        timeoutMs: 120_000,
+      }),
+    ).rejects.toThrow("invalid --timeout: 0");
+  });
 });

@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { callGateway, randomIdempotencyKey } from "../../gateway/call.js";
 import { resolveNodeFromNodeList } from "../../shared/node-resolve.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../utils/message-channel.js";
+import { parseTimeoutMsWithFallback } from "../parse-timeout.js";
 import { withProgress } from "../progress.js";
 import { parseNodeList, parsePairingList } from "./format.js";
 import type { NodeListNode, NodesRpcOpts } from "./types.js";
@@ -31,7 +32,9 @@ export const callGatewayCli = async (
         token: opts.token,
         method,
         params,
-        timeoutMs: callOpts?.transportTimeoutMs ?? Number(opts.timeout ?? 10_000),
+        timeoutMs:
+          callOpts?.transportTimeoutMs ??
+          parseTimeoutMsWithFallback(opts.timeout, 10_000, { invalidType: "error" }),
         clientName: GATEWAY_CLIENT_NAMES.CLI,
         mode: GATEWAY_CLIENT_MODES.CLI,
       }),
