@@ -18,6 +18,7 @@ import {
   normalizeStructuredPromptSection,
 } from "./prompt-cache-stability.js";
 import { sanitizeForPromptLiteral } from "./sanitize-for-prompt.js";
+import { applyModelPatches } from "./model-patches.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "./system-prompt-cache-boundary.js";
 import type {
   ProviderSystemPromptContribution,
@@ -773,7 +774,9 @@ export function buildAgentSystemPrompt(params: {
     `Reasoning: ${reasoningLevel} (hidden unless on/stream). Toggle /reasoning; /status shows Reasoning when enabled.`,
   );
 
-  return lines.filter(Boolean).join("\n");
+  const assembled = lines.filter(Boolean).join("\n");
+  const modelName = params.runtimeInfo?.model ?? params.runtimeInfo?.defaultModel ?? "";
+  return applyModelPatches(assembled, modelName);
 }
 
 export function buildRuntimeLine(
