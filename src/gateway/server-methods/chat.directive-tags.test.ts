@@ -4,6 +4,7 @@ import path from "node:path";
 import { CURRENT_SESSION_VERSION } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MsgContext } from "../../auto-reply/templating.js";
+import { abortTrackedRunById } from "../chat-abort.js";
 import {
   GATEWAY_CLIENT_CAPS,
   GATEWAY_CLIENT_MODES,
@@ -19,6 +20,7 @@ const mockState = vi.hoisted(() => ({
   mainSessionKey: "main",
   finalText: "[[reply_to_current]]",
   dispatchError: null as Error | null,
+  resolveSupportsImagesWait: null as Promise<void> | null,
   triggerAgentRunStart: false,
   agentRunId: "run-agent-1",
   sessionEntry: {} as Record<string, unknown>,
@@ -69,6 +71,12 @@ vi.mock("../session-utils.js", async (importOriginal) => {
         typeof mockState.sessionEntry.canonicalKey === "string"
           ? mockState.sessionEntry.canonicalKey
           : rawKey || "main",
+    }),
+    resolveGatewayModelSupportsImages: vi.fn(async () => {
+      if (mockState.resolveSupportsImagesWait) {
+        await mockState.resolveSupportsImagesWait;
+      }
+      return true;
     }),
   };
 });
@@ -240,9 +248,11 @@ function createChatContext(): Pick<
   | "chatAbortControllers"
   | "chatRunBuffers"
   | "chatDeltaSentAt"
+  | "chatDeltaLastBroadcastLen"
   | "chatAbortedRuns"
   | "removeChatRun"
   | "dedupe"
+  | "loadGatewayModelCatalog"
   | "registerToolEventRecipient"
   | "logGateway"
 > {
@@ -253,9 +263,17 @@ function createChatContext(): Pick<
     chatAbortControllers: new Map(),
     chatRunBuffers: new Map(),
     chatDeltaSentAt: new Map(),
+    chatDeltaLastBroadcastLen: new Map(),
     chatAbortedRuns: new Map(),
     removeChatRun: vi.fn(),
     dedupe: new Map(),
+    loadGatewayModelCatalog: vi.fn(async () => [
+      {
+        id: "gpt-4.1",
+        provider: "openai",
+        input: ["text", "image"],
+      },
+    ]) as unknown as GatewayRequestContext["loadGatewayModelCatalog"],
     registerToolEventRecipient: vi.fn(),
     logGateway: {
       warn: vi.fn(),
@@ -311,7 +329,15 @@ async function runNonStreamingChatSend(params: {
       return undefined;
     }
     await waitForAssertion(() => {
-      expect(params.context.dedupe.has(`chat:${params.idempotencyKey}`)).toBe(true);
+      const dedupeEntry = params.context.dedupe.get(`chat:${params.idempotencyKey}`);
+      const status =
+        dedupeEntry &&
+        typeof dedupeEntry.payload === "object" &&
+        dedupeEntry.payload !== null &&
+        "status" in dedupeEntry.payload
+          ? (dedupeEntry.payload as { status?: unknown }).status
+          : undefined;
+      expect(status === "ok" || status === "error").toBe(true);
     });
     return undefined;
   }
@@ -353,6 +379,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     const respond = vi.fn();
     const context = createChatContext();
     context.chatAbortControllers.set("run-same-session", {
+      kind: "chat",
       controller: new AbortController(),
       sessionId: "sess-prev",
       sessionKey: "main",
@@ -360,6 +387,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
       expiresAtMs: Date.now() + 10_000,
     });
     context.chatAbortControllers.set("run-other-session", {
+      kind: "chat",
       controller: new AbortController(),
       sessionId: "sess-other",
       sessionKey: "other",
@@ -405,6 +433,215 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
 
     const register = context.registerToolEventRecipient as unknown as ReturnType<typeof vi.fn>;
     expect(register).not.toHaveBeenCalled();
+  });
+
+  it("returns cached in-flight for active chat sends tracked in chat dedupe", async () => {
+    createTranscriptFixture("openclaw-chat-send-inflight-dedupe-");
+    mockState.finalText = "ok";
+    let releaseSave = () => {};
+    mockState.saveMediaWait = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const firstRespond = vi.fn();
+    const retryRespond = vi.fn();
+    const context = createChatContext();
+
+    await runNonStreamingChatSend({
+      context,
+      respond: firstRespond,
+      idempotencyKey: "idem-chat-inflight",
+      message: "hold this send open",
+      requestParams: {
+        attachments: [
+          {
+            mimeType: "image/png",
+            content:
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aYoYAAAAASUVORK5CYII=",
+          },
+        ],
+      },
+      expectBroadcast: false,
+      waitForCompletion: false,
+    });
+
+    await runNonStreamingChatSend({
+      context,
+      respond: retryRespond,
+      idempotencyKey: "idem-chat-inflight",
+      expectBroadcast: false,
+      waitForCompletion: false,
+    });
+
+    const [ok, payload, _error, meta] = retryRespond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(true);
+    expect(payload).toMatchObject({
+      runId: "idem-chat-inflight",
+      status: "in_flight",
+    });
+    expect(meta).toMatchObject({
+      cached: true,
+    });
+
+    releaseSave();
+    await waitForAssertion(() => {
+      expect(context.dedupe.get("chat:idem-chat-inflight")?.payload).toMatchObject({
+        runId: "idem-chat-inflight",
+        status: "ok",
+      });
+    });
+  });
+
+  it("rejects non-chat active runIds instead of treating them as chat in-flight", async () => {
+    createTranscriptFixture("openclaw-chat-send-agent-collision-");
+    mockState.finalText = "ok";
+    const respond = vi.fn();
+    const context = createChatContext();
+    context.chatAbortControllers.set("idem-chat-agent-collision", {
+      kind: "agent",
+      controller: new AbortController(),
+      sessionId: "sess-agent",
+      sessionKey: "main",
+      startedAtMs: Date.now(),
+      expiresAtMs: Date.now() + 10_000,
+      ownerConnId: "agent-conn",
+    });
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "idem-chat-agent-collision",
+      expectBroadcast: false,
+      waitForCompletion: false,
+    });
+
+    const [ok, payload, error, meta] = respond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(false);
+    expect(payload).toBeUndefined();
+    expect(error).toMatchObject({
+      code: ErrorCodes.INVALID_REQUEST,
+      message: "runId already in use by another active operation",
+    });
+    expect(meta).toMatchObject({
+      runId: "idem-chat-agent-collision",
+    });
+    expect(mockState.lastDispatchCtx).toBeUndefined();
+  });
+
+  it("rechecks runId ownership after attachment parsing before registering the chat entry", async () => {
+    createTranscriptFixture("openclaw-chat-send-post-parse-collision-");
+    mockState.finalText = "ok";
+    let releaseSupportsImages = () => {};
+    mockState.resolveSupportsImagesWait = new Promise<void>((resolve) => {
+      releaseSupportsImages = resolve;
+    });
+    const firstRespond = vi.fn();
+    const context = createChatContext();
+    const replacementEntry = {
+      kind: "agent" as const,
+      controller: new AbortController(),
+      sessionId: "sess-agent-replacement",
+      sessionKey: "main",
+      startedAtMs: Date.now(),
+      expiresAtMs: Date.now() + 10_000,
+      ownerConnId: "agent-conn",
+    };
+
+    const firstSend = runNonStreamingChatSend({
+      context,
+      respond: firstRespond,
+      idempotencyKey: "idem-chat-post-parse-collision",
+      requestParams: {
+        attachments: [
+          {
+            mimeType: "image/png",
+            content:
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aYoYAAAAASUVORK5CYII=",
+          },
+        ],
+      },
+      expectBroadcast: false,
+      waitForCompletion: false,
+    });
+
+    await waitForAssertion(() => {
+      expect(context.chatAbortControllers.has("idem-chat-post-parse-collision")).toBe(false);
+    });
+    context.chatAbortControllers.set("idem-chat-post-parse-collision", replacementEntry);
+
+    releaseSupportsImages();
+    await firstSend;
+
+    const [ok, payload, error, meta] = firstRespond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(false);
+    expect(payload).toBeUndefined();
+    expect(error).toMatchObject({
+      code: ErrorCodes.INVALID_REQUEST,
+      message: "runId already in use by another active operation",
+    });
+    expect(meta).toMatchObject({
+      runId: "idem-chat-post-parse-collision",
+    });
+    expect(mockState.lastDispatchCtx).toBeUndefined();
+    expect(context.chatAbortControllers.get("idem-chat-post-parse-collision")).toBe(
+      replacementEntry,
+    );
+    expect(context.dedupe.get("chat:idem-chat-post-parse-collision")).toBeUndefined();
+  });
+
+  it("preserves a replacement tracked entry when an aborted chat send settles later", async () => {
+    createTranscriptFixture("openclaw-chat-send-cleanup-identity-");
+    mockState.finalText = "ok";
+    let releaseSave = () => {};
+    mockState.saveMediaWait = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const respond = vi.fn();
+    const context = createChatContext();
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "idem-chat-cleanup-race",
+      message: "hold this send open",
+      requestParams: {
+        attachments: [
+          {
+            mimeType: "image/png",
+            content:
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aYoYAAAAASUVORK5CYII=",
+          },
+        ],
+      },
+      expectBroadcast: false,
+      waitForCompletion: false,
+    });
+
+    expect(
+      abortTrackedRunById(context as Parameters<typeof abortTrackedRunById>[0], {
+        runId: "idem-chat-cleanup-race",
+        sessionKey: "main",
+        stopReason: "test",
+      }),
+    ).toEqual({ aborted: true });
+
+    const replacementEntry = {
+      kind: "agent" as const,
+      controller: new AbortController(),
+      sessionId: "sess-agent-replacement",
+      sessionKey: "main",
+      startedAtMs: Date.now(),
+      expiresAtMs: Date.now() + 10_000,
+    };
+    context.chatAbortControllers.set("idem-chat-cleanup-race", replacementEntry);
+
+    releaseSave();
+    await waitForAssertion(() => {
+      expect(context.dedupe.get("chat:idem-chat-cleanup-race")?.payload).toMatchObject({
+        runId: "idem-chat-cleanup-race",
+        status: "ok",
+      });
+    });
+    expect(context.chatAbortControllers.get("idem-chat-cleanup-race")).toBe(replacementEntry);
   });
 
   it("chat.inject keeps message defined when directive tag is the only content", async () => {

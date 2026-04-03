@@ -30,6 +30,14 @@ import {
   resolveAgentIdFromSessionKey,
   toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
+import {
+  abortTrackedRunById,
+  canRequesterAccessTrackedRun,
+  normalizeOptionalTrackedText,
+  type ChatAbortOps,
+  type TrackedRunRequester,
+} from "../chat-abort.js";
+import { ADMIN_SCOPE } from "../method-scopes.js";
 import { GATEWAY_CLIENT_IDS } from "../protocol/client-info.js";
 import {
   ErrorCodes,
@@ -301,6 +309,31 @@ function hasTrackedActiveSessionRun(params: {
   return false;
 }
 
+function resolveSessionInterruptRequester(
+  client: GatewayRequestHandlerOptions["client"],
+): TrackedRunRequester {
+  const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
+  return {
+    connId: normalizeOptionalTrackedText(client?.connId),
+    deviceId: normalizeOptionalTrackedText(client?.connect?.device?.id),
+    isAdmin: scopes.includes(ADMIN_SCOPE),
+  };
+}
+
+function createTrackedAbortOps(context: GatewayRequestContext): ChatAbortOps {
+  return {
+    chatAbortControllers: context.chatAbortControllers,
+    chatRunBuffers: context.chatRunBuffers,
+    chatDeltaSentAt: context.chatDeltaSentAt,
+    chatDeltaLastBroadcastLen: context.chatDeltaLastBroadcastLen,
+    chatAbortedRuns: context.chatAbortedRuns,
+    removeChatRun: context.removeChatRun,
+    agentRunSeq: context.agentRunSeq,
+    broadcast: context.broadcast,
+    nodeSendToSession: context.nodeSendToSession,
+  };
+}
+
 async function interruptSessionRunIfActive(params: {
   req: GatewayRequestHandlerOptions["req"];
   context: GatewayRequestContext;
@@ -325,34 +358,66 @@ async function interruptSessionRunIfActive(params: {
   }
 
   if (hasTrackedRun) {
-    let abortOk = true;
-    let abortError: ReturnType<typeof errorShape> | undefined;
-    const abortSessionKey = resolveAbortSessionKey({
-      context: params.context,
-      requestedKey: params.requestedKey,
-      canonicalKey: params.canonicalKey,
-    });
+    const requester = resolveSessionInterruptRequester(params.client);
+    const matchedRuns = [...params.context.chatAbortControllers.entries()].filter(
+      ([, active]) =>
+        active.sessionKey === params.canonicalKey || active.sessionKey === params.requestedKey,
+    );
+    const authorizedRuns = matchedRuns.filter(([, active]) =>
+      canRequesterAccessTrackedRun(active, requester),
+    );
 
-    await chatHandlers["chat.abort"]({
-      req: params.req,
-      params: {
-        sessionKey: abortSessionKey,
-      },
-      respond: (ok, _payload, error) => {
-        abortOk = ok;
-        abortError = error;
-      },
-      context: params.context,
-      client: params.client,
-      isWebchatConnect: params.isWebchatConnect,
-    });
-
-    if (!abortOk) {
+    if (matchedRuns.length > 0 && authorizedRuns.length !== matchedRuns.length) {
       return {
         interrupted: true,
-        error:
-          abortError ?? errorShape(ErrorCodes.UNAVAILABLE, "failed to interrupt active session"),
+        error: errorShape(ErrorCodes.INVALID_REQUEST, "unauthorized"),
       };
+    }
+
+    const chatSessionKeys = [
+      ...new Set(
+        authorizedRuns
+          .filter(([, active]) => active.kind === "chat")
+          .map(([, active]) => active.sessionKey),
+      ),
+    ];
+    for (const sessionKey of chatSessionKeys) {
+      let abortOk = true;
+      let abortError: ReturnType<typeof errorShape> | undefined;
+      await chatHandlers["chat.abort"]({
+        req: params.req,
+        params: {
+          sessionKey,
+        },
+        respond: (ok, _payload, error) => {
+          abortOk = ok;
+          abortError = error;
+        },
+        context: params.context,
+        client: params.client,
+        isWebchatConnect: params.isWebchatConnect,
+      });
+
+      if (!abortOk) {
+        return {
+          interrupted: true,
+          error:
+            abortError ?? errorShape(ErrorCodes.UNAVAILABLE, "failed to interrupt active session"),
+        };
+      }
+    }
+
+    const ops = createTrackedAbortOps(params.context);
+    for (const [runId, active] of authorizedRuns) {
+      if (active.kind !== "agent") {
+        continue;
+      }
+      abortTrackedRunById(ops, {
+        runId,
+        sessionKey: active.sessionKey,
+        stopReason: "rpc",
+        expectedKind: "agent",
+      });
     }
   }
 
