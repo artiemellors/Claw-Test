@@ -26,10 +26,22 @@ const assignIf = (
   }
 };
 
+function sortObjectKeys(val: unknown): unknown {
+  if (Array.isArray(val)) return val.map(sortObjectKeys);
+  if (val !== null && typeof val === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(val as Record<string, unknown>).sort()) {
+      sorted[key] = sortObjectKeys((val as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return val;
+}
+
 function formatPatchValue(val: unknown): string {
   if (val === null) return theme.muted("(cleared)");
   if (val === undefined) return theme.muted("(unchanged)");
-  if (typeof val === "object") return JSON.stringify(val);
+  if (typeof val === "object") return JSON.stringify(sortObjectKeys(val));
   return String(val);
 }
 
@@ -177,6 +189,8 @@ export function registerCronEditCommand(cron: Command) {
             patch.sessionKey = null;
           }
 
+          let prefetchedList: { jobs?: CronJob[] } | null = null;
+
           const scheduleRequest = resolveCronEditScheduleRequest({
             at: opts.at,
             cron: opts.cron,
@@ -188,10 +202,10 @@ export function registerCronEditCommand(cron: Command) {
           if (scheduleRequest.kind === "direct") {
             patch.schedule = scheduleRequest.schedule;
           } else if (scheduleRequest.kind === "patch-existing-cron") {
-            const listed = (await callGatewayFromCli("cron.list", opts, {
+            prefetchedList = (await callGatewayFromCli("cron.list", opts, {
               includeDisabled: true,
             })) as { jobs?: CronJob[] } | null;
-            const existing = (listed?.jobs ?? []).find((job) => job.id === id);
+            const existing = (prefetchedList?.jobs ?? []).find((job) => job.id === id);
             if (!existing) {
               throw new Error(`unknown cron job id: ${id}`);
             }
@@ -336,16 +350,21 @@ export function registerCronEditCommand(cron: Command) {
           }
 
           // Fetch current job to show a before/after diff before applying changes.
+          // Non-blocking: if listing fails, skip the diff but proceed with the update.
           if (Object.keys(patch).length > 0) {
-            const listed = (await callGatewayFromCli("cron.list", opts, {
-              includeDisabled: true,
-            })) as { jobs?: CronJob[] } | null;
-            const existing = (listed?.jobs ?? []).find((job) => job.id === id);
-            if (existing) {
-              const diffLines = buildCronPatchDiff(existing, patch);
-              if (diffLines.length > 0) {
-                defaultRuntime.log(diffLines.join("\n"));
+            try {
+              const listed = prefetchedList ?? ((await callGatewayFromCli("cron.list", opts, {
+                includeDisabled: true,
+              })) as { jobs?: CronJob[] } | null);
+              const existing = (listed?.jobs ?? []).find((job) => job.id === id);
+              if (existing) {
+                const diffLines = buildCronPatchDiff(existing, patch);
+                if (diffLines.length > 0) {
+                  defaultRuntime.log(diffLines.join("\n"));
+                }
               }
+            } catch {
+              // Diff display is best-effort; listing failure should not block the update.
             }
           }
 
