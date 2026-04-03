@@ -27,10 +27,10 @@ const assignIf = (
 };
 
 function sortObjectKeys(val: unknown): unknown {
-  if (Array.isArray(val)) return val.map(sortObjectKeys);
+  if (Array.isArray(val)) { return val.map(sortObjectKeys); }
   if (val !== null && typeof val === "object") {
     const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(val as Record<string, unknown>).sort()) {
+    for (const key of Object.keys(val as Record<string, unknown>).toSorted()) {
       sorted[key] = sortObjectKeys((val as Record<string, unknown>)[key]);
     }
     return sorted;
@@ -39,9 +39,9 @@ function sortObjectKeys(val: unknown): unknown {
 }
 
 function formatPatchValue(val: unknown): string {
-  if (val === null) return theme.muted("(cleared)");
-  if (val === undefined) return theme.muted("(unchanged)");
-  if (typeof val === "object") return JSON.stringify(sortObjectKeys(val));
+  if (val === null) { return theme.muted("(cleared)"); }
+  if (val === undefined) { return theme.muted("(unchanged)"); }
+  if (typeof val === "object") { return JSON.stringify(sortObjectKeys(val)); }
   return String(val);
 }
 
