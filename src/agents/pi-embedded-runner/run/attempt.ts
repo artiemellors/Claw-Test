@@ -134,7 +134,10 @@ import { collectAllowedToolNames } from "../tool-name-allowlist.js";
 import { installToolResultContextGuard } from "../tool-result-context-guard.js";
 import { splitSdkTools } from "../tool-split.js";
 import { describeUnknownError, mapThinkingLevel } from "../utils.js";
-import { flushPendingToolResultsAfterIdle } from "../wait-for-idle-before-flush.js";
+import {
+  flushPendingToolResultsAfterIdle,
+  resolvePostRunIdleFlushTimeoutMs,
+} from "../wait-for-idle-before-flush.js";
 import {
   assembleAttemptContextEngine,
   finalizeAttemptContextEngineTurn,
@@ -1248,6 +1251,9 @@ export async function runEmbeddedAttempt(
         await flushPendingToolResultsAfterIdle({
           agent: activeSession?.agent,
           sessionManager,
+          timeoutMs: resolvePostRunIdleFlushTimeoutMs({
+            sessionId: params.sessionId,
+          }),
           clearPendingOnTimeout: true,
         });
         activeSession.dispose();
@@ -1974,6 +1980,9 @@ export async function runEmbeddedAttempt(
       await flushPendingToolResultsAfterIdle({
         agent: session?.agent,
         sessionManager,
+        timeoutMs: resolvePostRunIdleFlushTimeoutMs({
+          sessionId: params.sessionId,
+        }),
         clearPendingOnTimeout: true,
       });
       session?.dispose();
