@@ -45,8 +45,17 @@ function formatPatchValue(val: unknown): string {
   return String(val);
 }
 
-function computeDisplayAfter(patchVal: unknown, existingVal: unknown): unknown {
+// Keys that cron.update replaces wholesale rather than merging — shallow-merge
+// would show stale fields in the "after" preview for these.
+const REPLACE_KEYS = new Set(["schedule", "payload"]);
+
+function computeDisplayAfter(
+  patchVal: unknown,
+  existingVal: unknown,
+  replace: boolean,
+): unknown {
   if (
+    !replace &&
     patchVal !== null &&
     typeof patchVal === "object" &&
     !Array.isArray(patchVal) &&
@@ -63,7 +72,7 @@ function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): 
   const lines: string[] = [];
   for (const [key, next] of Object.entries(patch)) {
     const prev = (existing as Record<string, unknown>)[key];
-    const displayAfter = computeDisplayAfter(next, prev);
+    const displayAfter = computeDisplayAfter(next, prev, REPLACE_KEYS.has(key));
     const prevStr = formatPatchValue(prev);
     const nextStr = formatPatchValue(displayAfter);
     if (prevStr !== nextStr) {
