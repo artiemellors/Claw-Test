@@ -18,7 +18,7 @@ export function isAssistantMessage(msg: AgentMessage | undefined): msg is Assist
  */
 export function stripMinimaxToolCallXml(text: string): string {
   if (!text) {
-    return text;
+    return "";
   }
   if (!/minimax:tool_call/i.test(text)) {
     return text;
@@ -50,7 +50,7 @@ const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
 
 export function stripModelSpecialTokens(text: string): string {
   if (!text) {
-    return text;
+    return "";
   }
   if (!MODEL_SPECIAL_TOKEN_RE.test(text)) {
     return text;
@@ -67,7 +67,7 @@ export function stripModelSpecialTokens(text: string): string {
  */
 export function stripDowngradedToolCallText(text: string): string {
   if (!text) {
-    return text;
+    return "";
   }
   if (!/\[Tool (?:Call|Result)/i.test(text) && !/\[Historical context/i.test(text)) {
     return text;
@@ -233,15 +233,24 @@ export function stripThinkingTagsFromText(text: string): string {
   return stripReasoningTagsFromText(text, { mode: "strict", trim: "both" });
 }
 
-export function extractAssistantText(msg: AssistantMessage): string {
+export function extractAssistantText(msg: AssistantMessage | undefined): string {
+  if (!msg) {
+    return "";
+  }
   const extracted =
     extractTextFromChatContent(msg.content, {
-      sanitizeText: (text) =>
-        stripThinkingTagsFromText(
-          stripDowngradedToolCallText(stripModelSpecialTokens(stripMinimaxToolCallXml(text))),
-        ).trim(),
+      sanitizeText: (text) => {
+        if (!text) {
+          return "";
+        }
+        return (
+          stripThinkingTagsFromText(
+            stripDowngradedToolCallText(stripModelSpecialTokens(stripMinimaxToolCallXml(text))),
+          ) ?? ""
+        ).trim();
+      },
       joinWith: "\n",
-      normalizeText: (text) => text.trim(),
+      normalizeText: (text) => (text ?? "").trim(),
     }) ?? "";
   // Only apply keyword-based error rewrites when the assistant message is actually an error.
   // Otherwise normal prose that *mentions* errors (e.g. "context overflow") can get clobbered.

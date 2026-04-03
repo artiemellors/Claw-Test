@@ -853,9 +853,12 @@ function shouldRewriteRawPayloadWithoutErrorContext(raw: string): boolean {
 }
 
 export function formatAssistantErrorText(
-  msg: AssistantMessage,
+  msg: AssistantMessage | undefined,
   opts?: { cfg?: OpenClawConfig; sessionKey?: string; provider?: string; model?: string },
 ): string | undefined {
+  if (!msg) {
+    return undefined;
+  }
   // Also format errors if errorMessage is present, even if stopReason isn't "error"
   const raw = (msg.errorMessage ?? "").trim();
   if (msg.stopReason !== "error" && !raw) {
