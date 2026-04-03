@@ -166,6 +166,39 @@ function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): 
       );
     }
   }
+
+  // Mirror the side-effect in applyJobPatch: when sessionTarget becomes "main",
+  // any non-webhook delivery config is silently cleared by the real update path.
+  // Show this as an explicit delivery → (cleared) line so the preview is accurate.
+  const effectiveSessionTarget =
+    typeof patch["sessionTarget"] === "string"
+      ? patch["sessionTarget"]
+      : existing.sessionTarget;
+  if (effectiveSessionTarget === "main") {
+    const effectiveDelivery =
+      "delivery" in patch
+        ? computeDisplayAfter("delivery", patch["delivery"], existing.delivery)
+        : existing.delivery;
+    const deliveryMode =
+      effectiveDelivery !== null &&
+      typeof effectiveDelivery === "object" &&
+      !Array.isArray(effectiveDelivery)
+        ? (effectiveDelivery as Record<string, unknown>)["mode"]
+        : undefined;
+    if (effectiveDelivery !== undefined && deliveryMode !== "webhook") {
+      // The real applyJobPatch will clear delivery; show that in the preview.
+      const prevDeliveryStr = formatPatchValue(
+        "delivery" in patch ? effectiveDelivery : existing.delivery,
+      );
+      const clearedStr = formatPatchValue(undefined);
+      if (prevDeliveryStr !== clearedStr) {
+        lines.push(
+          `  ${theme.muted("delivery:")} ${prevDeliveryStr} ${theme.muted("→")} ${theme.muted("(cleared — main jobs do not support channel delivery)")}`,
+        );
+      }
+    }
+  }
+
   if (lines.length > 0) {
     lines.unshift(theme.warn("Applying changes:"));
   }
