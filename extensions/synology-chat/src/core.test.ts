@@ -1,5 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createRuntimeEnv } from "../../../test/helpers/plugins/runtime-env.js";
 import {
   createPluginSetupWizardConfigure,
   createTestWizardPrompter,
@@ -17,6 +18,7 @@ import {
   validateToken,
 } from "./security.js";
 import { buildSynologyChatInboundSessionKey } from "./session-key.js";
+import { synologyChatSetupWizard } from "./setup-surface.js";
 
 const synologyChatConfigure = createPluginSetupWizardConfigure(synologyChatPlugin);
 const originalEnv = { ...process.env };
@@ -40,6 +42,15 @@ describe("synology-chat core", () => {
     >;
 
     expect(properties.dangerouslyAllowNameMatching?.type).toBe("boolean");
+  });
+
+  it("exports allowInsecureSsl in the JSON schema", () => {
+    const properties = (SynologyChatChannelConfigSchema.schema.properties ?? {}) as Record<
+      string,
+      { type?: string }
+    >;
+
+    expect(properties.allowInsecureSsl?.type).toBe("boolean");
   });
 
   it("keeps the schema open for plugin-specific passthrough fields", () => {
@@ -130,6 +141,90 @@ describe("synology-chat core", () => {
 
     expect(result.cfg.channels?.["synology-chat"]?.dmPolicy).toBe("allowlist");
     expect(result.cfg.channels?.["synology-chat"]?.allowedUserIds).toEqual(["123456", "789012"]);
+  });
+
+  it("can enable insecure SSL during setup for trusted self-signed certs", async () => {
+    const confirm = vi.fn(async ({ message }: { message: string }) => {
+      if (message === "Allow insecure SSL for trusted self-signed NAS certificates?") {
+        return true;
+      }
+      throw new Error(`Unexpected confirm prompt: ${message}`);
+    });
+    const prompter = createTestWizardPrompter({
+      confirm: confirm as WizardPrompter["confirm"],
+      text: vi.fn(async ({ message }: { message: string }) => {
+        if (message === "Enter Synology Chat outgoing webhook token") {
+          return "synology-token";
+        }
+        if (message === "Incoming webhook URL") {
+          return "https://nas.example.com/webapi/entry.cgi?token=incoming";
+        }
+        if (message === "Outgoing webhook path (optional)") {
+          return "";
+        }
+        throw new Error(`Unexpected prompt: ${message}`);
+      }) as WizardPrompter["text"],
+    });
+
+    const result = await runSetupWizardConfigure({
+      configure: synologyChatConfigure,
+      cfg: {} as OpenClawConfig,
+      prompter,
+      options: {},
+    });
+
+    expect(result.cfg.channels?.["synology-chat"]?.allowInsecureSsl).toBe(true);
+  });
+
+  it("persists explicit allowInsecureSsl: false for named accounts when prompt is declined", async () => {
+    const prepare = synologyChatSetupWizard.prepare;
+    if (!prepare) {
+      throw new Error("setupWizard.prepare is required");
+    }
+    const confirm = vi.fn(
+      async ({ message, initialValue }: { message: string; initialValue?: boolean }) => {
+        if (message === "Allow insecure SSL for trusted self-signed NAS certificates?") {
+          expect(initialValue).toBe(true);
+          return false;
+        }
+        throw new Error(`Unexpected confirm prompt: ${message}`);
+      },
+    );
+
+    const prepared = await prepare({
+      cfg: {
+        channels: {
+          "synology-chat": {
+            allowInsecureSsl: true,
+            accounts: {
+              work: {
+                token: "work-token",
+                incomingUrl: "https://nas.example.com/webapi/entry.cgi?method=incoming",
+              },
+            },
+          },
+        },
+      } as OpenClawConfig,
+      accountId: "work",
+      credentialValues: {},
+      runtime: createRuntimeEnv({ throwOnExit: false }),
+      prompter: createTestWizardPrompter({
+        confirm: confirm as WizardPrompter["confirm"],
+      }),
+      options: {},
+    });
+    if (!prepared?.cfg) {
+      throw new Error("Expected prepare to include cfg");
+    }
+    const nextCfg = prepared.cfg;
+
+    const channelConfig = nextCfg.channels?.["synology-chat"] as
+      | {
+          accounts?: Record<string, { allowInsecureSsl?: boolean }>;
+        }
+      | undefined;
+    expect(channelConfig?.accounts?.work?.allowInsecureSsl).toBe(false);
+    expect(resolveAccount(nextCfg, "work").allowInsecureSsl).toBe(false);
   });
 });
 
@@ -295,6 +390,22 @@ describe("synology-chat account resolution", () => {
 
     process.env.SYNOLOGY_RATE_LIMIT = "0abc";
     expect(resolveAccount({ channels: { "synology-chat": {} } }).rateLimitPerMinute).toBe(30);
+  });
+
+  it("only enables insecure SSL for explicit boolean true", () => {
+    const enabled = resolveAccount({
+      channels: {
+        "synology-chat": { allowInsecureSsl: true },
+      },
+    });
+    expect(enabled.allowInsecureSsl).toBe(true);
+
+    const invalidShape = {
+      channels: {
+        "synology-chat": { allowInsecureSsl: "true" },
+      },
+    } as unknown as OpenClawConfig;
+    expect(resolveAccount(invalidShape).allowInsecureSsl).toBe(false);
   });
 });
 

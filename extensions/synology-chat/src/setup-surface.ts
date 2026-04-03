@@ -16,12 +16,16 @@ import type { SynologyChatAccountRaw, SynologyChatChannelConfig } from "./types.
 
 const channel = "synology-chat" as const;
 const DEFAULT_WEBHOOK_PATH = "/webhook/synology";
+const INSECURE_SSL_PROMPT = "Allow insecure SSL for trusted self-signed NAS certificates?";
+const INSECURE_SSL_HINT =
+  "If reply delivery fails on a trusted self-signed NAS certificate, set channels.synology-chat.allowInsecureSsl: true (or per-account allowInsecureSsl: true).";
 
 const SYNOLOGY_SETUP_HELP_LINES = [
   "1) Create an incoming webhook in Synology Chat and copy its URL",
   "2) Create an outgoing webhook and copy its secret token",
   `3) Point the outgoing webhook to https://<gateway-host>${DEFAULT_WEBHOOK_PATH}`,
   "4) Keep allowed user IDs handy for DM allowlisting",
+  `5) ${INSECURE_SSL_HINT}`,
   `Docs: ${formatDocsLink("/channels/synology-chat", "channels/synology-chat")}`,
 ];
 
@@ -140,6 +144,23 @@ function resolveExistingAllowedUserIds(cfg: OpenClawConfig, accountId: string): 
     .filter(Boolean);
 }
 
+function resolveAllowInsecureSslSetupPatch(params: {
+  accountId: string;
+  allowInsecureSsl: boolean;
+}): {
+  patch: Record<string, unknown>;
+  clearFields?: string[];
+} {
+  if (params.allowInsecureSsl) {
+    return { patch: { allowInsecureSsl: true } };
+  }
+  if (params.accountId !== DEFAULT_ACCOUNT_ID) {
+    // Named accounts can inherit channel-level allowInsecureSsl, so persist false explicitly.
+    return { patch: { allowInsecureSsl: false } };
+  }
+  return { patch: {}, clearFields: ["allowInsecureSsl"] };
+}
+
 export const synologyChatSetupAdapter: ChannelSetupAdapter = {
   resolveAccountId: ({ accountId }) => normalizeAccountId(accountId) ?? DEFAULT_ACCOUNT_ID,
   validateInput: ({ accountId, input }) => {
@@ -194,6 +215,23 @@ export const synologyChatSetupWizard: ChannelSetupWizard = {
     title: "Synology Chat webhook setup",
     lines: SYNOLOGY_SETUP_HELP_LINES,
   },
+  prepare: async ({ cfg, accountId, credentialValues, prompter }) => {
+    const allowInsecureSsl = await prompter.confirm({
+      message: INSECURE_SSL_PROMPT,
+      initialValue: resolveAccount(cfg, accountId).allowInsecureSsl,
+    });
+    const sslPatch = resolveAllowInsecureSslSetupPatch({ accountId, allowInsecureSsl });
+    return {
+      cfg: patchSynologyChatAccountConfig({
+        cfg,
+        accountId,
+        enabled: true,
+        clearFields: sslPatch.clearFields,
+        patch: sslPatch.patch,
+      }),
+      credentialValues,
+    };
+  },
   credentials: [
     {
       inputKey: "token",
@@ -246,6 +284,8 @@ export const synologyChatSetupWizard: ChannelSetupWizard = {
       helpLines: [
         "Use the incoming webhook URL from Synology Chat integrations.",
         "This is the URL OpenClaw uses to send replies back to Chat.",
+        "TLS certificate verification is enabled by default.",
+        INSECURE_SSL_HINT,
       ],
       currentValue: ({ cfg, accountId }) => getRawAccountConfig(cfg, accountId).incomingUrl?.trim(),
       keepPrompt: (value) => `Incoming webhook URL set (${value}). Keep it?`,
@@ -310,6 +350,7 @@ export const synologyChatSetupWizard: ChannelSetupWizard = {
       `Default outgoing webhook path: ${DEFAULT_WEBHOOK_PATH}`,
       'Set allowed user IDs, or manually switch `channels.synology-chat.dmPolicy` to `"open"` for public DMs.',
       'With `dmPolicy="allowlist"`, an empty allowedUserIds list blocks the route from starting.',
+      "For trusted self-signed NAS certificates, set `channels.synology-chat.allowInsecureSsl: true` (or per-account `allowInsecureSsl: true`) only when needed.",
       `Docs: ${formatDocsLink("/channels/synology-chat", "channels/synology-chat")}`,
     ],
   },
