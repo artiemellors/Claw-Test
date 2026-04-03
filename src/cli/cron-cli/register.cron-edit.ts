@@ -45,12 +45,27 @@ function formatPatchValue(val: unknown): string {
   return String(val);
 }
 
+function computeDisplayAfter(patchVal: unknown, existingVal: unknown): unknown {
+  if (
+    patchVal !== null &&
+    typeof patchVal === "object" &&
+    !Array.isArray(patchVal) &&
+    existingVal !== null &&
+    typeof existingVal === "object" &&
+    !Array.isArray(existingVal)
+  ) {
+    return { ...(existingVal as object), ...(patchVal as object) };
+  }
+  return patchVal;
+}
+
 function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): string[] {
   const lines: string[] = [];
   for (const [key, next] of Object.entries(patch)) {
     const prev = (existing as Record<string, unknown>)[key];
+    const displayAfter = computeDisplayAfter(next, prev);
     const prevStr = formatPatchValue(prev);
-    const nextStr = formatPatchValue(next);
+    const nextStr = formatPatchValue(displayAfter);
     if (prevStr !== nextStr) {
       lines.push(
         `  ${theme.muted(key + ":")} ${prevStr} ${theme.muted("→")} ${nextStr}`,
@@ -360,7 +375,7 @@ export function registerCronEditCommand(cron: Command) {
               if (existing) {
                 const diffLines = buildCronPatchDiff(existing, patch);
                 if (diffLines.length > 0) {
-                  defaultRuntime.log(diffLines.join("\n"));
+                  defaultRuntime.error(diffLines.join("\n"));
                 }
               }
             } catch {
