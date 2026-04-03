@@ -279,21 +279,11 @@ const mocks = vi.hoisted(() => ({
       sourcePath: "/tmp/Library/LaunchAgents/ai.openclaw.node.plist",
     }),
   }),
-}));
-
-vi.mock("../channels/config-presence.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../channels/config-presence.js")>();
-  return {
-    ...actual,
-    hasPotentialConfiguredChannels: mocks.hasPotentialConfiguredChannels,
-  };
-});
-
-vi.mock("../plugins/memory-runtime.js", () => ({
   getActiveMemorySearchManager: vi.fn(async ({ agentId }: { agentId: string }) => ({
     manager: {
       probeVectorAvailability: vi.fn(async () => true),
       status: () => ({
+        backend: "builtin",
         files: 2,
         chunks: 3,
         dirty: false,
@@ -317,6 +307,18 @@ vi.mock("../plugins/memory-runtime.js", () => ({
       __agentId: agentId,
     },
   })),
+}));
+
+vi.mock("../channels/config-presence.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../channels/config-presence.js")>();
+  return {
+    ...actual,
+    hasPotentialConfiguredChannels: mocks.hasPotentialConfiguredChannels,
+  };
+});
+
+vi.mock("../plugins/memory-runtime.js", () => ({
+  getActiveMemorySearchManager: mocks.getActiveMemorySearchManager,
 }));
 
 vi.mock("../config/sessions/main-session.js", () => ({
@@ -597,6 +599,37 @@ describe("statusCommand", () => {
         sourcePath: "/tmp/Library/LaunchAgents/ai.openclaw.node.plist",
       }),
     });
+    mocks.getActiveMemorySearchManager.mockReset();
+    mocks.getActiveMemorySearchManager.mockImplementation(
+      async ({ agentId }: { agentId: string }) => ({
+        manager: {
+          probeVectorAvailability: vi.fn(async () => true),
+          status: () => ({
+            backend: "builtin",
+            files: 2,
+            chunks: 3,
+            dirty: false,
+            workspaceDir: "/tmp/openclaw",
+            dbPath: "/tmp/memory.sqlite",
+            provider: "openai",
+            model: "text-embedding-3-small",
+            requestedProvider: "openai",
+            sources: ["memory"],
+            sourceCounts: [{ source: "memory", files: 2, chunks: 3 }],
+            cache: { enabled: true, entries: 10, maxEntries: 500 },
+            fts: { enabled: true, available: true },
+            vector: {
+              enabled: true,
+              available: true,
+              extensionPath: "/opt/vec0.dylib",
+              dims: 1024,
+            },
+          }),
+          close: vi.fn(async () => {}),
+          __agentId: agentId,
+        },
+      }),
+    );
     runtimeLogMock.mockClear();
     (runtime.error as Mock<(...args: unknown[]) => void>).mockClear();
   });
@@ -835,6 +868,80 @@ describe("statusCommand", () => {
       const logs = await runStatusAndGetLogs();
       expect(logs.some((l: string) => l.includes("auth token"))).toBe(true);
     });
+  });
+
+  it("uses live gateway memory status instead of printing unavailable during deep status", async () => {
+    mocks.loadConfig.mockReturnValue({
+      session: {},
+      plugins: {
+        slots: { memory: "openclaw-mem0" },
+      },
+    });
+    mocks.getActiveMemorySearchManager.mockResolvedValue({
+      manager: null,
+      error: "memory plugin unavailable",
+    } as never);
+    mockProbeGatewayResult({
+      ok: true,
+      connectLatencyMs: 10,
+      error: null,
+      health: {},
+      status: {},
+      presence: [],
+    });
+    mocks.callGateway.mockImplementation(async ({ method }: { method: string }) => {
+      if (method === "doctor.memory.status") {
+        return {
+          agentId: "main",
+          provider: "mem0",
+          runtime: { ok: true },
+          embedding: { ok: false, error: "irrelevant for external plugin" },
+        };
+      }
+      return {};
+    });
+
+    const joined = await runStatusAndGetJoinedLogs({ deep: true });
+
+    expect(joined).toContain("gateway active");
+    expect(joined).toContain("provider mem0");
+    expect(joined).not.toContain("enabled (plugin openclaw-mem0) · unavailable");
+  });
+
+  it("accepts legacy gateway memory status payloads without crashing", async () => {
+    mocks.loadConfig.mockReturnValue({
+      session: {},
+      plugins: {
+        slots: { memory: "openclaw-mem0" },
+      },
+    });
+    mocks.getActiveMemorySearchManager.mockResolvedValue({
+      manager: null,
+      error: "memory plugin unavailable",
+    } as never);
+    mockProbeGatewayResult({
+      ok: true,
+      connectLatencyMs: 10,
+      error: null,
+      health: {},
+      status: {},
+      presence: [],
+    });
+    mocks.callGateway.mockImplementation(async ({ method }: { method: string }) => {
+      if (method === "doctor.memory.status") {
+        return {
+          agentId: "main",
+          provider: "mem0",
+          embedding: { ok: true },
+        };
+      }
+      return {};
+    });
+
+    const joined = await runStatusAndGetJoinedLogs({ deep: true });
+
+    expect(joined).toContain("gateway active");
+    expect(joined).toContain("provider mem0");
   });
 
   it("warns instead of crashing when gateway auth SecretRef is unresolved for probe auth", async () => {
