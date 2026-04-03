@@ -23,12 +23,12 @@ import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
 import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
 import { resolveChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import { finalizeInboundContext } from "openclaw/plugin-sdk/reply-dispatch-runtime";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import {
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
 } from "openclaw/plugin-sdk/reply-history";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
-import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { danger, logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
@@ -193,7 +193,9 @@ export async function processDiscordMessage(
         shouldBypassMention,
       }),
     );
-  const statusReactionsEnabled = shouldAckReaction();
+  const shouldSendAckReaction = shouldAckReaction();
+  const statusReactionsEnabled =
+    shouldSendAckReaction && cfg.messages?.statusReactions?.enabled !== false;
   // Discord outbound helpers expect Carbon's request client shape explicitly.
   const discordRest = client.rest as unknown as RequestClient;
   const discordAdapter: StatusReactionAdapter = {
@@ -225,6 +227,15 @@ export async function processDiscordMessage(
   });
   if (statusReactionsEnabled) {
     void statusReactions.setQueued();
+  } else if (shouldSendAckReaction && ackReaction) {
+    void discordAdapter.setReaction(ackReaction).catch((err) => {
+      logAckFailure({
+        log: logVerbose,
+        channel: "discord",
+        target: `${messageChannelId}/${message.id}`,
+        error: err,
+      });
+    });
   }
   const { createReplyDispatcherWithTyping, dispatchInboundMessage } = await loadReplyRuntime();
 
@@ -931,6 +942,15 @@ export async function processDiscordMessage(
           void statusReactions.restoreInitial();
         }
       }
+    } else if (shouldSendAckReaction && ackReaction && removeAckAfterReply) {
+      void discordAdapter.removeReaction?.(ackReaction)?.catch((err) => {
+        logAckFailure({
+          log: logVerbose,
+          channel: "discord",
+          target: `${messageChannelId}/${message.id}`,
+          error: err,
+        });
+      });
     }
   }
   if (dispatchAborted) {
