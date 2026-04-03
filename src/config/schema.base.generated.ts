@@ -11576,7 +11576,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
     },
     "agents.list.*.skills": {
       label: "Agent Skill Filter",
-      help: "Optional allowlist of skills for this agent (omit = all skills; empty = no skills).",
+      help: "Optional allowlist of skills for this agent. If omitted, the agent inherits agents.defaults.skills when set; otherwise skills stay unrestricted. Set [] for no skills. An explicit list fully replaces inherited defaults instead of merging with them.",
       tags: ["advanced"],
     },
     "agents.list[].includedWorkDirs": {
@@ -14927,7 +14927,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
     },
     "agents.list[].skills": {
       label: "Agent Skill Filter",
-      help: "Optional allowlist of skills for this agent (omit = all skills; empty = no skills).",
+      help: "Optional allowlist of skills for this agent. If omitted, the agent inherits agents.defaults.skills when set; otherwise skills stay unrestricted. Set [] for no skills. An explicit list fully replaces inherited defaults instead of merging with them.",
+      tags: ["advanced"],
+    },
+    "agents.defaults.skills": {
+      label: "Default Agent Skill Filter",
+      help: "Optional default skill allowlist inherited by agents that omit agents.list[].skills. Omit for unrestricted skills, set [] to give inheriting agents no skills, and remember explicit agents.list[].skills replaces this default instead of merging with it.",
       tags: ["advanced"],
     },
     "agents.list[].identity.avatar": {
