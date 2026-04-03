@@ -216,6 +216,7 @@ export async function deliverAgentCommandResult(params: {
     }
   };
 
+  let hadPreflightError = false;
   if (deliver) {
     if (isInternalMessageChannel(deliveryChannel)) {
       const err = new Error(
@@ -224,17 +225,20 @@ export async function deliverAgentCommandResult(params: {
       if (!bestEffortDeliver) {
         throw err;
       }
+      hadPreflightError = true;
       logDeliveryError(err);
     } else if (!isDeliveryChannelKnown) {
       const err = new Error(`Unknown channel: ${deliveryChannel}`);
       if (!bestEffortDeliver) {
         throw err;
       }
+      hadPreflightError = true;
       logDeliveryError(err);
     } else if (resolvedTarget && !resolvedTarget.ok) {
       if (!bestEffortDeliver) {
         throw resolvedTarget.error;
       }
+      hadPreflightError = true;
       logDeliveryError(resolvedTarget.error);
     }
   }
@@ -250,7 +254,7 @@ export async function deliverAgentCommandResult(params: {
     applyChannelTransforms: deliver,
   });
   const normalizedPayloads = normalizeOutboundPayloadsForJson(normalizedReplyPayloads);
-  if (opts.json) {
+  if (opts.json && !deliver) {
     runtime.log(
       JSON.stringify(
         buildOutboundResultEnvelope({
@@ -261,14 +265,33 @@ export async function deliverAgentCommandResult(params: {
         2,
       ),
     );
-    if (!deliver) {
-      return { payloads: normalizedPayloads, meta: result.meta };
-    }
+    return { payloads: normalizedPayloads, meta: result.meta };
   }
 
   if (!payloads || payloads.length === 0) {
-    runtime.log("No reply from agent.");
-    return { payloads: [], meta: result.meta };
+    const noPayloadStatus = deliver
+      ? {
+          requested: true,
+          attempted: false,
+          succeeded: false,
+          ...(hadPreflightError ? { error: true } : {}),
+        }
+      : undefined;
+    if (opts.json) {
+      runtime.log(
+        JSON.stringify(
+          {
+            ...buildOutboundResultEnvelope({ payloads: [], meta: result.meta }),
+            ...(noPayloadStatus ? { deliveryStatus: noPayloadStatus } : {}),
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      runtime.log("No reply from agent.");
+    }
+    return { payloads: [], meta: result.meta, deliveryStatus: noPayloadStatus };
   }
 
   const deliveryPayloads = normalizeOutboundPayloads(normalizedReplyPayloads);
@@ -291,24 +314,103 @@ export async function deliverAgentCommandResult(params: {
       logPayload(payload);
     }
   }
-  if (deliver && deliveryChannel && !isInternalMessageChannel(deliveryChannel)) {
+  let deliveryAttempted = false;
+  let deliverySucceeded = false;
+  let deliveryThrewError = false;
+  let hadPartialFailure = false;
+  if (
+    deliver &&
+    deliveryChannel &&
+    !isInternalMessageChannel(deliveryChannel) &&
+    deliveryPayloads.length > 0
+  ) {
     if (deliveryTarget) {
-      await deliverOutboundPayloads({
-        cfg,
-        channel: deliveryChannel,
-        to: deliveryTarget,
-        accountId: resolvedAccountId,
-        payloads: deliveryPayloads,
-        session: outboundSession,
-        replyToId: resolvedReplyToId ?? null,
-        threadId: resolvedThreadTarget ?? null,
-        bestEffort: bestEffortDeliver,
-        onError: (err) => logDeliveryError(err),
-        onPayload: logPayload,
-        deps: createOutboundSendDeps(deps),
-      });
+      deliveryAttempted = true;
+      try {
+        const results = await deliverOutboundPayloads({
+          cfg,
+          channel: deliveryChannel,
+          to: deliveryTarget,
+          accountId: resolvedAccountId,
+          payloads: deliveryPayloads,
+          session: outboundSession,
+          replyToId: resolvedReplyToId ?? null,
+          threadId: resolvedThreadTarget ?? null,
+          bestEffort: bestEffortDeliver,
+          onError: (err) => {
+            hadPartialFailure = true;
+            logDeliveryError(err);
+          },
+          onPayload: logPayload,
+          deps: createOutboundSendDeps(deps),
+        });
+        // Note: zero results can mean either a real silent failure (e.g.
+        // adapter returned []) or intentional hook cancellation (message_sending
+        // hook returned cancel:true). We conservatively treat both as not-succeeded
+        // since catching silent failures is this patch's primary goal. A future
+        // change to deliverOutboundPayloads could expose cancellation metadata to
+        // distinguish the two cases.
+        deliverySucceeded = results.length > 0;
+      } catch (err) {
+        if (!bestEffortDeliver) {
+          throw err;
+        }
+        deliveryThrewError = true;
+        logDeliveryError(err);
+      }
     }
   }
 
-  return { payloads: normalizedPayloads, meta: result.meta };
+  // Log when delivery was requested but didn't succeed. This catches silent
+  // failures caused by stale delivery context (e.g., after model fallback or
+  // error recovery) where the response is written to the session transcript
+  // but never actually sent to the external channel.
+  if (deliver && deliveryPayloads.length > 0 && !deliverySucceeded && !opts.json) {
+    const reason = !deliveryChannel
+      ? "no delivery channel resolved"
+      : isInternalMessageChannel(deliveryChannel)
+        ? "channel resolved to internal"
+        : !deliveryTarget
+          ? "no delivery target resolved"
+          : deliveryThrewError
+            ? "delivery threw an error"
+            : "delivery returned zero results";
+    runtime.log(
+      `[delivery] delivery requested but not completed: ${reason} ` +
+        `(session=${effectiveSessionKey ?? "unknown"} channel=${deliveryChannel ?? "none"} ` +
+        `target=${deliveryTarget ?? "none"} payloads=${deliveryPayloads.length})`,
+    );
+  }
+
+  const deliveryStatusResult = deliver
+    ? {
+        requested: true,
+        attempted: deliveryAttempted,
+        succeeded: deliverySucceeded,
+        ...(hadPartialFailure ? { hadPartialFailure: true } : {}),
+        ...(deliveryThrewError || hadPreflightError ? { error: true } : {}),
+      }
+    : undefined;
+
+  if (opts.json) {
+    runtime.log(
+      JSON.stringify(
+        {
+          ...buildOutboundResultEnvelope({
+            payloads: normalizedPayloads,
+            meta: result.meta,
+          }),
+          ...(deliveryStatusResult ? { deliveryStatus: deliveryStatusResult } : {}),
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  return {
+    payloads: normalizedPayloads,
+    meta: result.meta,
+    deliveryStatus: deliveryStatusResult,
+  };
 }
