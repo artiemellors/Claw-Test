@@ -646,6 +646,7 @@ export async function runReplyAgent(params: {
       });
       const showCost =
         authMode === "api-key" ||
+        authMode === "mixed" ||
         (costConfig != null && costConfig.input > 0 && costConfig.output > 0);
       let formatted = formatResponseUsageLine({
         usage,
