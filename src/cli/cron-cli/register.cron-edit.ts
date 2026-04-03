@@ -45,17 +45,81 @@ function formatPatchValue(val: unknown): string {
   return String(val);
 }
 
-// Keys that cron.update replaces wholesale rather than merging — shallow-merge
-// would show stale fields in the "after" preview for these.
-const REPLACE_KEYS = new Set(["schedule", "payload"]);
+// Mirror the merge semantics of applyJobPatch so the preview diff is accurate.
+//
+// schedule: when kind==="cron" and patch omits staggerMs, the real update
+//   preserves the existing staggerMs. All other cases replace wholesale.
+//
+// payload: when patch.kind === existing.kind, the real update merges fields.
+//   When kind changes (or existing is absent), it replaces wholesale.
 
-function computeDisplayAfter(
+function computeDisplayAfterSchedule(
   patchVal: unknown,
   existingVal: unknown,
-  replace: boolean,
 ): unknown {
   if (
-    !replace &&
+    patchVal !== null &&
+    typeof patchVal === "object" &&
+    !Array.isArray(patchVal)
+  ) {
+    const p = patchVal as Record<string, unknown>;
+    if (
+      p["kind"] === "cron" &&
+      p["staggerMs"] === undefined &&
+      existingVal !== null &&
+      typeof existingVal === "object" &&
+      !Array.isArray(existingVal)
+    ) {
+      const e = existingVal as Record<string, unknown>;
+      if (e["kind"] === "cron" && e["staggerMs"] !== undefined) {
+        return { ...p, staggerMs: e["staggerMs"] };
+      }
+    }
+  }
+  return patchVal;
+}
+
+function computeDisplayAfterPayload(
+  patchVal: unknown,
+  existingVal: unknown,
+): unknown {
+  if (
+    patchVal === null ||
+    typeof patchVal !== "object" ||
+    Array.isArray(patchVal)
+  ) {
+    return patchVal;
+  }
+  const p = patchVal as Record<string, unknown>;
+  if (
+    existingVal === null ||
+    typeof existingVal !== "object" ||
+    Array.isArray(existingVal)
+  ) {
+    return patchVal;
+  }
+  const e = existingVal as Record<string, unknown>;
+  // Different kind: real update replaces wholesale
+  if (p["kind"] !== e["kind"]) {
+    return patchVal;
+  }
+  // Same kind: real update merges fields — mirror that here
+  return { ...e, ...p };
+}
+
+function computeDisplayAfter(
+  key: string,
+  patchVal: unknown,
+  existingVal: unknown,
+): unknown {
+  if (key === "schedule") {
+    return computeDisplayAfterSchedule(patchVal, existingVal);
+  }
+  if (key === "payload") {
+    return computeDisplayAfterPayload(patchVal, existingVal);
+  }
+  // Default: shallow-merge objects, pass-through primitives/arrays
+  if (
     patchVal !== null &&
     typeof patchVal === "object" &&
     !Array.isArray(patchVal) &&
@@ -72,7 +136,7 @@ function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): 
   const lines: string[] = [];
   for (const [key, next] of Object.entries(patch)) {
     const prev = (existing as Record<string, unknown>)[key];
-    const displayAfter = computeDisplayAfter(next, prev, REPLACE_KEYS.has(key));
+    const displayAfter = computeDisplayAfter(key, next, prev);
     const prevStr = formatPatchValue(prev);
     const nextStr = formatPatchValue(displayAfter);
     if (prevStr !== nextStr) {
