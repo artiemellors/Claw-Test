@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { AUTH_RATE_LIMIT_CLIENT_KEY_BROWSER_ORIGIN_PREFIX } from "../../auth-rate-limit.js";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
 import {
-  BROWSER_ORIGIN_LOOPBACK_RATE_LIMIT_IP,
   resolveHandshakeBrowserSecurityContext,
   resolveUnauthorizedHandshakeContext,
   shouldAllowSilentLocalPairing,
@@ -19,22 +19,41 @@ function createRateLimiter(): AuthRateLimiter {
 }
 
 describe("handshake auth helpers", () => {
-  it("pins browser-origin loopback clients to the synthetic rate-limit ip", () => {
+  it("keys browser-origin loopback clients by origin for rate limiting", () => {
     const rateLimiter = createRateLimiter();
     const browserRateLimiter = createRateLimiter();
     const resolved = resolveHandshakeBrowserSecurityContext({
-      requestOrigin: "https://app.example",
+      requestOrigin: "https://App.Example:443",
       clientIp: "127.0.0.1",
       rateLimiter,
       browserRateLimiter,
     });
 
+    // URL parsing strips the default HTTPS port, so :443 is normalized away.
     expect(resolved).toMatchObject({
       hasBrowserOriginHeader: true,
       enforceOriginCheckForAnyClient: true,
-      rateLimitClientIp: BROWSER_ORIGIN_LOOPBACK_RATE_LIMIT_IP,
+      rateLimitClientIp: `${AUTH_RATE_LIMIT_CLIENT_KEY_BROWSER_ORIGIN_PREFIX}https://app.example`,
       authRateLimiter: browserRateLimiter,
     });
+  });
+
+  it("canonicalizes equivalent origins to the same rate-limit bucket", () => {
+    const rateLimiter = createRateLimiter();
+    const browserRateLimiter = createRateLimiter();
+    const withPort = resolveHandshakeBrowserSecurityContext({
+      requestOrigin: "https://app.example:443",
+      clientIp: "127.0.0.1",
+      rateLimiter,
+      browserRateLimiter,
+    });
+    const withoutPort = resolveHandshakeBrowserSecurityContext({
+      requestOrigin: "https://app.example",
+      clientIp: "127.0.0.1",
+      rateLimiter,
+      browserRateLimiter,
+    });
+    expect(withPort.rateLimitClientIp).toBe(withoutPort.rateLimitClientIp);
   });
 
   it("recommends device-token retry only for shared-token mismatch with device identity", () => {
