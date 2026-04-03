@@ -14,6 +14,10 @@ import {
 } from "./schedule-options.js";
 import { getCronChannelOptions, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
 import { resolveDefaultCronStaggerMs } from "../../cron/stagger.js";
+import {
+  normalizeOptionalText,
+  normalizeRequiredName,
+} from "../../cron/service/normalize.js";
 import { theme } from "../../terminal/theme.js";
 
 const assignIf = (
@@ -138,6 +142,12 @@ function computeDisplayAfter(
   }
   if (key === "payload") {
     return computeDisplayAfterPayload(patchVal, existingVal);
+  }
+  if (key === "name") {
+    return typeof patchVal === "string" ? normalizeRequiredName(patchVal) : patchVal;
+  }
+  if (key === "description") {
+    return typeof patchVal === "string" ? normalizeOptionalText(patchVal) : patchVal;
   }
   // Default: shallow-merge objects, pass-through primitives/arrays
   if (
@@ -523,3 +533,4 @@ export function registerCronEditCommand(cron: Command) {
       }),
   );
 }
+

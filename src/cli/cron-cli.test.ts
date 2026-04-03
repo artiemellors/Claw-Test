@@ -863,4 +863,25 @@ describe("cron cli", () => {
     expect(patch?.patch?.failureAlert?.mode).toBe("webhook");
     expect(patch?.patch?.failureAlert?.accountId).toBe("bot-a");
   });
+
+  it("normalizes name and description in diff preview before diffing", async () => {
+    resetGatewayMock();
+    mockCronEditJobLookup({ kind: "cron", expr: "* * * * *" });
+
+    const program = buildProgram();
+    await program.parseAsync(
+      ["cron", "edit", "job-1", "--name", "  trimmed  ", "--description", "  spaced  "],
+      { from: "user" },
+    );
+
+    // The diff preview (written to error) should show the normalized value,
+    // not the raw whitespace-padded input.
+    const errorOutput = defaultRuntime.error.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+    expect(errorOutput).toContain("trimmed");
+    expect(errorOutput).not.toContain("  trimmed  ");
+    expect(errorOutput).toContain("spaced");
+    expect(errorOutput).not.toContain("  spaced  ");
+  });
 });
