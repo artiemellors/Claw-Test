@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluateChannelHealth, resolveChannelRestartReason } from "./channel-health-policy.js";
 
-function evaluateDiscordHealth(
-  account: Record<string, unknown>,
-  now = 100_000,
-  channelId = "discord",
-) {
+function evaluateSlackHealth(account: Record<string, unknown>, now = 100_000, channelId = "slack") {
   return evaluateChannelHealth(account, {
     channelId,
     now,
@@ -127,13 +123,33 @@ describe("evaluateChannelHealth", () => {
         lastEventAt: 0,
       },
       {
-        channelId: "discord",
+        channelId: "slack",
         now: 100_000,
         channelConnectGraceMs: 10_000,
         staleEventThresholdMs: 30_000,
       },
     );
     expect(evaluation).toEqual({ healthy: false, reason: "stale-socket" });
+  });
+
+  it("skips stale-socket detection for discord channels", () => {
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
+        lastStartAt: 0,
+        lastEventAt: 0,
+      },
+      {
+        channelId: "discord",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
+    expect(evaluation).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("skips stale-socket detection for telegram long-polling channels", () => {
@@ -157,7 +173,7 @@ describe("evaluateChannelHealth", () => {
   });
 
   it("skips stale-socket detection for channels in webhook mode", () => {
-    const evaluation = evaluateDiscordHealth({
+    const evaluation = evaluateSlackHealth({
       running: true,
       connected: true,
       enabled: true,
@@ -170,7 +186,7 @@ describe("evaluateChannelHealth", () => {
   });
 
   it("does not flag stale sockets for channels without event tracking", () => {
-    const evaluation = evaluateDiscordHealth({
+    const evaluation = evaluateSlackHealth({
       running: true,
       connected: true,
       enabled: true,
@@ -182,7 +198,7 @@ describe("evaluateChannelHealth", () => {
   });
 
   it("does not flag stale sockets without an active connected socket", () => {
-    const evaluation = evaluateDiscordHealth(
+    const evaluation = evaluateSlackHealth(
       {
         running: true,
         enabled: true,
@@ -197,7 +213,7 @@ describe("evaluateChannelHealth", () => {
   });
 
   it("ignores inherited event timestamps from a previous lifecycle", () => {
-    const evaluation = evaluateDiscordHealth(
+    const evaluation = evaluateSlackHealth(
       {
         running: true,
         connected: true,
