@@ -3684,6 +3684,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                 workspace: {
                   type: "string",
                 },
+                includedWorkDirs: {
+                  type: "array",
+                  items: {
+                    type: "string",
+                  },
+                },
                 agentDir: {
                   type: "string",
                 },
@@ -19616,6 +19622,10 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Agent Skill Filter",
       help: "Optional allowlist of skills for this agent (omit = all skills; empty = no skills).",
       tags: ["advanced"],
+    },
+    "agents.list[].includedWorkDirs": {
+      label: "Agent Included Work Dirs",
+      tags: ["storage"],
     },
     "agents.list[].runtime": {
       label: "Agent Runtime",

@@ -34,6 +34,7 @@ type AgentEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[num
 type ResolvedAgentConfig = {
   name?: string;
   workspace?: string;
+  includedWorkDirs?: string[];
   agentDir?: string;
   model?: AgentEntry["model"];
   thinkingDefault?: AgentEntry["thinkingDefault"];
@@ -136,6 +137,9 @@ export function resolveAgentConfig(
   return {
     name: typeof entry.name === "string" ? entry.name : undefined,
     workspace: typeof entry.workspace === "string" ? entry.workspace : undefined,
+    includedWorkDirs: Array.isArray(entry.includedWorkDirs)
+      ? entry.includedWorkDirs.filter((value): value is string => typeof value === "string")
+      : undefined,
     agentDir: typeof entry.agentDir === "string" ? entry.agentDir : undefined,
     model:
       typeof entry.model === "string" || (entry.model && typeof entry.model === "object")
@@ -283,6 +287,30 @@ export function resolveAgentWorkspaceDir(cfg: OpenClawConfig, agentId: string) {
   return stripNullBytes(path.join(stateDir, `workspace-${id}`));
 }
 
+export function resolveAgentIncludedWorkDirs(cfg: OpenClawConfig, agentId: string): string[] {
+  const id = normalizeAgentId(agentId);
+  const configured = resolveAgentConfig(cfg, id)?.includedWorkDirs;
+  if (!Array.isArray(configured)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const included: string[] = [];
+  for (const entry of configured) {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const resolved = stripNullBytes(resolveUserPath(trimmed));
+    const key = normalizePathForComparison(resolved);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    included.push(resolved);
+  }
+  return included;
+}
+
 function normalizePathForComparison(input: string): string {
   const resolved = path.resolve(stripNullBytes(resolveUserPath(input)));
   let normalized = resolved;
@@ -310,19 +338,31 @@ export function resolveAgentIdsByWorkspacePath(
 ): string[] {
   const normalizedWorkspacePath = normalizePathForComparison(workspacePath);
   const ids = listAgentIds(cfg);
-  const matches: Array<{ id: string; workspaceDir: string; order: number }> = [];
+  const matches: Array<{ id: string; rootDir: string; order: number }> = [];
 
   for (let index = 0; index < ids.length; index += 1) {
     const id = ids[index];
-    const workspaceDir = normalizePathForComparison(resolveAgentWorkspaceDir(cfg, id));
-    if (!isPathWithinRoot(normalizedWorkspacePath, workspaceDir)) {
+    const candidateRoots = [
+      resolveAgentWorkspaceDir(cfg, id),
+      ...resolveAgentIncludedWorkDirs(cfg, id),
+    ].map((root) => normalizePathForComparison(root));
+    let bestRoot: string | undefined;
+    for (const rootDir of candidateRoots) {
+      if (!isPathWithinRoot(normalizedWorkspacePath, rootDir)) {
+        continue;
+      }
+      if (!bestRoot || rootDir.length > bestRoot.length) {
+        bestRoot = rootDir;
+      }
+    }
+    if (!bestRoot) {
       continue;
     }
-    matches.push({ id, workspaceDir, order: index });
+    matches.push({ id, rootDir: bestRoot, order: index });
   }
 
   matches.sort((left, right) => {
-    const workspaceLengthDelta = right.workspaceDir.length - left.workspaceDir.length;
+    const workspaceLengthDelta = right.rootDir.length - left.rootDir.length;
     if (workspaceLengthDelta !== 0) {
       return workspaceLengthDelta;
     }

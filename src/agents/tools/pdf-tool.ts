@@ -296,6 +296,7 @@ export function createPdfTool(options?: {
   config?: OpenClawConfig;
   agentDir?: string;
   workspaceDir?: string;
+  includedWorkDirs?: string[];
   sandbox?: PdfSandboxConfig;
   fsPolicy?: ToolFsPolicy;
 }): AnyAgentTool | null {
@@ -410,6 +411,7 @@ export function createPdfTool(options?: {
               root: options.sandbox.root.trim(),
               bridge: options.sandbox.bridge,
               workspaceOnly: options.fsPolicy?.workspaceOnly === true,
+              allowedRoots: options?.includedWorkDirs,
             }
           : null;
 
@@ -471,6 +473,7 @@ export function createPdfTool(options?: {
           options?.workspaceDir,
           {
             workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+            includedWorkDirs: options?.includedWorkDirs,
           },
           [resolvedPathInfo.resolved],
         );
