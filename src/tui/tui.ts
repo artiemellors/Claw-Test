@@ -835,6 +835,11 @@ export async function runTui(opts: TuiOptions) {
     showThinking = !showThinking;
     void loadHistory();
   };
+  editor.onShiftEnter = () => {
+    // Insert a newline for multi-line message composition
+    editor.insertText("\n");
+    tui.requestRender();
+  };
 
   tui.addInputListener((data) => {
     if (!chatLog.hasVisibleBtw()) {
