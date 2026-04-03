@@ -2396,6 +2396,36 @@ describe("dispatchReplyFromConfig", () => {
     expect(internalHookMocks.triggerInternalHook).not.toHaveBeenCalled();
   });
 
+  it("skips hook pipeline when skipHooks is set", async () => {
+    setNoAbort();
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    const cfg = emptyConfig;
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({
+      Provider: "telegram",
+      Surface: "telegram",
+      SessionKey: "agent:main:main",
+      CommandBody: "/help",
+      MessageSid: "msg-skip-hooks",
+    });
+
+    const replyResolver = vi.fn(async () => ({ text: "hi" }) satisfies ReplyPayload);
+    await dispatchReplyFromConfig({ ctx, cfg, dispatcher, replyResolver, skipHooks: true });
+
+    expect(hookMocks.runner.runMessageReceived).not.toHaveBeenCalled();
+    expect(hookMocks.runner.runBeforeDispatch).not.toHaveBeenCalled();
+    expect(internalHookMocks.triggerInternalHook).not.toHaveBeenCalled();
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(replyResolver).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        skipHooks: true,
+        skipSessionPersistence: true,
+      }),
+      undefined,
+    );
+  });
+
   it("emits diagnostics when enabled", async () => {
     setNoAbort();
     const cfg = { diagnostics: { enabled: true } } as OpenClawConfig;

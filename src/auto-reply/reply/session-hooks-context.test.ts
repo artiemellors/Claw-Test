@@ -90,6 +90,67 @@ describe("session hook context wiring", () => {
     expect(context).toMatchObject({ sessionId: event?.sessionId });
   });
 
+  it("skips session hooks and store persistence for ephemeral eval sessions", async () => {
+    const sessionKey = "agent:main:telegram:direct:ephemeral";
+    const storePath = await createStorePath("openclaw-session-hook-ephemeral");
+    await writeStore(storePath, {});
+    const cfg = { session: { store: storePath } } as OpenClawConfig;
+
+    const result = await initSessionState({
+      ctx: { Body: "hello", SessionKey: sessionKey },
+      cfg,
+      commandAuthorized: true,
+      skipHooks: true,
+      skipPersistence: true,
+    });
+
+    expect(hookRunnerMocks.runSessionStart).not.toHaveBeenCalled();
+    expect(hookRunnerMocks.runSessionEnd).not.toHaveBeenCalled();
+    expect(result.storePath).toBeUndefined();
+    expect(result.sessionKey).toBe(sessionKey);
+    const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+    expect(stored).toEqual({});
+  });
+
+  it("does not fork from a parent session when persistence is disabled", async () => {
+    const sessionKey = "agent:main:telegram:direct:ephemeral-thread";
+    const parentSessionKey = "agent:main:telegram:direct:parent";
+    const storePath = await createStorePath("openclaw-session-hook-no-parent-fork");
+    const parentTranscript = await writeTranscript(storePath, "parent-session", "hello parent");
+    await writeStore(storePath, {
+      [parentSessionKey]: {
+        sessionId: "parent-session",
+        sessionFile: parentTranscript,
+        updatedAt: Date.now(),
+      },
+    });
+    const cfg = { session: { store: storePath } } as OpenClawConfig;
+
+    const result = await initSessionState({
+      ctx: {
+        Body: "hello",
+        SessionKey: sessionKey,
+        ParentSessionKey: parentSessionKey,
+      },
+      cfg,
+      commandAuthorized: true,
+      skipHooks: true,
+      skipPersistence: true,
+    });
+
+    expect(result.sessionKey).toBe(sessionKey);
+    expect(result.sessionEntry.forkedFromParent).not.toBe(true);
+    expect(result.sessionEntry.sessionFile).toBeUndefined();
+    const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+    expect(stored).toEqual({
+      [parentSessionKey]: {
+        sessionId: "parent-session",
+        sessionFile: parentTranscript,
+        updatedAt: expect.any(Number),
+      },
+    });
+  });
+
   it("passes sessionKey to session_end hook context on reset", async () => {
     const sessionKey = "agent:main:telegram:direct:123";
     const storePath = await createStorePath("openclaw-session-hook-end");

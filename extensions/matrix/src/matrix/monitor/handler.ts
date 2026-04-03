@@ -53,6 +53,11 @@ import {
   type RuntimeEnv,
   type RuntimeLogger,
 } from "./runtime-api.js";
+import {
+  runMatrixSemanticLoopJudge,
+  type MatrixSemanticLoopJudgeResult,
+  type MatrixSemanticLoopTurn,
+} from "./semantic-loop-judge.js";
 import { createMatrixThreadContextResolver } from "./thread-context.js";
 import {
   resolveMatrixReplyToEventId,
@@ -66,7 +71,18 @@ import { isMatrixVerificationRoomMessage } from "./verification-utils.js";
 const ALLOW_FROM_STORE_CACHE_TTL_MS = 30_000;
 const PAIRING_REPLY_COOLDOWN_MS = 5 * 60_000;
 const MAX_TRACKED_PAIRING_REPLY_SENDERS = 512;
+const MAX_BOT_CHAIN_STATES = 512;
+const MAX_BOT_CHAIN_REOPEN_ROUTES = 512;
+const MAX_BOT_CHAIN_TURNS = 12;
 type MatrixAllowBotsMode = "off" | "mentions" | "all";
+
+type MatrixBotChainState = {
+  turns: MatrixSemanticLoopTurn[];
+  terminated: boolean;
+  reasonCode?: string;
+  lastUpdatedOrder: number;
+  terminatedOrder?: number;
+};
 
 export type MatrixMonitorHandlerParams = {
   client: MatrixClient;
@@ -80,6 +96,7 @@ export type MatrixMonitorHandlerParams = {
   groupAllowFrom?: string[];
   roomsConfig?: Record<string, MatrixRoomConfig>;
   accountAllowBots?: boolean | "mentions";
+  accountSemanticBotLoopTermination?: boolean;
   configuredBotUserIds?: ReadonlySet<string>;
   groupPolicy: "open" | "allowlist" | "disabled";
   replyToMode: ReplyToMode;
@@ -199,6 +216,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     groupAllowFrom = [],
     roomsConfig,
     accountAllowBots,
+    accountSemanticBotLoopTermination,
     configuredBotUserIds = new Set<string>(),
     groupPolicy,
     replyToMode,
@@ -230,6 +248,10 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     expiresAtMs: number;
   } | null = null;
   const pairingReplySentAtMsBySender = new Map<string, number>();
+  const botChainStateByKey = new Map<string, MatrixBotChainState>();
+  const botChainReopenOrderByRoute = new Map<string, number>();
+  const botChainTails = new Map<string, Promise<void>>();
+  let botChainEventOrder = 0;
   const resolveThreadContext = createMatrixThreadContextResolver({
     client,
     getMemberDisplayName,
@@ -282,6 +304,151 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
     return true;
   };
 
+  const upsertBotChainState = (key: string): MatrixBotChainState => {
+    const existing = botChainStateByKey.get(key);
+    if (existing) {
+      botChainStateByKey.delete(key);
+      botChainStateByKey.set(key, existing);
+      return existing;
+    }
+    const next: MatrixBotChainState = {
+      turns: [],
+      terminated: false,
+      lastUpdatedOrder: 0,
+    };
+    botChainStateByKey.set(key, next);
+    while (botChainStateByKey.size > MAX_BOT_CHAIN_STATES) {
+      const oldest = botChainStateByKey.keys().next().value;
+      if (typeof oldest !== "string") {
+        break;
+      }
+      botChainStateByKey.delete(oldest);
+    }
+    return next;
+  };
+
+  const nextBotChainEventOrder = (): number => {
+    botChainEventOrder += 1;
+    return botChainEventOrder;
+  };
+
+  const getBotChainRouteReopenOrder = (routeKey: string): number => {
+    const reopenOrder = botChainReopenOrderByRoute.get(routeKey);
+    if (typeof reopenOrder !== "number") {
+      return 0;
+    }
+    botChainReopenOrderByRoute.delete(routeKey);
+    botChainReopenOrderByRoute.set(routeKey, reopenOrder);
+    return reopenOrder;
+  };
+
+  const markBotChainRouteReopened = (routeKey: string, reopenOrder: number) => {
+    const existing = botChainReopenOrderByRoute.get(routeKey);
+    if (typeof existing === "number" && existing >= reopenOrder) {
+      return;
+    }
+    if (typeof existing === "number") {
+      botChainReopenOrderByRoute.delete(routeKey);
+    }
+    botChainReopenOrderByRoute.set(routeKey, reopenOrder);
+    while (botChainReopenOrderByRoute.size > MAX_BOT_CHAIN_REOPEN_ROUTES) {
+      const oldest = botChainReopenOrderByRoute.keys().next().value;
+      if (typeof oldest !== "string") {
+        break;
+      }
+      botChainReopenOrderByRoute.delete(oldest);
+    }
+  };
+
+  const resetBotChainStateForReopen = (state: MatrixBotChainState, reopenOrder: number) => {
+    state.turns = [];
+    state.terminated = false;
+    delete state.reasonCode;
+    delete state.terminatedOrder;
+    state.lastUpdatedOrder = reopenOrder;
+  };
+
+  const getBotChainStateOrder = (state: MatrixBotChainState): number =>
+    state.terminatedOrder ?? state.lastUpdatedOrder;
+
+  const isBotChainEventCurrent = (routeKey: string, eventOrder: number): boolean =>
+    getBotChainRouteReopenOrder(routeKey) <= eventOrder;
+
+  const maybeReopenBotChainState = (state: MatrixBotChainState, routeKey: string) => {
+    if (!state.terminated) {
+      return;
+    }
+    const reopenOrder = getBotChainRouteReopenOrder(routeKey);
+    if (reopenOrder < getBotChainStateOrder(state)) {
+      return;
+    }
+    resetBotChainStateForReopen(state, reopenOrder);
+  };
+
+  const markBotChainTerminated = (params: {
+    state: MatrixBotChainState;
+    routeKey: string;
+    eventOrder: number;
+    senderId: string;
+    roomId: string;
+    decision: MatrixSemanticLoopJudgeResult;
+  }) => {
+    if (!isBotChainEventCurrent(params.routeKey, params.eventOrder)) {
+      return;
+    }
+    params.state.terminated = true;
+    params.state.reasonCode = params.decision.reasonCode;
+    params.state.terminatedOrder = params.eventOrder;
+    params.state.lastUpdatedOrder = params.eventOrder;
+    logVerboseMessage(
+      `matrix: terminate bot-to-bot chain room=${params.roomId} sender=${params.senderId} reason=${params.decision.reasonCode} confidence=${params.decision.confidence.toFixed(2)}`,
+    );
+  };
+
+  const commitBotChainTurns = (params: {
+    state: MatrixBotChainState;
+    routeKey: string;
+    eventOrder: number;
+    agentId: string;
+    turns: MatrixSemanticLoopTurn[];
+    semanticFinalText: string;
+  }) => {
+    if (!isBotChainEventCurrent(params.routeKey, params.eventOrder)) {
+      return;
+    }
+    const botReply = params.semanticFinalText.trim();
+    const nextTurns = [...params.turns];
+    if (botReply) {
+      nextTurns.push({
+        senderId: `agent:${params.agentId}`,
+        text: botReply,
+        timestampMs: Date.now(),
+      });
+    }
+    params.state.turns = nextTurns.slice(-MAX_BOT_CHAIN_TURNS);
+    params.state.terminated = false;
+    delete params.state.reasonCode;
+    delete params.state.terminatedOrder;
+    params.state.lastUpdatedOrder = params.eventOrder;
+  };
+
+  const acquireBotChainLock = async (key: string): Promise<() => void> => {
+    const previous = botChainTails.get(key) ?? Promise.resolve();
+    let releaseCurrent!: () => void;
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+    const chain = previous.catch(() => {}).then(() => current);
+    botChainTails.set(key, chain);
+    await previous.catch(() => {});
+    return () => {
+      releaseCurrent();
+      if (botChainTails.get(key) === chain) {
+        botChainTails.delete(key);
+      }
+    };
+  };
+
   const runRoomIngress = async <T>(roomId: string, task: () => Promise<T>): Promise<T> => {
     const previous = roomIngressTails.get(roomId) ?? Promise.resolve();
     let releaseCurrent!: () => void;
@@ -302,9 +469,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
   };
 
   return async (roomId: string, event: MatrixRawEvent) => {
+    const eventOrder = nextBotChainEventOrder();
     const eventId = typeof event.event_id === "string" ? event.event_id.trim() : "";
     let claimedInboundEvent = false;
     let draftStreamRef: ReturnType<typeof createMatrixDraftStream> | undefined;
+    let releaseBotChainLock: (() => void) | undefined;
     try {
       const eventType = event.type;
       if (eventType === EventType.RoomMessageEncrypted) {
@@ -433,7 +602,12 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           : undefined;
         const roomConfig = roomConfigInfo?.config;
         const allowBotsMode = resolveMatrixAllowBotsMode(roomConfig?.allowBots ?? accountAllowBots);
+        const semanticBotLoopTermination =
+          (roomConfig?.semanticBotLoopTermination ?? accountSemanticBotLoopTermination) === true;
         const isConfiguredBotSender = configuredBotUserIds.has(senderId);
+        const shouldTrackConfiguredBotChain =
+          isRoom && isConfiguredBotSender && semanticBotLoopTermination;
+        const shouldMarkBotChainRouteReopened = isRoom && !isConfiguredBotSender;
         const roomMatchMeta = roomConfigInfo
           ? `matchKey=${roomConfigInfo.matchKey ?? "none"} matchSource=${
               roomConfigInfo.matchSource ?? "none"
@@ -666,6 +840,21 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           eventTs: eventTs ?? undefined,
           resolveAgentRoute: core.channel.routing.resolveAgentRoute,
         });
+        const botChainRouteKey = `${roomId}|${_route.sessionKey}`;
+        const botChainKey = `${botChainRouteKey}|${senderId}`;
+        let activeBotChainState: MatrixBotChainState | undefined;
+        if (shouldTrackConfiguredBotChain) {
+          releaseBotChainLock = await acquireBotChainLock(botChainKey);
+          activeBotChainState = upsertBotChainState(botChainKey);
+          maybeReopenBotChainState(activeBotChainState, botChainRouteKey);
+          if (activeBotChainState.terminated) {
+            logVerboseMessage(
+              `matrix: drop configured bot sender=${senderId} (semantic stop_loop active reason=${activeBotChainState.reasonCode ?? "unknown"})`,
+            );
+            await commitInboundEventIfClaimed();
+            return;
+          }
+        }
         const agentMentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, _route.agentId);
         const selfDisplayName = content.formatted_body
           ? await getMemberDisplayName(roomId, selfUserId).catch(() => undefined)
@@ -822,6 +1011,44 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           await commitInboundEventIfClaimed();
           return;
         }
+        let pendingBotChainTurns: MatrixSemanticLoopTurn[] | undefined;
+        if (activeBotChainState) {
+          const nextTurns = [
+            ...activeBotChainState.turns,
+            {
+              senderId,
+              text: bodyText,
+              timestampMs: eventTs ?? undefined,
+            },
+          ].slice(-MAX_BOT_CHAIN_TURNS);
+          if (nextTurns.length < 2) {
+            pendingBotChainTurns = nextTurns;
+          } else {
+            const semanticDecision = await runMatrixSemanticLoopJudge({
+              core,
+              cfg,
+              agentId: _route.agentId,
+              accountId: _route.accountId,
+              routeSessionKey: _route.sessionKey,
+              roomId,
+              turns: nextTurns,
+            });
+            if (semanticDecision.decision === "stop_loop") {
+              markBotChainTerminated({
+                state: activeBotChainState,
+                routeKey: botChainRouteKey,
+                eventOrder,
+                senderId,
+                roomId,
+                decision: semanticDecision,
+              });
+              await commitInboundEventIfClaimed();
+              return;
+            }
+            // Per-chain locking keeps judged snapshots and later commits aligned.
+            pendingBotChainTurns = nextTurns;
+          }
+        }
         const senderName = await getSenderName();
         if (_configuredBinding) {
           const ensured = await ensureConfiguredAcpBindingReady({
@@ -862,6 +1089,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           wasMentioned,
           shouldBypassMention,
           canDetectMention,
+          isConfiguredBotSender,
+          shouldMarkBotChainRouteReopened,
+          activeBotChainState,
+          pendingBotChainTurns,
+          botChainRouteKey,
           commandAuthorized,
           inboundHistory,
           senderName,
@@ -914,6 +1146,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         wasMentioned,
         shouldBypassMention,
         canDetectMention,
+        isConfiguredBotSender,
+        shouldMarkBotChainRouteReopened,
+        activeBotChainState,
+        pendingBotChainTurns,
+        botChainRouteKey,
         commandAuthorized,
         inboundHistory,
         senderName,
@@ -1184,6 +1421,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       // Set after the first final payload consumes the draft event so
       // subsequent finals go through normal delivery.
       let draftConsumed = false;
+      let semanticFinalText = "";
 
       const getDisplayableDraftText = () => {
         const nextDraftBoundaryOffset = pendingDraftBoundaries.find(
@@ -1249,6 +1487,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           ...prefixOptions,
           humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, _route.agentId),
           deliver: async (payload: ReplyPayload, info: { kind: string }) => {
+            if (info.kind === "final" && payload.text) {
+              semanticFinalText += (semanticFinalText ? "\n" : "") + payload.text;
+            }
             if (draftStream && info.kind !== "tool" && !payload.isCompactionNotice) {
               const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
 
@@ -1503,6 +1744,9 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         roomHistoryTracker.consumeHistory(_route.agentId, roomId, triggerSnapshot, _messageId);
       }
       if (!queuedFinal) {
+        if (shouldMarkBotChainRouteReopened) {
+          markBotChainRouteReopened(botChainRouteKey, eventOrder);
+        }
         await commitInboundEventIfClaimed();
         return;
       }
@@ -1510,10 +1754,26 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       logVerboseMessage(
         `matrix: delivered ${finalCount} reply${finalCount === 1 ? "" : "ies"} to ${replyTarget}`,
       );
+      if (activeBotChainState && pendingBotChainTurns && !activeBotChainState.terminated) {
+        commitBotChainTurns({
+          state: activeBotChainState,
+          routeKey: botChainRouteKey,
+          eventOrder,
+          agentId: _route.agentId,
+          turns: pendingBotChainTurns,
+          semanticFinalText,
+        });
+      }
+      if (shouldMarkBotChainRouteReopened) {
+        markBotChainRouteReopened(botChainRouteKey, eventOrder);
+      }
       await commitInboundEventIfClaimed();
     } catch (err) {
       runtime.error?.(`matrix handler failed: ${String(err)}`);
     } finally {
+      if (releaseBotChainLock) {
+        releaseBotChainLock();
+      }
       // Stop the draft stream timer so partial drafts don't leak if the
       // model run throws or times out mid-stream.
       if (draftStreamRef) {

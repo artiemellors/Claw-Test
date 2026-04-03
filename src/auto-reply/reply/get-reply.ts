@@ -215,11 +215,13 @@ export async function getReplyFromConfig(
       cfg,
     });
   }
-  emitPreAgentMessageHooks({
-    ctx: finalized,
-    cfg,
-    isFastTestEnv,
-  });
+  if (resolvedOpts?.skipHooks !== true) {
+    emitPreAgentMessageHooks({
+      ctx: finalized,
+      cfg,
+      isFastTestEnv,
+    });
+  }
 
   const commandAuthorized = finalized.CommandAuthorized;
   resolveCommandAuthorization({
@@ -231,6 +233,8 @@ export async function getReplyFromConfig(
     ctx: finalized,
     cfg,
     commandAuthorized,
+    skipHooks: resolvedOpts?.skipHooks === true,
+    skipPersistence: resolvedOpts?.skipSessionPersistence === true,
   });
   let {
     sessionCtx,
@@ -436,7 +440,7 @@ export async function getReplyFromConfig(
   // Allow plugins to intercept and return a synthetic reply before the LLM runs.
   const { getGlobalHookRunner } = await loadHookRunnerGlobal();
   const hookRunner = getGlobalHookRunner();
-  if (hookRunner?.hasHooks("before_agent_reply")) {
+  if (resolvedOpts?.skipHooks !== true && hookRunner?.hasHooks("before_agent_reply")) {
     const { resolveOriginMessageProvider } = await loadOriginRouting();
     const hookMessageProvider = resolveOriginMessageProvider({
       originatingChannel: sessionCtx.OriginatingChannel,
