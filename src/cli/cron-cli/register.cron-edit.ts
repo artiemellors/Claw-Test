@@ -13,6 +13,7 @@ import {
   resolveCronEditScheduleRequest,
 } from "./schedule-options.js";
 import { getCronChannelOptions, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
+import { resolveDefaultCronStaggerMs } from "../../cron/stagger.js";
 import { theme } from "../../terminal/theme.js";
 
 const assignIf = (
@@ -66,14 +67,25 @@ function computeDisplayAfterSchedule(
     const p = patchVal as Record<string, unknown>;
     if (
       p["kind"] === "cron" &&
-      p["staggerMs"] === undefined &&
-      existingVal !== null &&
-      typeof existingVal === "object" &&
-      !Array.isArray(existingVal)
+      p["staggerMs"] === undefined
     ) {
-      const e = existingVal as Record<string, unknown>;
-      if (e["kind"] === "cron" && e["staggerMs"] !== undefined) {
-        return { ...p, staggerMs: e["staggerMs"] };
+      if (
+        existingVal !== null &&
+        typeof existingVal === "object" &&
+        !Array.isArray(existingVal)
+      ) {
+        const e = existingVal as Record<string, unknown>;
+        if (e["kind"] === "cron" && e["staggerMs"] !== undefined) {
+          // Path 1: existing is cron — preserve existing staggerMs (mirrors applyJobPatch)
+          return { ...p, staggerMs: e["staggerMs"] };
+        }
+      }
+      // Path 2: non-cron → cron conversion — synthesize default stagger just as applyJobPatch does
+      if (typeof p["expr"] === "string") {
+        const defaultStaggerMs = resolveDefaultCronStaggerMs(p["expr"]);
+        if (defaultStaggerMs !== undefined) {
+          return { ...p, staggerMs: defaultStaggerMs };
+        }
       }
     }
   }
