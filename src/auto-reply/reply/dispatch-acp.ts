@@ -247,7 +247,11 @@ async function finalizeAcpTurnOutput(params: {
   await params.delivery.settleVisibleText();
   let queuedFinal =
     params.delivery.hasDeliveredVisibleText() && !params.delivery.hasFailedVisibleTextDelivery();
-  const ttsMode = resolveTtsConfig(params.cfg).mode ?? "final";
+  const ttsMode =
+    resolveTtsConfig({
+      cfg: params.cfg,
+      sessionKey: params.sessionKey,
+    }).mode ?? "final";
   const accumulatedBlockText = params.delivery.getAccumulatedBlockText();
   const hasAccumulatedBlockText = accumulatedBlockText.trim().length > 0;
 
@@ -261,6 +265,7 @@ async function finalizeAcpTurnOutput(params: {
         kind: "final",
         inboundAudio: params.inboundAudio,
         ttsAuto: params.sessionTtsAuto,
+        sessionKey: params.sessionKey,
       });
       if (ttsSyntheticReply.mediaUrl) {
         const delivered = await params.delivery.deliver("final", {
@@ -356,6 +361,7 @@ export async function tryDispatchAcpReply(params: {
   const delivery = createAcpDispatchDeliveryCoordinator({
     cfg: params.cfg,
     ctx: params.ctx,
+    sessionKey: canonicalSessionKey,
     dispatcher: params.dispatcher,
     inboundAudio: params.inboundAudio,
     sessionTtsAuto: params.sessionTtsAuto,

@@ -7,7 +7,7 @@ import { ChannelType, type Client, ReadyListener } from "@buape/carbon";
 import type { VoicePlugin } from "@buape/carbon/voice";
 import { resolveAgentDir } from "openclaw/plugin-sdk/agent-runtime";
 import { agentCommandFromIngress } from "openclaw/plugin-sdk/agent-runtime";
-import { resolveTtsConfig, type ResolvedTtsConfig } from "openclaw/plugin-sdk/agent-runtime";
+import { resolveTtsConfig } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { DiscordAccountConfig, TtsConfig } from "openclaw/plugin-sdk/config-runtime";
 import { transcribeAudioFile } from "openclaw/plugin-sdk/media-understanding-runtime";
@@ -16,6 +16,7 @@ import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { parseTtsDirectives } from "openclaw/plugin-sdk/speech";
+import { mergeTtsConfig } from "openclaw/plugin-sdk/speech-core";
 import { textToSpeech } from "openclaw/plugin-sdk/speech-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
@@ -69,58 +70,6 @@ type VoiceSessionEntry = {
   decryptRecoveryInFlight: boolean;
   stop: () => void;
 };
-
-function mergeTtsConfig(base: TtsConfig, override?: TtsConfig): TtsConfig {
-  if (!override) {
-    return base;
-  }
-  const baseProviders = base.providers ?? {};
-  const overrideProviders = override.providers ?? {};
-  const mergedProviders = Object.fromEntries(
-    [...new Set([...Object.keys(baseProviders), ...Object.keys(overrideProviders)])].map(
-      (providerId) => {
-        const baseProvider = baseProviders[providerId] ?? {};
-        const overrideProvider = overrideProviders[providerId] ?? {};
-        return [
-          providerId,
-          {
-            ...baseProvider,
-            ...overrideProvider,
-          },
-        ];
-      },
-    ),
-  );
-  return {
-    ...base,
-    ...override,
-    modelOverrides: {
-      ...base.modelOverrides,
-      ...override.modelOverrides,
-    },
-    ...(Object.keys(mergedProviders).length === 0 ? {} : { providers: mergedProviders }),
-  };
-}
-
-function resolveVoiceTtsConfig(params: { cfg: OpenClawConfig; override?: TtsConfig }): {
-  cfg: OpenClawConfig;
-  resolved: ResolvedTtsConfig;
-} {
-  if (!params.override) {
-    return { cfg: params.cfg, resolved: resolveTtsConfig(params.cfg) };
-  }
-  const base = params.cfg.messages?.tts ?? {};
-  const merged = mergeTtsConfig(base, params.override);
-  const messages = params.cfg.messages ?? {};
-  const cfg = {
-    ...params.cfg,
-    messages: {
-      ...messages,
-      tts: merged,
-    },
-  };
-  return { cfg, resolved: resolveTtsConfig(cfg) };
-}
 
 function buildWavBuffer(pcm: Buffer): Buffer {
   const blockAlign = (CHANNELS * BIT_DEPTH) / 8;
@@ -686,10 +635,20 @@ export class DiscordVoiceManager {
       `reply ok (${replyText.length} chars): guild ${entry.guildId} channel ${entry.channelId}`,
     );
 
-    const { cfg: ttsCfg, resolved: ttsConfig } = resolveVoiceTtsConfig({
+    const ttsConfig = resolveTtsConfig({
       cfg: this.params.cfg,
+      agentId: entry.route.agentId,
       override: this.params.discordConfig.voice?.tts,
     });
+    const ttsCfg = {
+      ...this.params.cfg,
+      messages: {
+        ...this.params.cfg.messages,
+        tts:
+          ttsConfig.rawConfig ??
+          mergeTtsConfig({}, this.params.discordConfig.voice?.tts, this.params.cfg),
+      },
+    };
     const directive = parseTtsDirectives(replyText, ttsConfig.modelOverrides, {
       cfg: ttsCfg,
       providerConfigs: ttsConfig.providerConfigs,
@@ -704,8 +663,10 @@ export class DiscordVoiceManager {
 
     const ttsResult = await textToSpeech({
       text: speakText,
-      cfg: ttsCfg,
+      cfg: this.params.cfg,
       channel: "discord",
+      agentId: entry.route.agentId,
+      ttsConfigOverride: this.params.discordConfig.voice?.tts,
       overrides: directive.overrides,
     });
     if (!ttsResult.success || !ttsResult.audioPath) {

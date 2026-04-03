@@ -10,13 +10,15 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { normalizeChannelId, type ChannelId } from "openclaw/plugin-sdk/channel-runtime";
-import type {
-  OpenClawConfig,
-  TtsAutoMode,
-  TtsConfig,
-  TtsMode,
-  TtsModelOverrideConfig,
-  TtsProvider,
+import {
+  resolveAgentConfig,
+  resolveSessionAgentId,
+  type OpenClawConfig,
+  type TtsAutoMode,
+  type TtsConfig,
+  type TtsMode,
+  type TtsModelOverrideConfig,
+  type TtsProvider,
 } from "openclaw/plugin-sdk/config-runtime";
 import { redactSensitiveText } from "openclaw/plugin-sdk/logging-core";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
@@ -28,6 +30,7 @@ import {
   canonicalizeSpeechProviderId,
   getSpeechProvider,
   listSpeechProviders,
+  mergeTtsConfig,
   normalizeSpeechProviderId,
   normalizeTtsAutoMode,
   parseTtsDirectives,
@@ -73,6 +76,13 @@ type TtsUserPrefs = {
 };
 
 export type ResolvedTtsModelOverrides = SpeechModelOverridePolicy;
+
+type ResolveTtsConfigParams = {
+  cfg: OpenClawConfig;
+  agentId?: string;
+  sessionKey?: string;
+  override?: TtsConfig;
+};
 
 export type TtsAttemptReasonCode =
   | "success"
@@ -299,6 +309,50 @@ function collectDirectProviderConfigEntries(raw: TtsConfig): Record<string, Spee
   return entries;
 }
 
+function resolveTtsConfigParams(
+  input: OpenClawConfig | ResolveTtsConfigParams,
+): ResolveTtsConfigParams {
+  return "cfg" in input ? input : { cfg: input };
+}
+
+function resolveTtsContextAgentId(params: ResolveTtsConfigParams): string {
+  const explicitAgentId = params.agentId?.trim();
+  if (explicitAgentId) {
+    return explicitAgentId;
+  }
+  return resolveSessionAgentId({
+    sessionKey: params.sessionKey,
+    config: params.cfg,
+  });
+}
+
+function stripScopedTtsConfigFields(config: TtsConfig): TtsConfig {
+  const { prefsPath: _ignoredPrefsPath, ...rest } = config;
+  return rest;
+}
+
+function resolveRawTtsConfig(params: ResolveTtsConfigParams): TtsConfig {
+  const globalConfig = params.cfg.messages?.tts ?? {};
+  const agentDefaults = stripScopedTtsConfigFields(params.cfg.agents?.defaults?.tts ?? {});
+  const agentConfig = stripScopedTtsConfigFields(
+    resolveAgentConfig(params.cfg, resolveTtsContextAgentId(params))?.tts ?? {},
+  );
+  const base = mergeTtsConfig(
+    mergeTtsConfig(globalConfig, agentDefaults, params.cfg),
+    agentConfig,
+    params.cfg,
+  );
+  const merged = mergeTtsConfig(
+    base,
+    stripScopedTtsConfigFields(params.override ?? {}),
+    params.cfg,
+  );
+  return {
+    ...merged,
+    prefsPath: globalConfig.prefsPath,
+  };
+}
+
 export function getResolvedSpeechProviderConfig(
   config: ResolvedTtsConfig,
   providerId: string,
@@ -311,8 +365,11 @@ export function getResolvedSpeechProviderConfig(
   return resolveLazyProviderConfig(config, canonical, cfg);
 }
 
-export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
-  const raw: TtsConfig = cfg.messages?.tts ?? {};
+export function resolveTtsConfig(
+  input: OpenClawConfig | ResolveTtsConfigParams,
+): ResolvedTtsConfig {
+  const params = resolveTtsConfigParams(input);
+  const raw = resolveRawTtsConfig(params);
   const providerSource = raw.provider ? "config" : "default";
   const timeoutMs = raw.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const auto = resolveConfiguredTtsAutoMode(raw);
@@ -330,7 +387,7 @@ export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
     maxTextLength: raw.maxTextLength ?? DEFAULT_MAX_TEXT_LENGTH,
     timeoutMs,
     rawConfig: raw,
-    sourceConfig: cfg,
+    sourceConfig: params.cfg,
   };
 }
 
@@ -365,32 +422,39 @@ export function resolveTtsAutoMode(params: {
   return params.config.auto;
 }
 
-function resolveEffectiveTtsAutoState(params: { cfg: OpenClawConfig; sessionAuto?: string }): {
+function resolveEffectiveTtsAutoState(params: ResolveTtsConfigParams & { sessionAuto?: string }): {
   autoMode: TtsAutoMode;
   prefsPath: string;
+  config: ResolvedTtsConfig;
 } {
-  const raw: TtsConfig = params.cfg.messages?.tts ?? {};
-  const prefsPath = resolveTtsPrefsPathValue(raw.prefsPath);
+  const config = resolveTtsConfig(params);
+  const prefsPath = resolveTtsPrefsPath(config);
   const sessionAuto = normalizeTtsAutoMode(params.sessionAuto);
   if (sessionAuto) {
-    return { autoMode: sessionAuto, prefsPath };
+    return { autoMode: sessionAuto, prefsPath, config };
   }
   const prefsAuto = resolveTtsAutoModeFromPrefs(readPrefs(prefsPath));
   if (prefsAuto) {
-    return { autoMode: prefsAuto, prefsPath };
+    return { autoMode: prefsAuto, prefsPath, config };
   }
   return {
-    autoMode: resolveConfiguredTtsAutoMode(raw),
+    autoMode: config.auto,
     prefsPath,
+    config,
   };
 }
 
-export function buildTtsSystemPromptHint(cfg: OpenClawConfig): string | undefined {
-  const { autoMode, prefsPath } = resolveEffectiveTtsAutoState({ cfg });
+export function buildTtsSystemPromptHint(
+  cfg: OpenClawConfig,
+  context?: Omit<ResolveTtsConfigParams, "cfg" | "override">,
+): string | undefined {
+  const { autoMode, prefsPath, config } = resolveEffectiveTtsAutoState({
+    cfg,
+    ...context,
+  });
   if (autoMode === "off") {
     return undefined;
   }
-  const config = resolveTtsConfig(cfg);
   const maxLength = getTtsMaxLength(prefsPath);
   const summarize = isSummarizationEnabled(prefsPath) ? "on" : "off";
   const autoHint =
@@ -654,6 +718,9 @@ function resolveTtsRequestSetup(params: {
   cfg: OpenClawConfig;
   prefsPath?: string;
   providerOverride?: TtsProvider;
+  agentId?: string;
+  sessionKey?: string;
+  ttsConfigOverride?: TtsConfig;
   disableFallback?: boolean;
 }):
   | {
@@ -663,7 +730,12 @@ function resolveTtsRequestSetup(params: {
   | {
       error: string;
     } {
-  const config = resolveTtsConfig(params.cfg);
+  const config = resolveTtsConfig({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    override: params.ttsConfigOverride,
+  });
   const prefsPath = params.prefsPath ?? resolveTtsPrefsPath(config);
   if (params.text.length > config.maxTextLength) {
     return {
@@ -685,6 +757,9 @@ export async function textToSpeech(params: {
   cfg: OpenClawConfig;
   prefsPath?: string;
   channel?: string;
+  agentId?: string;
+  sessionKey?: string;
+  ttsConfigOverride?: TtsConfig;
   overrides?: TtsDirectiveOverrides;
   disableFallback?: boolean;
 }): Promise<TtsResult> {
@@ -723,6 +798,9 @@ export async function synthesizeSpeech(params: {
   cfg: OpenClawConfig;
   prefsPath?: string;
   channel?: string;
+  agentId?: string;
+  sessionKey?: string;
+  ttsConfigOverride?: TtsConfig;
   overrides?: TtsDirectiveOverrides;
   disableFallback?: boolean;
 }): Promise<TtsSynthesisResult> {
@@ -731,6 +809,9 @@ export async function synthesizeSpeech(params: {
     cfg: params.cfg,
     prefsPath: params.prefsPath,
     providerOverride: params.overrides?.provider,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    ttsConfigOverride: params.ttsConfigOverride,
     disableFallback: params.disableFallback,
   });
   if ("error" in setup) {
@@ -827,11 +908,17 @@ export async function textToSpeechTelephony(params: {
   text: string;
   cfg: OpenClawConfig;
   prefsPath?: string;
+  agentId?: string;
+  sessionKey?: string;
+  ttsConfigOverride?: TtsConfig;
 }): Promise<TtsTelephonyResult> {
   const setup = resolveTtsRequestSetup({
     text: params.text,
     cfg: params.cfg,
     prefsPath: params.prefsPath,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    ttsConfigOverride: params.ttsConfigOverride,
   });
   if ("error" in setup) {
     return { success: false, error: setup.error };
@@ -959,18 +1046,23 @@ export async function maybeApplyTtsToPayload(params: {
   kind?: "tool" | "block" | "final";
   inboundAudio?: boolean;
   ttsAuto?: string;
+  agentId?: string;
+  sessionKey?: string;
+  ttsConfigOverride?: TtsConfig;
 }): Promise<ReplyPayload> {
   if (params.payload.isCompactionNotice) {
     return params.payload;
   }
-  const { autoMode, prefsPath } = resolveEffectiveTtsAutoState({
+  const { autoMode, prefsPath, config } = resolveEffectiveTtsAutoState({
     cfg: params.cfg,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    override: params.ttsConfigOverride,
     sessionAuto: params.ttsAuto,
   });
   if (autoMode === "off") {
     return params.payload;
   }
-  const config = resolveTtsConfig(params.cfg);
 
   const reply = resolveSendableOutboundReplyParts(params.payload);
   const text = reply.text;
@@ -1076,6 +1168,9 @@ export async function maybeApplyTtsToPayload(params: {
     cfg: params.cfg,
     prefsPath,
     channel: params.channel,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    ttsConfigOverride: params.ttsConfigOverride,
     overrides: directives.overrides,
   });
 
@@ -1123,5 +1218,6 @@ export const _test = {
   summarizeText,
   getResolvedSpeechProviderConfig,
   formatTtsProviderError,
+  mergeTtsConfig,
   sanitizeTtsErrorForLog,
 };

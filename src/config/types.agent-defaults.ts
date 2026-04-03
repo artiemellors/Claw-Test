@@ -7,6 +7,7 @@ import type {
   TypingMode,
 } from "./types.base.js";
 import type { MemorySearchConfig } from "./types.tools.js";
+import type { TtsConfig } from "./types.tts.js";
 
 export type AgentModelEntryConfig = {
   alias?: string;
@@ -189,6 +190,8 @@ export type AgentDefaultsConfig = {
   };
   /** Vector memory search configuration (per-agent overrides supported). */
   memorySearch?: MemorySearchConfig;
+  /** Default TTS settings inherited by agents unless overridden per-agent or per-account. */
+  tts?: TtsConfig;
   /** Default thinking level when no /think directive is present. */
   thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
   /** Default verbose level when no /verbose directive is present. */

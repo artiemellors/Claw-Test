@@ -27,6 +27,7 @@ export {
   normalizeSeed,
   requireInRange,
 } from "../tts/tts-core.js";
+export { mergeTtsConfig } from "../tts/merge-config.js";
 export { parseTtsDirectives } from "../tts/directives.js";
 export {
   canonicalizeSpeechProviderId,

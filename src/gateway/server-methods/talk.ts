@@ -4,7 +4,7 @@ import { buildTalkConfigResponse, resolveActiveTalkProviderConfig } from "../../
 import type { TalkProviderConfig } from "../../config/types.gateway.js";
 import type { OpenClawConfig, TtsConfig, TtsProviderConfigMap } from "../../config/types.js";
 import { canonicalizeSpeechProviderId, getSpeechProvider } from "../../tts/provider-registry.js";
-import { synthesizeSpeech, type TtsDirectiveOverrides } from "../../tts/tts.js";
+import { resolveTtsConfig, synthesizeSpeech, type TtsDirectiveOverrides } from "../../tts/tts.js";
 import {
   ErrorCodes,
   errorShape,
@@ -65,7 +65,7 @@ function resolveTalkVoiceId(
 function buildTalkTtsConfig(
   config: OpenClawConfig,
 ):
-  | { cfg: OpenClawConfig; provider: string; providerConfig: TalkProviderConfig }
+  | { provider: string; providerConfig: TalkProviderConfig; ttsConfig: TtsConfig }
   | { error: string } {
   const resolved = resolveActiveTalkProviderConfig(config.talk);
   const provider = canonicalizeSpeechProviderId(resolved?.provider, config);
@@ -80,7 +80,7 @@ function buildTalkTtsConfig(
     };
   }
 
-  const baseTts = config.messages?.tts ?? {};
+  const baseTts = resolveTtsConfig(config).rawConfig ?? {};
   const providerConfig = resolved.config;
   const resolvedProviderConfig =
     speechProvider.resolveTalkConfig?.({
@@ -102,13 +102,7 @@ function buildTalkTtsConfig(
   return {
     provider,
     providerConfig,
-    cfg: {
-      ...config,
-      messages: {
-        ...config.messages,
-        tts: talkTts,
-      },
-    },
+    ttsConfig: talkTts,
   };
 }
 
@@ -255,7 +249,8 @@ export const talkHandlers: GatewayRequestHandlers = {
       );
       const result = await synthesizeSpeech({
         text,
-        cfg: setup.cfg,
+        cfg: snapshot.config,
+        ttsConfigOverride: setup.ttsConfig,
         overrides,
         disableFallback: true,
       });

@@ -104,7 +104,11 @@ export const handleTtsCommands: CommandHandler = async (params, allowTextCommand
     return { shouldContinue: false };
   }
 
-  const config = resolveTtsConfig(params.cfg);
+  const config = resolveTtsConfig({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+  });
   const prefsPath = resolveTtsPrefsPath(config);
   const action = parsed.action;
   const args = parsed.args;
@@ -142,6 +146,8 @@ export const handleTtsCommands: CommandHandler = async (params, allowTextCommand
       cfg: params.cfg,
       channel: params.command.channel,
       prefsPath,
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
     });
 
     if (result.success && result.audioPath) {

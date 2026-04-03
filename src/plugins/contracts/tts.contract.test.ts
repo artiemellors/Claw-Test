@@ -6,6 +6,7 @@ import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import type { SpeechProviderPlugin } from "../../plugins/types.js";
 import { withEnv } from "../../test-utils/env.js";
+import { resolveConfiguredTtsMode } from "../../tts/tts-config.js";
 import * as tts from "../../tts/tts.js";
 
 let completeSimple: typeof import("@mariozechner/pi-ai").completeSimple;
@@ -654,6 +655,346 @@ describe("tts", () => {
 
       expect(config.provider).toBe("microsoft");
       expect(getTtsProvider(config, "/tmp/tts-prefs-normalized.json")).toBe("microsoft");
+    });
+
+    it("merges global, agent-default, and per-agent TTS config with default-agent fallback", () => {
+      const config = resolveTtsConfig({
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-4o-mini" },
+            tts: {
+              provider: "openai",
+              openai: {
+                model: "gpt-4o-mini-tts",
+                baseUrl: "https://agent-default.example/v1",
+              },
+              modelOverrides: {
+                allowProvider: false,
+              },
+            },
+          },
+          list: [
+            {
+              id: "voice-agent",
+              default: true,
+              tts: {
+                provider: "elevenlabs",
+                mode: "all",
+                openai: {
+                  voice: "agent-voice",
+                },
+                elevenlabs: {
+                  apiKey: "agent-elevenlabs-key",
+                  voiceId: "agent-voice-id",
+                },
+                modelOverrides: {
+                  allowProvider: true,
+                },
+              },
+            },
+          ],
+        },
+        messages: {
+          tts: {
+            auto: "always",
+            provider: "microsoft",
+            openai: {
+              apiKey: "global-openai-key",
+              voice: "global-voice",
+            },
+            microsoft: {
+              enabled: true,
+              voice: "en-US-AriaNeural",
+            },
+            modelOverrides: {
+              enabled: true,
+              allowVoice: false,
+            },
+          },
+        },
+      });
+
+      expect(config.auto).toBe("always");
+      expect(config.mode).toBe("all");
+      expect(config.provider).toBe("elevenlabs");
+      expect(config.modelOverrides.allowProvider).toBe(true);
+      expect(config.modelOverrides.allowVoice).toBe(false);
+      expect(config.providerConfigs.openai).toMatchObject({
+        apiKey: "global-openai-key",
+        model: "gpt-4o-mini-tts",
+        baseUrl: "https://agent-default.example/v1",
+        voice: "agent-voice",
+      });
+      expect(config.providerConfigs.elevenlabs).toMatchObject({
+        apiKey: "agent-elevenlabs-key",
+        voiceId: "agent-voice-id",
+      });
+    });
+
+    it("lets account or channel TTS overrides beat per-agent config while preserving deep-merged providers", () => {
+      const config = resolveTtsConfig({
+        cfg: {
+          agents: {
+            defaults: {
+              model: { primary: "openai/gpt-4o-mini" },
+              tts: {
+                providers: {
+                  openai: {
+                    apiKey: "global-openai-key",
+                    voice: "default-voice",
+                  },
+                },
+              },
+            },
+            list: [
+              {
+                id: "voice-agent",
+                tts: {
+                  provider: "elevenlabs",
+                  providers: {
+                    openai: {
+                      voice: "agent-voice",
+                    },
+                    elevenlabs: {
+                      apiKey: "agent-elevenlabs-key",
+                      voiceId: "agent-voice-id",
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          messages: {
+            tts: {
+              auto: "always",
+            },
+          },
+        },
+        agentId: "voice-agent",
+        override: {
+          provider: "microsoft",
+          providers: {
+            openai: {
+              voice: "account-voice",
+            },
+            microsoft: {
+              enabled: true,
+              voice: "en-US-JennyNeural",
+            },
+          },
+        },
+      });
+
+      expect(config.provider).toBe("microsoft");
+      expect(config.providerConfigs.openai).toMatchObject({
+        apiKey: "global-openai-key",
+        voice: "account-voice",
+      });
+      expect(config.providerConfigs.microsoft).toMatchObject({
+        enabled: true,
+        voice: "en-US-JennyNeural",
+      });
+      expect(config.providerConfigs.elevenlabs).toMatchObject({
+        apiKey: "agent-elevenlabs-key",
+        voiceId: "agent-voice-id",
+      });
+    });
+
+    it("lets late talk-style overrides beat agent-level TTS layers", () => {
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-4o-mini" },
+            tts: {
+              provider: "openai",
+              providers: {
+                openai: {
+                  apiKey: "global-openai-key",
+                  voice: "agent-default-voice",
+                  model: "gpt-4o-mini-tts",
+                },
+              },
+            },
+          },
+        },
+      };
+      const baseTts = resolveTtsConfig(cfg).rawConfig ?? {};
+
+      const config = resolveTtsConfig({
+        cfg,
+        override: {
+          ...baseTts,
+          auto: "always",
+          provider: "openai",
+          providers: {
+            ...baseTts.providers,
+            openai: {
+              ...baseTts.providers?.openai,
+              voice: "talk-voice",
+              model: "tts-1",
+            },
+          },
+        },
+      });
+
+      expect(config.provider).toBe("openai");
+      expect(config.auto).toBe("always");
+      expect(config.providerConfigs.openai).toMatchObject({
+        apiKey: "global-openai-key",
+        voice: "talk-voice",
+        model: "tts-1",
+      });
+    });
+
+    it("preserves provider fields when legacy and providers config styles are mixed across layers", () => {
+      const config = resolveTtsConfig({
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-4o-mini" },
+          },
+          list: [
+            {
+              id: "voice-agent",
+              default: true,
+              tts: {
+                provider: "openai",
+                providers: {
+                  openai: {
+                    voice: "agent-voice",
+                  },
+                },
+              },
+            },
+          ],
+        },
+        messages: {
+          tts: {
+            provider: "openai",
+            openai: {
+              apiKey: "global-openai-key",
+              model: "gpt-4o-mini-tts",
+            },
+          },
+        },
+      });
+
+      expect(config.providerConfigs.openai).toMatchObject({
+        apiKey: "global-openai-key",
+        model: "gpt-4o-mini-tts",
+        voice: "agent-voice",
+      });
+    });
+
+    it("coalesces provider aliases before merging legacy and providers config layers", () => {
+      const config = resolveTtsConfig({
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-4o-mini" },
+          },
+          list: [
+            {
+              id: "voice-agent",
+              default: true,
+              tts: {
+                providers: {
+                  microsoft: {
+                    voice: "en-US-JennyNeural",
+                  },
+                },
+              },
+            },
+          ],
+        },
+        messages: {
+          tts: {
+            providers: {
+              edge: {
+                apiKey: "edge-key",
+              },
+            },
+          },
+        },
+      });
+
+      expect(config.providerConfigs.microsoft).toMatchObject({
+        apiKey: "edge-key",
+        voice: "en-US-JennyNeural",
+      });
+    });
+
+    it("keeps prefsPath global when agent and override layers provide TTS config", () => {
+      const config = resolveTtsConfig({
+        cfg: {
+          agents: {
+            defaults: {
+              model: { primary: "openai/gpt-4o-mini" },
+              tts: {
+                prefsPath: "/tmp/tts-agent-defaults.json",
+              },
+            },
+            list: [
+              {
+                id: "voice-agent",
+                default: true,
+                tts: {
+                  prefsPath: "/tmp/tts-agent.json",
+                  provider: "openai",
+                },
+              },
+            ],
+          },
+          messages: {
+            tts: {
+              prefsPath: "/tmp/tts-global.json",
+            },
+          },
+        },
+        agentId: "voice-agent",
+        override: {
+          prefsPath: "/tmp/tts-override.json",
+          providers: {
+            openai: {
+              voice: "agent-voice",
+            },
+          },
+        },
+      });
+
+      expect(config.prefsPath).toBe("/tmp/tts-global.json");
+      expect(config.rawConfig).toBeDefined();
+      expect(config.rawConfig?.prefsPath).toBe("/tmp/tts-global.json");
+      expect(config.providerConfigs.openai).toMatchObject({
+        voice: "agent-voice",
+      });
+    });
+  });
+
+  describe("resolveConfiguredTtsMode", () => {
+    it("uses the effective per-agent mode when a session or agent context is provided", () => {
+      const cfg: OpenClawConfig = {
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-4o-mini" },
+          },
+          list: [
+            {
+              id: "voice-agent",
+              default: true,
+              tts: {
+                mode: "all",
+              },
+            },
+          ],
+        },
+        messages: {
+          tts: {
+            mode: "final",
+          },
+        },
+      };
+
+      expect(resolveConfiguredTtsMode(cfg)).toBe("all");
+      expect(resolveConfiguredTtsMode(cfg, { agentId: "voice-agent" })).toBe("all");
     });
   });
 

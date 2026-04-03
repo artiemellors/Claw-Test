@@ -7,6 +7,7 @@ import {
   HumanDelaySchema,
   IdentitySchema,
   SecretInputSchema,
+  TtsConfigSchema,
   ToolsLinksSchema,
   ToolsMediaSchema,
 } from "./zod-schema.core.js";
@@ -786,6 +787,7 @@ export const AgentEntrySchema = z
     fastModeDefault: z.boolean().optional(),
     skills: z.array(z.string()).optional(),
     memorySearch: MemorySearchSchema,
+    tts: TtsConfigSchema,
     humanDelay: HumanDelaySchema.optional(),
     heartbeat: HeartbeatSchema,
     identity: IdentitySchema,
