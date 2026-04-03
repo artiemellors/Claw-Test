@@ -1,8 +1,9 @@
 import type { Message } from "@grammyjs/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { retryAsync } from "../../../../src/infra/retry.js";
-import { resolveMedia } from "./delivery.resolve-media.js";
 import type { TelegramContext } from "./types.js";
+
+let resolveMedia: typeof import("./delivery.js").resolveMedia;
 
 const saveMediaBuffer = vi.fn();
 const fetchRemoteMedia = vi.fn();
@@ -182,10 +183,12 @@ async function flushRetryTimers() {
 }
 
 describe("resolveMedia getFile retry", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
+    vi.resetModules();
     fetchRemoteMedia.mockReset();
     saveMediaBuffer.mockReset();
+    ({ resolveMedia } = await import("./delivery.js"));
   });
 
   afterEach(() => {
@@ -444,10 +447,12 @@ describe("resolveMedia getFile retry", () => {
 });
 
 describe("resolveMedia original filename preservation", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
+    vi.resetModules();
     fetchRemoteMedia.mockClear();
     saveMediaBuffer.mockClear();
+    ({ resolveMedia } = await import("./delivery.js"));
   });
 
   afterEach(() => {

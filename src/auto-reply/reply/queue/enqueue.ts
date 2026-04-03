@@ -1,5 +1,6 @@
 import { resolveGlobalDedupeCache } from "../../../infra/dedupe.js";
 import { applyQueueDropPolicy, shouldSkipQueueItem } from "../../../utils/queue-helpers.js";
+import { normalizeFollowupRun } from "../agent-runner-utils.js";
 import { kickFollowupDrainIfIdle, rememberFollowupDrainCallback } from "./drain.js";
 import { getExistingFollowupQueue, getFollowupQueue } from "./state.js";
 import type { FollowupRun, QueueDedupeMode, QueueSettings } from "./types.js";
@@ -62,8 +63,10 @@ export function enqueueFollowupRun(
   runFollowup?: (run: FollowupRun) => Promise<void>,
   restartIfIdle = true,
 ): boolean {
+  const normalizedRun = normalizeFollowupRun(run);
   const queue = getFollowupQueue(key, settings);
-  const recentMessageIdKey = dedupeMode !== "none" ? buildRecentMessageIdKey(run, key) : undefined;
+  const recentMessageIdKey =
+    dedupeMode !== "none" ? buildRecentMessageIdKey(normalizedRun, key) : undefined;
   if (recentMessageIdKey && RECENT_QUEUE_MESSAGE_IDS.peek(recentMessageIdKey)) {
     return false;
   }
@@ -75,12 +78,12 @@ export function enqueueFollowupRun(
           isRunAlreadyQueued(item, items, dedupeMode === "prompt");
 
   // Deduplicate: skip if the same message is already queued.
-  if (shouldSkipQueueItem({ item: run, items: queue.items, dedupe })) {
+  if (shouldSkipQueueItem({ item: normalizedRun, items: queue.items, dedupe })) {
     return false;
   }
 
   queue.lastEnqueuedAt = Date.now();
-  queue.lastRun = run.run;
+  queue.lastRun = normalizedRun.run;
 
   const shouldEnqueue = applyQueueDropPolicy({
     queue,
@@ -90,7 +93,7 @@ export function enqueueFollowupRun(
     return false;
   }
 
-  queue.items.push(run);
+  queue.items.push(normalizedRun);
   if (recentMessageIdKey) {
     RECENT_QUEUE_MESSAGE_IDS.check(recentMessageIdKey);
   }

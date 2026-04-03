@@ -8,6 +8,7 @@ import {
   resolveInboundDebounceMs,
 } from "openclaw/plugin-sdk/channel-inbound";
 import {
+  buildConfiguredModelsProviderData,
   buildCommandsMessagePaginated,
   buildCommandsPaginationKeyboard,
   resolveStoredModelOverride,
@@ -1436,11 +1437,15 @@ export const registerTelegramHandlers = ({
           resolvedThreadId,
           senderId,
         });
-        const modelData = await telegramDeps.buildModelsProviderData(
+        const configuredModelData = buildConfiguredModelsProviderData(
           runtimeCfg,
           sessionState.agentId,
         );
-        const { byProvider, providers } = modelData;
+        let modelData = await telegramDeps.buildModelsProviderData(
+          runtimeCfg,
+          sessionState.agentId,
+        );
+        let { byProvider, providers } = modelData;
 
         const editMessageWithButtons = async (
           text: string,
@@ -1528,11 +1533,44 @@ export const registerTelegramHandlers = ({
         }
 
         if (modelCallback.type === "select") {
-          const selection = resolveModelSelection({
+          // Compact Telegram callbacks omit the provider to stay under the 64-byte
+          // callback_data cap, so resolve them against the full provider/model set
+          // shown in the UI instead of the narrower configured subset.
+          const shouldUseConfiguredSubsetFirst = Boolean(modelCallback.provider);
+          let selection = resolveModelSelection({
             callback: modelCallback,
-            providers,
-            byProvider,
+            providers: shouldUseConfiguredSubsetFirst ? configuredModelData.providers : providers,
+            byProvider: shouldUseConfiguredSubsetFirst
+              ? configuredModelData.byProvider
+              : byProvider,
           });
+          let selectionAllowed =
+            selection.kind === "resolved" &&
+            Boolean(
+              (shouldUseConfiguredSubsetFirst ? configuredModelData.byProvider : byProvider)
+                .get(selection.provider)
+                ?.has(selection.model),
+            );
+
+          if (
+            shouldUseConfiguredSubsetFirst &&
+            (!selectionAllowed || selection.kind !== "resolved")
+          ) {
+            modelData = await telegramDeps.buildModelsProviderData(
+              runtimeCfg,
+              sessionState.agentId,
+            );
+            ({ byProvider, providers } = modelData);
+            selection = resolveModelSelection({
+              callback: modelCallback,
+              providers,
+              byProvider,
+            });
+            selectionAllowed =
+              selection.kind === "resolved" &&
+              Boolean(byProvider.get(selection.provider)?.has(selection.model));
+          }
+
           if (selection.kind !== "resolved") {
             const providerInfos: ProviderInfo[] = providers.map((p) => ({
               id: p,
@@ -1546,8 +1584,7 @@ export const registerTelegramHandlers = ({
             return;
           }
 
-          const modelSet = byProvider.get(selection.provider);
-          if (!modelSet?.has(selection.model)) {
+          if (!selectionAllowed) {
             await editMessageWithButtons(
               `❌ Model "${selection.provider}/${selection.model}" is not allowed.`,
               [],

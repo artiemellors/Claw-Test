@@ -11,6 +11,12 @@ type MockMemorySearchManager = {
     sync: (params?: unknown) => Promise<void>;
   };
 };
+type MockResolvedApiKey = {
+  apiKey: string;
+  mode: string;
+  profileId?: string;
+  source?: string;
+};
 
 export const contextEngineCompactMock = vi.fn(async () => ({
   ok: true as boolean,
@@ -80,6 +86,14 @@ export const sessionMessages: unknown[] = [
   },
 ];
 export const sessionAbortCompactionMock: Mock<(reason?: unknown) => void> = vi.fn();
+export const ensureAuthProfileStoreMock = vi.fn();
+export const getApiKeyForModelMock: Mock<(params?: unknown) => Promise<MockResolvedApiKey>> = vi.fn(
+  async () => ({ apiKey: "test", mode: "env" }),
+);
+export const createGigachatStreamFnMock = vi.fn();
+export const gigachatStreamFn = vi.fn();
+export const lastCreatedSession = { current: null as null | { agent: { streamFn: unknown } } };
+export const lastInitialStreamFn = { current: null as unknown };
 export const createOpenClawCodingToolsMock = vi.fn(() => []);
 
 export function resetCompactSessionStateMocks(): void {
@@ -165,6 +179,14 @@ export function resetCompactHooksHarnessMocks(): void {
 
   triggerInternalHook.mockReset();
   resetCompactSessionStateMocks();
+  ensureAuthProfileStoreMock.mockReset();
+  ensureAuthProfileStoreMock.mockReturnValue({ profiles: {} });
+  getApiKeyForModelMock.mockReset();
+  getApiKeyForModelMock.mockResolvedValue({ apiKey: "test", mode: "env" });
+  createGigachatStreamFnMock.mockReset();
+  createGigachatStreamFnMock.mockReturnValue(gigachatStreamFn);
+  lastCreatedSession.current = null;
+  lastInitialStreamFn.current = null;
   createOpenClawCodingToolsMock.mockReset();
   createOpenClawCodingToolsMock.mockReturnValue([]);
 }
@@ -211,6 +233,7 @@ export async function loadCompactHooksHarness(): Promise<{
     AuthStorage: class AuthStorage {},
     ModelRegistry: class ModelRegistry {},
     createAgentSession: vi.fn(async () => {
+      const initialStreamFn = vi.fn();
       const session = {
         sessionId: "session-1",
         messages: sessionMessages.map((message) =>
@@ -222,7 +245,7 @@ export async function loadCompactHooksHarness(): Promise<{
           replaceMessages: vi.fn((messages: unknown[]) => {
             session.messages = [...(messages as typeof session.messages)];
           }),
-          streamFn: vi.fn(),
+          streamFn: initialStreamFn,
         },
         compact: vi.fn(async () => {
           session.messages.splice(1);
@@ -231,6 +254,8 @@ export async function loadCompactHooksHarness(): Promise<{
         abortCompaction: sessionAbortCompactionMock,
         dispose: vi.fn(),
       };
+      lastCreatedSession.current = session;
+      lastInitialStreamFn.current = initialStreamFn;
       return { session };
     }),
     DefaultResourceLoader: class DefaultResourceLoader {},
@@ -261,8 +286,13 @@ export async function loadCompactHooksHarness(): Promise<{
   vi.doMock("../model-auth.js", () => ({
     applyAuthHeaderOverride: vi.fn((model: unknown) => model),
     applyLocalNoAuthHeaderOverride: vi.fn((model: unknown) => model),
-    getApiKeyForModel: vi.fn(async () => ({ apiKey: "test", mode: "env" })),
+    ensureAuthProfileStore: ensureAuthProfileStoreMock,
+    getApiKeyForModel: getApiKeyForModelMock,
     resolveModelAuthMode: vi.fn(() => "env"),
+  }));
+
+  vi.doMock("../gigachat-stream.js", () => ({
+    createGigachatStreamFn: createGigachatStreamFnMock,
   }));
 
   vi.doMock("../sandbox.js", () => ({

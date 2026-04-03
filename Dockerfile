@@ -43,20 +43,8 @@ RUN mkdir -p /out && \
 FROM ${OPENCLAW_NODE_BOOKWORM_IMAGE} AS build
 ARG OPENCLAW_BUNDLED_PLUGIN_DIR
 
-# Install Bun (required for build scripts). Retry the whole bootstrap flow to
-# tolerate transient 5xx failures from bun.sh/GitHub during CI image builds.
-RUN set -eux; \
-    for attempt in 1 2 3 4 5; do \
-      if curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL https://bun.sh/install | bash; then \
-        break; \
-      fi; \
-      if [ "$attempt" -eq 5 ]; then \
-        exit 1; \
-      fi; \
-      sleep $((attempt * 2)); \
-    done
-ENV PATH="/root/.bun/bin:${PATH}"
-
+# Docker builds stay on the Node + pnpm path so smoke tests do not depend on
+# Bun release download availability.
 RUN corepack enable
 
 WORKDIR /app

@@ -21,7 +21,7 @@ import type { OriginatingChannelType } from "../templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
-import { resolveRunAuthProfile } from "./agent-runner-utils.js";
+import { normalizeFollowupRun, resolveRunAuthProfile } from "./agent-runner-utils.js";
 import {
   resolveOriginAccountId,
   resolveOriginMessageProvider,
@@ -136,6 +136,7 @@ export function createFollowupRunner(params: {
 
   return async (queued: FollowupRun) => {
     try {
+      queued = normalizeFollowupRun(queued);
       const runId = crypto.randomUUID();
       const shouldSurfaceToControlUi = isInternalMessageChannel(
         resolveOriginMessageProvider({

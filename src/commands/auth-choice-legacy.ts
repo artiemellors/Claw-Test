@@ -35,6 +35,8 @@ export function resolveLegacyAuthChoiceAliasesForCli(params?: {
   return ["setup-token", "oauth", ...manifestCliAliases];
 }
 
+export const AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI = resolveLegacyAuthChoiceAliasesForCli();
+
 export function normalizeLegacyOnboardAuthChoice(
   authChoice: AuthChoice | undefined,
   params?: {

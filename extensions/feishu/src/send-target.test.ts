@@ -19,17 +19,15 @@ describe("resolveFeishuSendTarget", () => {
   const cfg = {} as ClawdbotConfig;
   const client = { id: "client" };
 
-  beforeAll(async () => {
-    ({ resolveFeishuSendTarget } = await import("./send-target.js"));
-  });
-
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetModules();
     resolveFeishuAccountMock.mockReset().mockReturnValue({
       accountId: "default",
       enabled: true,
       configured: true,
     });
     createFeishuClientMock.mockReset().mockReturnValue(client);
+    ({ resolveFeishuSendTarget } = await import("./send-target.js"));
   });
 
   it("keeps explicit group targets as chat_id even when ID shape is ambiguous", () => {

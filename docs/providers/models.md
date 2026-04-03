@@ -27,6 +27,7 @@ model as `provider/model`.
 - [Anthropic (API + Claude Code CLI)](/providers/anthropic)
 - [Amazon Bedrock](/providers/bedrock)
 - [Cloudflare AI Gateway](/providers/cloudflare-ai-gateway)
+- [GigaChat](/providers/gigachat)
 - [GLM models](/providers/glm)
 - [MiniMax](/providers/minimax)
 - [Mistral](/providers/mistral)

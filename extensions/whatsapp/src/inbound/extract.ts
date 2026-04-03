@@ -17,6 +17,7 @@ const MESSAGE_WRAPPER_KEYS = [
   "viewOnceMessageV2",
   "viewOnceMessageV2Extension",
   "documentWithCaptionMessage",
+  "botInvokeMessage",
   "groupMentionedMessage",
 ] as const;
 
@@ -68,7 +69,7 @@ function fallbackNormalizeMessageContent(
 
 function normalizeMessage(message: proto.IMessage | undefined): proto.IMessage | undefined {
   if (typeof normalizeMessageContent === "function") {
-    return normalizeMessageContent(message);
+    return fallbackNormalizeMessageContent(normalizeMessageContent(message));
   }
   return fallbackNormalizeMessageContent(message);
 }

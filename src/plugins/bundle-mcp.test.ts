@@ -100,7 +100,6 @@ describe("loadEnabledBundleMcpConfig", () => {
             },
           },
         };
-
         const loaded = loadEnabledBundleMcpConfig({
           workspaceDir,
           cfg: config,

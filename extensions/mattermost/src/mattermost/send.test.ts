@@ -35,9 +35,14 @@ const mockState = vi.hoisted(() => ({
   uploadMattermostFile: vi.fn(),
 }));
 
-vi.mock("../../runtime-api.js", () => ({
-  loadOutboundMediaFromUrl: mockState.loadOutboundMediaFromUrl,
-}));
+vi.mock("../../runtime-api.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../runtime-api.js")>("../../runtime-api.js");
+  return {
+    ...actual,
+    loadOutboundMediaFromUrl: mockState.loadOutboundMediaFromUrl,
+  };
+});
 
 vi.mock("openclaw/plugin-sdk/config-runtime", () => ({
   resolveMarkdownTableMode: vi.fn(() => "off"),

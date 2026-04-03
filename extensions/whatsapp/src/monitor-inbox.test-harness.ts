@@ -80,17 +80,57 @@ function createMockSock(): MockSock {
 
 vi.mock("openclaw/plugin-sdk/media-runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("openclaw/plugin-sdk/media-runtime")>();
-  return {
-    ...actual,
-    saveMediaBuffer: vi.fn().mockResolvedValue({
+  const mockModule = Object.create(null) as Record<string, unknown>;
+  Object.defineProperties(mockModule, Object.getOwnPropertyDescriptors(actual));
+  Object.defineProperty(mockModule, "saveMediaBuffer", {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: vi.fn().mockResolvedValue({
       id: "mid",
       path: "/tmp/mid",
       size: 1,
       contentType: "image/jpeg",
     }),
+  });
+  return mockModule;
+});
+
+vi.mock("openclaw/plugin-sdk/config-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/config-runtime")>();
+  const mockModule = Object.create(null) as Record<string, unknown>;
+  Object.defineProperties(mockModule, Object.getOwnPropertyDescriptors(actual));
+  Object.defineProperty(mockModule, "loadConfig", {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: () => mockLoadConfig(),
+  });
+  return mockModule;
+});
+
+vi.mock("openclaw/plugin-sdk/conversation-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/conversation-runtime")>();
+  return {
+    ...actual,
+    upsertChannelPairingRequest: (...args: unknown[]) => upsertPairingRequestMock(...args),
   };
 });
 
+vi.mock("openclaw/plugin-sdk/security-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/security-runtime")>();
+  return {
+    ...actual,
+    readStoreAllowFromForDmPolicy: async (
+      params: Parameters<typeof actual.readStoreAllowFromForDmPolicy>[0],
+    ) =>
+      await actual.readStoreAllowFromForDmPolicy({
+        ...params,
+        readStore: async (provider, accountId) =>
+          (await readAllowFromStoreMock(provider, accountId)) as string[],
+      }),
+  };
+});
 vi.mock("./session.js", async () => {
   const actual = await vi.importActual<typeof import("./session.js")>("./session.js");
   return {

@@ -3,6 +3,7 @@ import {
   resolveApiKeyForProfile,
   resolveAuthProfileOrder,
 } from "../../agents/auth-profiles.js";
+import { resolveGigachatAuthMode } from "../../agents/gigachat-auth.js";
 import { resolveEnvApiKey } from "../../agents/model-auth.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { RuntimeEnv } from "../../runtime.js";
@@ -23,7 +24,7 @@ async function resolveApiKeyFromProfiles(params: {
   provider: string;
   cfg: OpenClawConfig;
   agentDir?: string;
-}): Promise<string | null> {
+}): Promise<{ key: string; profileId: string; metadata?: Record<string, string> } | null> {
   const store = ensureAuthProfileStore(params.agentDir);
   const order = resolveAuthProfileOrder({
     cfg: params.cfg,
@@ -42,7 +43,22 @@ async function resolveApiKeyFromProfiles(params: {
       agentDir: params.agentDir,
     });
     if (resolved?.apiKey) {
-      return resolved.apiKey;
+      if (
+        params.provider === "gigachat" &&
+        (resolveGigachatAuthMode({
+          metadata: cred.metadata,
+          apiKey: resolved.apiKey,
+          authProfileId: profileId,
+        }) === "basic" ||
+          (cred.metadata?.scope !== undefined && cred.metadata.scope !== "GIGACHAT_API_PERS"))
+      ) {
+        continue;
+      }
+      return {
+        key: resolved.apiKey,
+        profileId,
+        metadata: cred.metadata,
+      };
     }
   }
   return null;
@@ -60,7 +76,13 @@ export async function resolveNonInteractiveApiKey(params: {
   allowProfile?: boolean;
   required?: boolean;
   secretInputMode?: SecretInputMode;
-}): Promise<{ key: string; source: NonInteractiveApiKeySource; envVarName?: string } | null> {
+}): Promise<{
+  key: string;
+  source: NonInteractiveApiKeySource;
+  envVarName?: string;
+  profileId?: string;
+  metadata?: Record<string, string>;
+} | null> {
   const flagKey = normalizeOptionalSecretInput(params.flagValue);
   const envResolved = resolveEnvApiKey(params.provider);
   const explicitEnvVar = params.envVarName?.trim();
@@ -112,7 +134,12 @@ export async function resolveNonInteractiveApiKey(params: {
       agentDir: params.agentDir,
     });
     if (profileKey) {
-      return { key: profileKey, source: "profile" };
+      return {
+        key: profileKey.key,
+        source: "profile",
+        profileId: profileKey.profileId,
+        metadata: profileKey.metadata,
+      };
     }
   }
 

@@ -2,9 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OAuthCredentials } from "@mariozechner/pi-ai";
 import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
+import {
+  loadAuthProfileStoreForSecretsRuntime,
+  resolveAuthProfileOrder,
+} from "../agents/auth-profiles.js";
 import { buildAuthProfileId } from "../agents/auth-profiles/identity.js";
 import { upsertAuthProfile } from "../agents/auth-profiles/profiles.js";
-import { normalizeProviderIdForAuth } from "../agents/provider-id.js";
+import { resolveGigachatAuthMode } from "../agents/gigachat-auth.js";
+import { findNormalizedProviderValue, normalizeProviderIdForAuth } from "../agents/provider-id.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import {
@@ -14,6 +19,7 @@ import {
   type SecretRef,
 } from "../config/types.secrets.js";
 import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
+import { resolveSecretInputString } from "../secrets/resolve-secret-input-string.js";
 import { normalizeSecretInput } from "../utils/normalize-secret-input.js";
 import type { SecretInputMode } from "./provider-auth-types.js";
 
@@ -130,7 +136,8 @@ export function applyAuthProfileConfig(
     .map(([profileId, profile]) => ({ profileId, mode: profile.mode }));
 
   // Maintain `auth.order` when it already exists. Additionally, if we detect
-  // mixed auth modes for the same provider, keep the newly selected profile first.
+  // another profile for the same provider, keep the newly selected profile first
+  // even when the auth modes match.
   const matchingProviderOrderEntries = Object.entries(cfg.auth?.order ?? {}).filter(
     ([providerId]) => normalizeProviderIdForAuth(providerId) === normalizedProvider,
   );
@@ -146,11 +153,11 @@ export function applyAuthProfileConfig(
           ...existingProviderOrder.filter((profileId) => profileId !== params.profileId),
         ]
       : existingProviderOrder;
-  const hasMixedConfiguredModes = configuredProviderProfiles.some(
-    ({ profileId, mode }) => profileId !== params.profileId && mode !== params.mode,
+  const hasOtherConfiguredProfiles = configuredProviderProfiles.some(
+    ({ profileId }) => profileId !== params.profileId,
   );
   const derivedProviderOrder =
-    existingProviderOrder === undefined && preferProfileFirst && hasMixedConfiguredModes
+    existingProviderOrder === undefined && preferProfileFirst && hasOtherConfiguredProfiles
       ? [
           params.profileId,
           ...configuredProviderProfiles
@@ -188,6 +195,51 @@ export function applyAuthProfileConfig(
       ...(order ? { order } : {}),
     },
   };
+}
+
+export async function shouldResetGigachatBaseUrlForOAuthReauth(params: {
+  cfg: OpenClawConfig;
+  agentDir?: string;
+}): Promise<boolean> {
+  const resolveGigachatApiKeySafely = async (
+    value: SecretInput | undefined,
+  ): Promise<string | undefined> => {
+    if (!value) {
+      return undefined;
+    }
+    return await resolveSecretInputString({
+      config: params.cfg,
+      value,
+      env: process.env,
+      // Reauth should still proceed when a stale ref can no longer be resolved.
+      onResolveRefError: () => undefined as never,
+    });
+  };
+  const store = loadAuthProfileStoreForSecretsRuntime(params.agentDir);
+  const activeProfileId = resolveAuthProfileOrder({
+    cfg: params.cfg,
+    store,
+    provider: "gigachat",
+  })[0];
+  const activeProfile = activeProfileId ? store.profiles[activeProfileId] : undefined;
+  const activeProfileApiKey =
+    activeProfile?.type === "api_key" && activeProfile.provider === "gigachat"
+      ? await resolveGigachatApiKeySafely(activeProfile.keyRef ?? activeProfile.key)
+      : undefined;
+  if (
+    activeProfile?.type === "api_key" &&
+    activeProfile.provider === "gigachat" &&
+    (activeProfile.metadata?.authMode === "basic" ||
+      resolveGigachatAuthMode({ apiKey: activeProfileApiKey }) === "basic")
+  ) {
+    return true;
+  }
+
+  // When no GigaChat auth profile is active, onboarding can still be replacing a
+  // manual config-backed Basic setup (`models.providers.gigachat.apiKey/baseUrl`).
+  const configuredProvider = findNormalizedProviderValue(params.cfg.models?.providers, "gigachat");
+  const configuredApiKey = await resolveGigachatApiKeySafely(configuredProvider?.apiKey);
+  return activeProfile == null && resolveGigachatAuthMode({ apiKey: configuredApiKey }) === "basic";
 }
 
 /** Resolve real path, returning null if the target doesn't exist. */

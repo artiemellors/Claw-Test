@@ -226,6 +226,10 @@ const LOCAL_EXTENSION_API_BARREL_EXCEPTIONS = [
   // accounts.ts -> runtime-api.ts -> src/plugin-sdk/matrix -> plugin api barrel -> accounts.ts
   bundledPluginFile("matrix", "src/matrix/accounts.ts"),
 ] as const;
+const CORE_GUARDRAIL_EXCEPTIONS = [
+  // Contract registries are test support, even though they live under src for co-located fixtures.
+  "src/channels/plugins/contracts/registry.ts",
+] as const;
 
 const sourceTextCache = new Map<string, string>();
 type SourceAnalysis = {
@@ -356,6 +360,7 @@ function collectCoreSourceFiles(): string[] {
       normalizedFullPath.includes(".spec.") ||
       normalizedFullPath.includes(".fixture.") ||
       normalizedFullPath.includes(".snap") ||
+      CORE_GUARDRAIL_EXCEPTIONS.some((suffix) => normalizedFullPath.endsWith(`/${suffix}`)) ||
       // src/plugin-sdk is the curated bridge layer; validate its contracts with dedicated
       // plugin-sdk guardrails instead of the generic "core should not touch extensions" rule.
       normalizedFullPath.includes(`${normalizedPluginSdkDir}/`),

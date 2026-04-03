@@ -1045,6 +1045,31 @@ describe("onboard (non-interactive): provider auth", () => {
     });
   });
 
+  it("infers GigaChat auth from --gigachat-api-key and stores personal OAuth metadata", async () => {
+    await withOnboardEnv("openclaw-onboard-gigachat-infer-", async (env) => {
+      const cfg = await runOnboardingAndReadConfig(env, {
+        gigachatApiKey: "gigachat-credentials==", // pragma: allowlist secret
+      });
+
+      expect(cfg.auth?.profiles?.["gigachat:default"]?.provider).toBe("gigachat");
+      expect(cfg.auth?.profiles?.["gigachat:default"]?.mode).toBe("api_key");
+      expect(cfg.agents?.defaults?.model?.primary).toBe("gigachat/GigaChat-2-Max");
+      await expectApiKeyProfile({
+        profileId: "gigachat:default",
+        provider: "gigachat",
+        key: "gigachat-credentials==",
+        metadata: {
+          authMode: "oauth",
+          scope: "GIGACHAT_API_PERS",
+        },
+      });
+      const gigachatProfile = cfg.auth?.profiles?.["gigachat:default"] as
+        | { metadata?: Record<string, string> }
+        | undefined;
+      expect(gigachatProfile?.metadata?.insecureTls).toBeUndefined();
+    });
+  });
+
   it("stores Volcano Engine API key and sets default model", async () => {
     await withOnboardEnv("openclaw-onboard-volcengine-", async (env) => {
       const cfg = await runOnboardingAndReadConfig(env, {
@@ -1301,7 +1326,24 @@ describe("onboard (non-interactive): provider auth", () => {
     });
   });
 
-  it("stores LiteLLM API key in the default auth profile", async () => {
+  it.each(["gigachat-basic", "gigachat-business", "gigachat-personal"] as const)(
+    'rejects "%s" auth choice in non-interactive mode',
+    async (authChoice) => {
+      await withOnboardEnv(
+        `openclaw-onboard-${authChoice}-non-interactive-`,
+        async ({ runtime }) => {
+          await expect(
+            runNonInteractiveSetupWithDefaults(runtime, {
+              authChoice,
+              skipSkills: true,
+            }),
+          ).rejects.toThrow(`Auth choice "${authChoice}" requires interactive mode.`);
+        },
+      );
+    },
+  );
+
+  it("stores LiteLLM API key and sets default model", async () => {
     await withOnboardEnv("openclaw-onboard-litellm-", async (env) => {
       const cfg = await runOnboardingAndReadConfig(env, {
         authChoice: "litellm-api-key",

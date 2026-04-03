@@ -10,10 +10,14 @@ vi.mock("../../../src/globals.js", () => ({
   shouldLogVerbose: () => false,
 }));
 
-vi.mock("./send.js", () => ({
-  sendPollWhatsApp: hoisted.sendPollWhatsApp,
-  sendReactionWhatsApp: hoisted.sendReactionWhatsApp,
-}));
+vi.mock("./send.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./send.js")>();
+  return {
+    ...actual,
+    sendPollWhatsApp: hoisted.sendPollWhatsApp,
+    sendReactionWhatsApp: hoisted.sendReactionWhatsApp,
+  };
+});
 
 let whatsappOutbound: typeof import("./outbound-adapter.js").whatsappOutbound;
 

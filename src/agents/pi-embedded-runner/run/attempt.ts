@@ -9,18 +9,14 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { resolveHeartbeatPrompt } from "../../../auto-reply/heartbeat.js";
 import { resolveChannelCapabilities } from "../../../config/channel-capabilities.js";
+import type { OpenClawConfig } from "../../../config/config.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import {
   ensureGlobalUndiciEnvProxyDispatcher,
   ensureGlobalUndiciStreamTimeouts,
 } from "../../../infra/net/undici-global-dispatcher.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
-import {
-  isOllamaCompatProvider,
-  resolveOllamaCompatNumCtxEnabled,
-  shouldInjectOllamaCompatNumCtx,
-  wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama.js";
+import { createConfiguredOllamaStreamFn } from "../../../plugin-sdk/ollama.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
@@ -32,6 +28,7 @@ import { resolveOpenClawAgentDir } from "../../agent-paths.js";
 import { resolveSessionAgentIds } from "../../agent-scope.js";
 import { createAnthropicPayloadLogger } from "../../anthropic-payload-log.js";
 import { createAnthropicVertexStreamFnForModel } from "../../anthropic-vertex-stream.js";
+import { ensureAuthProfileStore } from "../../auth-profiles.js";
 import {
   analyzeBootstrapBudget,
   buildBootstrapPromptWarning,
@@ -47,13 +44,21 @@ import {
   resolveChannelMessageToolHints,
   resolveChannelReactionGuidance,
 } from "../../channel-tools.js";
+import { ensureCustomApiRegistered } from "../../custom-api-registry.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../defaults.js";
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
 import { isTimeoutError } from "../../failover-error.js";
+import {
+  resolveConfiguredGigachatBaseUrl,
+  resolveGigachatInsecureTlsOverride,
+  resolveGigachatAuthMode,
+  resolveGigachatAuthProfileMetadata,
+} from "../../gigachat-auth.js";
+import { createGigachatStreamFn } from "../../gigachat-stream.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
 import { buildModelAliasLines } from "../../model-alias-lines.js";
-import { resolveModelAuthMode } from "../../model-auth.js";
-import { resolveDefaultModelForAgent } from "../../model-selection.js";
+import { getApiKeyForModel, resolveModelAuthMode } from "../../model-auth.js";
+import { normalizeProviderId, resolveDefaultModelForAgent } from "../../model-selection.js";
 import { supportsModelTools } from "../../model-tool-support.js";
 import { createOpenAIWebSocketStreamFn, releaseWsSession } from "../../openai-ws-stream.js";
 import { resolveOwnerDisplaySetting } from "../../owner-display.js";
@@ -68,7 +73,9 @@ import {
   resolveBootstrapMaxChars,
   resolveBootstrapPromptTruncationWarningMode,
   resolveBootstrapTotalMaxChars,
+  validateGeminiTurns,
 } from "../../pi-embedded-helpers.js";
+import { validateAnthropicTurns } from "../../pi-embedded-helpers/turns.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
 import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
@@ -93,10 +100,13 @@ import {
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { sanitizeToolCallIdsForCloudCodeAssist } from "../../tool-call-id.js";
-import { resolveTranscriptPolicy } from "../../transcript-policy.js";
+import { normalizeToolName } from "../../tool-policy.js";
+import { resolveTranscriptPolicy, type TranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
 import { isCacheTtlEligibleProvider } from "../cache-ttl.js";
+import type { CompactEmbeddedPiSessionParams } from "../compact.js";
+import { buildEmbeddedCompactionRuntimeContext } from "../compaction-runtime-context.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
 import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
 import { buildEmbeddedExtensionFactories } from "../extensions.js";
@@ -141,7 +151,6 @@ import {
   runAttemptContextEngineBootstrap,
 } from "./attempt.context-engine-helpers.js";
 import {
-  buildAfterTurnRuntimeContext,
   prependSystemPromptAddition,
   resolveAttemptFsWorkspaceOnly,
   resolvePromptBuildHookResult,
@@ -162,15 +171,6 @@ import {
   resolveAttemptSpawnWorkspaceDir,
   shouldUseOpenAIWebSocketTransport,
 } from "./attempt.thread-helpers.js";
-import {
-  shouldRepairMalformedAnthropicToolCallArguments,
-  wrapStreamFnDecodeXaiToolCallArguments,
-  wrapStreamFnRepairMalformedToolCallArguments,
-} from "./attempt.tool-call-argument-repair.js";
-import {
-  wrapStreamFnSanitizeMalformedToolCalls,
-  wrapStreamFnTrimToolCallNames,
-} from "./attempt.tool-call-normalization.js";
 import { waitForCompactionRetryWithAggregateTimeout } from "./compaction-retry-aggregate-timeout.js";
 import {
   resolveRunTimeoutDuringCompaction,
@@ -183,6 +183,1146 @@ import { detectAndLoadPromptImages } from "./images.js";
 import { buildAttemptReplayMetadata } from "./incomplete-turn.js";
 import { resolveLlmIdleTimeoutMs, streamWithIdleTimeout } from "./llm-idle-timeout.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
+export {
+  resolveGigachatAuthProfileMetadata,
+  resolveGigachatInsecureTlsOverride,
+} from "../../gigachat-auth.js";
+
+export async function resolveGigachatApiKeyForRun(params: {
+  model: EmbeddedRunAttemptParams["model"];
+  config?: OpenClawConfig;
+  authProfileId?: string;
+  agentDir?: string;
+  authStorage: Pick<EmbeddedRunAttemptParams["authStorage"], "getApiKey">;
+}): Promise<{ apiKey?: string; authProfileId?: string }> {
+  const runtimeApiKey = await params.authStorage.getApiKey(params.model.provider);
+  let resolvedApiKey = runtimeApiKey ?? undefined;
+  let resolvedAuthProfileId = params.authProfileId?.trim() || undefined;
+
+  if (!resolvedApiKey || !resolvedAuthProfileId) {
+    try {
+      const resolvedAuth = await getApiKeyForModel({
+        model: params.model,
+        cfg: params.config,
+        profileId: params.authProfileId,
+        agentDir: params.agentDir,
+      });
+      resolvedApiKey ??= resolvedAuth.apiKey ?? undefined;
+      resolvedAuthProfileId ||= resolvedAuth.profileId?.trim() || undefined;
+    } catch (error) {
+      if (!resolvedApiKey) {
+        throw error;
+      }
+    }
+  }
+
+  return {
+    apiKey: resolvedApiKey,
+    authProfileId: resolvedAuthProfileId,
+  };
+}
+
+export function isOllamaCompatProvider(model: {
+  provider?: string;
+  baseUrl?: string;
+  api?: string;
+}): boolean {
+  const providerId = normalizeProviderId(model.provider ?? "");
+  if (providerId === "ollama") {
+    return true;
+  }
+  if (!model.baseUrl) {
+    return false;
+  }
+  try {
+    const parsed = new URL(model.baseUrl);
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocalhost =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]";
+    if (isLocalhost && parsed.port === "11434") {
+      return true;
+    }
+
+    // Allow remote/LAN Ollama OpenAI-compatible endpoints when the provider id
+    // itself indicates Ollama usage (e.g. "my-ollama").
+    const providerHintsOllama = providerId.includes("ollama");
+    const isOllamaPort = parsed.port === "11434";
+    const isOllamaCompatPath = parsed.pathname === "/" || /^\/v1\/?$/i.test(parsed.pathname);
+    return providerHintsOllama && isOllamaPort && isOllamaCompatPath;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveOllamaCompatNumCtxEnabled(params: {
+  config?: OpenClawConfig;
+  providerId?: string;
+}): boolean {
+  const providerId = params.providerId?.trim();
+  if (!providerId) {
+    return true;
+  }
+  const providers = params.config?.models?.providers;
+  if (!providers) {
+    return true;
+  }
+  const direct = providers[providerId];
+  if (direct) {
+    return direct.injectNumCtxForOpenAICompat ?? true;
+  }
+  const normalized = normalizeProviderId(providerId);
+  for (const [candidateId, candidate] of Object.entries(providers)) {
+    if (normalizeProviderId(candidateId) === normalized) {
+      return (
+        (candidate as { injectNumCtxForOpenAICompat?: boolean }).injectNumCtxForOpenAICompat ?? true
+      );
+    }
+  }
+  return true;
+}
+
+export function shouldInjectOllamaCompatNumCtx(params: {
+  model: { api?: string; provider?: string; baseUrl?: string };
+  config?: OpenClawConfig;
+  providerId?: string;
+}): boolean {
+  // Restrict to the OpenAI-compatible adapter path only.
+  if (params.model.api !== "openai-completions") {
+    return false;
+  }
+  if (!isOllamaCompatProvider(params.model)) {
+    return false;
+  }
+  return resolveOllamaCompatNumCtxEnabled({
+    config: params.config,
+    providerId: params.providerId,
+  });
+}
+
+export function wrapOllamaCompatNumCtx(baseFn: StreamFn | undefined, numCtx: number): StreamFn {
+  const streamFn = baseFn ?? streamSimple;
+  return (model, context, options) =>
+    streamFn(model, context, {
+      ...options,
+      onPayload: (payload: unknown) => {
+        if (!payload || typeof payload !== "object") {
+          return options?.onPayload?.(payload, model);
+        }
+        const payloadRecord = payload as Record<string, unknown>;
+        if (!payloadRecord.options || typeof payloadRecord.options !== "object") {
+          payloadRecord.options = {};
+        }
+        (payloadRecord.options as Record<string, unknown>).num_ctx = numCtx;
+        return options?.onPayload?.(payload, model);
+      },
+    });
+}
+
+function resolveCaseInsensitiveAllowedToolName(
+  rawName: string,
+  allowedToolNames?: Set<string>,
+): string | null {
+  if (!allowedToolNames || allowedToolNames.size === 0) {
+    return null;
+  }
+  const folded = rawName.toLowerCase();
+  let caseInsensitiveMatch: string | null = null;
+  for (const name of allowedToolNames) {
+    if (name.toLowerCase() !== folded) {
+      continue;
+    }
+    if (caseInsensitiveMatch && caseInsensitiveMatch !== name) {
+      return null;
+    }
+    caseInsensitiveMatch = name;
+  }
+  return caseInsensitiveMatch;
+}
+
+function resolveExactAllowedToolName(
+  rawName: string,
+  allowedToolNames?: Set<string>,
+): string | null {
+  if (!allowedToolNames || allowedToolNames.size === 0) {
+    return null;
+  }
+  if (allowedToolNames.has(rawName)) {
+    return rawName;
+  }
+  const normalized = normalizeToolName(rawName);
+  if (allowedToolNames.has(normalized)) {
+    return normalized;
+  }
+  return (
+    resolveCaseInsensitiveAllowedToolName(rawName, allowedToolNames) ??
+    resolveCaseInsensitiveAllowedToolName(normalized, allowedToolNames)
+  );
+}
+
+function buildStructuredToolNameCandidates(rawName: string): string[] {
+  const trimmed = rawName.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const addCandidate = (value: string) => {
+    const candidate = value.trim();
+    if (!candidate || seen.has(candidate)) {
+      return;
+    }
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+
+  addCandidate(trimmed);
+  addCandidate(normalizeToolName(trimmed));
+
+  const normalizedDelimiter = trimmed.replace(/\//g, ".");
+  addCandidate(normalizedDelimiter);
+  addCandidate(normalizeToolName(normalizedDelimiter));
+
+  const segments = normalizedDelimiter
+    .split(".")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length > 1) {
+    for (let index = 1; index < segments.length; index += 1) {
+      const suffix = segments.slice(index).join(".");
+      addCandidate(suffix);
+      addCandidate(normalizeToolName(suffix));
+    }
+  }
+
+  return candidates;
+}
+
+function resolveStructuredAllowedToolName(
+  rawName: string,
+  allowedToolNames?: Set<string>,
+): string | null {
+  if (!allowedToolNames || allowedToolNames.size === 0) {
+    return null;
+  }
+
+  const candidateNames = buildStructuredToolNameCandidates(rawName);
+  for (const candidate of candidateNames) {
+    if (allowedToolNames.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const candidate of candidateNames) {
+    const caseInsensitiveMatch = resolveCaseInsensitiveAllowedToolName(candidate, allowedToolNames);
+    if (caseInsensitiveMatch) {
+      return caseInsensitiveMatch;
+    }
+  }
+
+  return null;
+}
+
+function inferToolNameFromToolCallId(
+  rawId: string | undefined,
+  allowedToolNames?: Set<string>,
+): string | null {
+  if (!rawId || !allowedToolNames || allowedToolNames.size === 0) {
+    return null;
+  }
+  const id = rawId.trim();
+  if (!id) {
+    return null;
+  }
+
+  const candidateTokens = new Set<string>();
+  const addToken = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    candidateTokens.add(trimmed);
+    candidateTokens.add(trimmed.replace(/[:._/-]\d+$/, ""));
+    candidateTokens.add(trimmed.replace(/\d+$/, ""));
+
+    const normalizedDelimiter = trimmed.replace(/\//g, ".");
+    candidateTokens.add(normalizedDelimiter);
+    candidateTokens.add(normalizedDelimiter.replace(/[:._-]\d+$/, ""));
+    candidateTokens.add(normalizedDelimiter.replace(/\d+$/, ""));
+
+    for (const prefixPattern of [/^functions?[._-]?/i, /^tools?[._-]?/i]) {
+      const stripped = normalizedDelimiter.replace(prefixPattern, "");
+      if (stripped !== normalizedDelimiter) {
+        candidateTokens.add(stripped);
+        candidateTokens.add(stripped.replace(/[:._-]\d+$/, ""));
+        candidateTokens.add(stripped.replace(/\d+$/, ""));
+      }
+    }
+  };
+
+  const preColon = id.split(":")[0] ?? id;
+  for (const seed of [id, preColon]) {
+    addToken(seed);
+  }
+
+  let singleMatch: string | null = null;
+  for (const candidate of candidateTokens) {
+    const matched = resolveStructuredAllowedToolName(candidate, allowedToolNames);
+    if (!matched) {
+      continue;
+    }
+    if (singleMatch && singleMatch !== matched) {
+      return null;
+    }
+    singleMatch = matched;
+  }
+
+  return singleMatch;
+}
+
+function looksLikeMalformedToolNameCounter(rawName: string): boolean {
+  const normalizedDelimiter = rawName.trim().replace(/\//g, ".");
+  return (
+    /^(?:functions?|tools?)[._-]?/i.test(normalizedDelimiter) &&
+    /(?:[:._-]\d+|\d+)$/.test(normalizedDelimiter)
+  );
+}
+
+function normalizeToolCallNameForDispatch(
+  rawName: string,
+  allowedToolNames?: Set<string>,
+  rawToolCallId?: string,
+): string {
+  const trimmed = rawName.trim();
+  if (!trimmed) {
+    // Keep whitespace-only placeholders unchanged unless we can safely infer
+    // a canonical name from toolCallId and allowlist.
+    return inferToolNameFromToolCallId(rawToolCallId, allowedToolNames) ?? rawName;
+  }
+  if (!allowedToolNames || allowedToolNames.size === 0) {
+    return trimmed;
+  }
+
+  const exact = resolveExactAllowedToolName(trimmed, allowedToolNames);
+  if (exact) {
+    return exact;
+  }
+  // Some providers put malformed toolCallId-like strings into `name`
+  // itself (for example `functionsread3`). Recover conservatively from the
+  // name token before consulting the separate id so explicit names like
+  // `someOtherTool` are preserved.
+  const inferredFromName = inferToolNameFromToolCallId(trimmed, allowedToolNames);
+  if (inferredFromName) {
+    return inferredFromName;
+  }
+
+  // If the explicit name looks like a provider-mangled tool-call id with a
+  // numeric suffix, fail closed when inference is ambiguous instead of routing
+  // to whichever structured candidate happens to match.
+  if (looksLikeMalformedToolNameCounter(trimmed)) {
+    return trimmed;
+  }
+
+  return resolveStructuredAllowedToolName(trimmed, allowedToolNames) ?? trimmed;
+}
+
+function isToolCallBlockType(type: unknown): boolean {
+  return type === "toolCall" || type === "toolUse" || type === "functionCall";
+}
+
+const REPLAY_TOOL_CALL_NAME_MAX_CHARS = 64;
+
+type ReplayToolCallBlock = {
+  type?: unknown;
+  id?: unknown;
+  name?: unknown;
+  input?: unknown;
+  arguments?: unknown;
+};
+
+type ReplayToolCallSanitizeReport = {
+  messages: AgentMessage[];
+  droppedAssistantMessages: number;
+};
+
+type AnthropicToolResultContentBlock = {
+  type?: unknown;
+  toolUseId?: unknown;
+};
+
+function isReplayToolCallBlock(block: unknown): block is ReplayToolCallBlock {
+  if (!block || typeof block !== "object") {
+    return false;
+  }
+  return isToolCallBlockType((block as { type?: unknown }).type);
+}
+
+function replayToolCallHasInput(block: ReplayToolCallBlock): boolean {
+  const hasInput = "input" in block ? block.input !== undefined && block.input !== null : false;
+  const hasArguments =
+    "arguments" in block ? block.arguments !== undefined && block.arguments !== null : false;
+  return hasInput || hasArguments;
+}
+
+function replayToolCallNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function resolveReplayToolCallName(
+  rawName: string,
+  rawId: string,
+  allowedToolNames?: Set<string>,
+): string | null {
+  if (rawName.length > REPLAY_TOOL_CALL_NAME_MAX_CHARS * 2) {
+    return null;
+  }
+  const normalized = normalizeToolCallNameForDispatch(rawName, allowedToolNames, rawId);
+  const trimmed = normalized.trim();
+  if (!trimmed || trimmed.length > REPLAY_TOOL_CALL_NAME_MAX_CHARS || /\s/.test(trimmed)) {
+    return null;
+  }
+  if (!allowedToolNames || allowedToolNames.size === 0) {
+    return trimmed;
+  }
+  return resolveExactAllowedToolName(trimmed, allowedToolNames);
+}
+
+function sanitizeReplayToolCallInputs(
+  messages: AgentMessage[],
+  allowedToolNames?: Set<string>,
+): ReplayToolCallSanitizeReport {
+  let changed = false;
+  let droppedAssistantMessages = 0;
+  const out: AgentMessage[] = [];
+
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || message.role !== "assistant") {
+      out.push(message);
+      continue;
+    }
+    if (!Array.isArray(message.content)) {
+      out.push(message);
+      continue;
+    }
+
+    const nextContent: typeof message.content = [];
+    let messageChanged = false;
+
+    for (const block of message.content) {
+      if (!isReplayToolCallBlock(block)) {
+        nextContent.push(block);
+        continue;
+      }
+      const replayBlock = block as ReplayToolCallBlock;
+
+      if (!replayToolCallHasInput(replayBlock) || !replayToolCallNonEmptyString(replayBlock.id)) {
+        changed = true;
+        messageChanged = true;
+        continue;
+      }
+
+      const rawName = typeof replayBlock.name === "string" ? replayBlock.name : "";
+      const resolvedName = resolveReplayToolCallName(rawName, replayBlock.id, allowedToolNames);
+      if (!resolvedName) {
+        changed = true;
+        messageChanged = true;
+        continue;
+      }
+
+      if (replayBlock.name !== resolvedName) {
+        nextContent.push({ ...(block as object), name: resolvedName } as typeof block);
+        changed = true;
+        messageChanged = true;
+        continue;
+      }
+      nextContent.push(block);
+    }
+
+    if (messageChanged) {
+      changed = true;
+      if (nextContent.length > 0) {
+        out.push({ ...message, content: nextContent });
+      } else {
+        droppedAssistantMessages += 1;
+      }
+      continue;
+    }
+
+    out.push(message);
+  }
+
+  return {
+    messages: changed ? out : messages,
+    droppedAssistantMessages,
+  };
+}
+
+function sanitizeAnthropicReplayToolResults(messages: AgentMessage[]): AgentMessage[] {
+  let changed = false;
+  const out: AgentMessage[] = [];
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || typeof message !== "object" || message.role !== "user") {
+      out.push(message);
+      continue;
+    }
+    if (!Array.isArray(message.content)) {
+      out.push(message);
+      continue;
+    }
+
+    const previous = messages[index - 1];
+    const validToolUseIds = new Set<string>();
+    if (previous && typeof previous === "object" && previous.role === "assistant") {
+      const previousContent = (previous as { content?: unknown }).content;
+      if (Array.isArray(previousContent)) {
+        for (const block of previousContent) {
+          if (!block || typeof block !== "object") {
+            continue;
+          }
+          const typedBlock = block as { type?: unknown; id?: unknown };
+          if (typedBlock.type !== "toolUse" || typeof typedBlock.id !== "string") {
+            continue;
+          }
+          const trimmedId = typedBlock.id.trim();
+          if (trimmedId) {
+            validToolUseIds.add(trimmedId);
+          }
+        }
+      }
+    }
+
+    const nextContent = message.content.filter((block) => {
+      if (!block || typeof block !== "object") {
+        return true;
+      }
+      const typedBlock = block as AnthropicToolResultContentBlock;
+      if (typedBlock.type !== "toolResult" || typeof typedBlock.toolUseId !== "string") {
+        return true;
+      }
+      return validToolUseIds.size > 0 && validToolUseIds.has(typedBlock.toolUseId);
+    });
+
+    if (nextContent.length === message.content.length) {
+      out.push(message);
+      continue;
+    }
+
+    changed = true;
+    if (nextContent.length > 0) {
+      out.push({ ...message, content: nextContent });
+      continue;
+    }
+
+    out.push({
+      ...message,
+      content: [{ type: "text", text: "[tool results omitted]" }],
+    } as AgentMessage);
+  }
+
+  return changed ? out : messages;
+}
+
+function normalizeToolCallIdsInMessage(message: unknown): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+
+  const usedIds = new Set<string>();
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const typedBlock = block as { type?: unknown; id?: unknown };
+    if (!isToolCallBlockType(typedBlock.type) || typeof typedBlock.id !== "string") {
+      continue;
+    }
+    const trimmedId = typedBlock.id.trim();
+    if (!trimmedId) {
+      continue;
+    }
+    usedIds.add(trimmedId);
+  }
+
+  let fallbackIndex = 1;
+  const assignedIds = new Set<string>();
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const typedBlock = block as { type?: unknown; id?: unknown };
+    if (!isToolCallBlockType(typedBlock.type)) {
+      continue;
+    }
+    if (typeof typedBlock.id === "string") {
+      const trimmedId = typedBlock.id.trim();
+      if (trimmedId) {
+        if (!assignedIds.has(trimmedId)) {
+          if (typedBlock.id !== trimmedId) {
+            typedBlock.id = trimmedId;
+          }
+          assignedIds.add(trimmedId);
+          continue;
+        }
+      }
+    }
+
+    let fallbackId = "";
+    while (!fallbackId || usedIds.has(fallbackId) || assignedIds.has(fallbackId)) {
+      fallbackId = `call_auto_${fallbackIndex++}`;
+    }
+    typedBlock.id = fallbackId;
+    usedIds.add(fallbackId);
+    assignedIds.add(fallbackId);
+  }
+}
+
+function trimWhitespaceFromToolCallNamesInMessage(
+  message: unknown,
+  allowedToolNames?: Set<string>,
+): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const typedBlock = block as { type?: unknown; name?: unknown; id?: unknown };
+    if (!isToolCallBlockType(typedBlock.type)) {
+      continue;
+    }
+    const rawId = typeof typedBlock.id === "string" ? typedBlock.id : undefined;
+    if (typeof typedBlock.name === "string") {
+      const normalized = normalizeToolCallNameForDispatch(typedBlock.name, allowedToolNames, rawId);
+      if (normalized !== typedBlock.name) {
+        typedBlock.name = normalized;
+      }
+      continue;
+    }
+    const inferred = inferToolNameFromToolCallId(rawId, allowedToolNames);
+    if (inferred) {
+      typedBlock.name = inferred;
+    }
+  }
+  normalizeToolCallIdsInMessage(message);
+}
+
+function wrapStreamTrimToolCallNames(
+  stream: ReturnType<typeof streamSimple>,
+  allowedToolNames?: Set<string>,
+): ReturnType<typeof streamSimple> {
+  const originalResult = stream.result.bind(stream);
+  stream.result = async () => {
+    const message = await originalResult();
+    trimWhitespaceFromToolCallNamesInMessage(message, allowedToolNames);
+    return message;
+  };
+
+  const originalAsyncIterator = stream[Symbol.asyncIterator].bind(stream);
+  (stream as { [Symbol.asyncIterator]: typeof originalAsyncIterator })[Symbol.asyncIterator] =
+    function () {
+      const iterator = originalAsyncIterator();
+      return {
+        async next() {
+          const result = await iterator.next();
+          if (!result.done && result.value && typeof result.value === "object") {
+            const event = result.value as {
+              partial?: unknown;
+              message?: unknown;
+            };
+            trimWhitespaceFromToolCallNamesInMessage(event.partial, allowedToolNames);
+            trimWhitespaceFromToolCallNamesInMessage(event.message, allowedToolNames);
+          }
+          return result;
+        },
+        async return(value?: unknown) {
+          return iterator.return?.(value) ?? { done: true as const, value: undefined };
+        },
+        async throw(error?: unknown) {
+          return iterator.throw?.(error) ?? { done: true as const, value: undefined };
+        },
+      };
+    };
+
+  return stream;
+}
+
+export function wrapStreamFnTrimToolCallNames(
+  baseFn: StreamFn,
+  allowedToolNames?: Set<string>,
+): StreamFn {
+  return (model, context, options) => {
+    const maybeStream = baseFn(model, context, options);
+    if (maybeStream && typeof maybeStream === "object" && "then" in maybeStream) {
+      return Promise.resolve(maybeStream).then((stream) =>
+        wrapStreamTrimToolCallNames(stream, allowedToolNames),
+      );
+    }
+    return wrapStreamTrimToolCallNames(maybeStream, allowedToolNames);
+  };
+}
+
+export function wrapStreamFnSanitizeMalformedToolCalls(
+  baseFn: StreamFn,
+  allowedToolNames?: Set<string>,
+  transcriptPolicy?: Pick<TranscriptPolicy, "validateGeminiTurns" | "validateAnthropicTurns">,
+): StreamFn {
+  return (model, context, options) => {
+    const ctx = context as unknown as { messages?: unknown };
+    const messages = ctx?.messages;
+    if (!Array.isArray(messages)) {
+      return baseFn(model, context, options);
+    }
+    const sanitized = sanitizeReplayToolCallInputs(messages as AgentMessage[], allowedToolNames);
+    if (sanitized.messages === messages) {
+      return baseFn(model, context, options);
+    }
+    let nextMessages = sanitizeToolUseResultPairing(sanitized.messages, {
+      erroredAssistantResultPolicy: "preserve",
+    });
+    if (transcriptPolicy?.validateAnthropicTurns) {
+      nextMessages = sanitizeAnthropicReplayToolResults(nextMessages);
+    }
+    if (sanitized.droppedAssistantMessages > 0 || transcriptPolicy?.validateAnthropicTurns) {
+      if (transcriptPolicy?.validateGeminiTurns) {
+        nextMessages = validateGeminiTurns(nextMessages);
+      }
+      if (transcriptPolicy?.validateAnthropicTurns) {
+        nextMessages = validateAnthropicTurns(nextMessages);
+      }
+    }
+    const nextContext = {
+      ...(context as unknown as Record<string, unknown>),
+      messages: nextMessages,
+    } as unknown;
+    return baseFn(model, nextContext as typeof context, options);
+  };
+}
+
+type BalancedJsonPrefix = {
+  json: string;
+  startIndex: number;
+};
+
+function extractBalancedJsonPrefix(raw: string): BalancedJsonPrefix | null {
+  let start = 0;
+  while (start < raw.length) {
+    const char = raw[start];
+    if (char === "{" || char === "[") {
+      break;
+    }
+    start += 1;
+  }
+  const startChar = raw[start];
+  if (startChar !== "{" && startChar !== "[") {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const char = raw[i];
+    if (char === undefined) {
+      break;
+    }
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return { json: raw.slice(start, i + 1), startIndex: start };
+      }
+    }
+  }
+  return null;
+}
+
+const MAX_TOOLCALL_REPAIR_BUFFER_CHARS = 64_000;
+const MAX_TOOLCALL_REPAIR_LEADING_CHARS = 96;
+const MAX_TOOLCALL_REPAIR_TRAILING_CHARS = 3;
+const TOOLCALL_REPAIR_ALLOWED_LEADING_RE = /^[a-z0-9\s"'`.:/_\\-]+$/i;
+const TOOLCALL_REPAIR_ALLOWED_TRAILING_RE = /^[^\s{}[\]":,\\]{1,3}$/;
+const MAX_BTW_SNAPSHOT_MESSAGES = 100;
+
+function shouldAttemptMalformedToolCallRepair(partialJson: string, delta: string): boolean {
+  if (/[}\]]/.test(delta)) {
+    return true;
+  }
+  const trimmedDelta = delta.trim();
+  return (
+    trimmedDelta.length > 0 &&
+    trimmedDelta.length <= MAX_TOOLCALL_REPAIR_TRAILING_CHARS &&
+    /[}\]]/.test(partialJson)
+  );
+}
+
+type ToolCallArgumentRepair = {
+  args: Record<string, unknown>;
+  trailingSuffix: string;
+};
+
+function isAllowedToolCallRepairLeadingPrefix(prefix: string): boolean {
+  if (!prefix) {
+    return true;
+  }
+  if (prefix.length > MAX_TOOLCALL_REPAIR_LEADING_CHARS) {
+    return false;
+  }
+  if (!TOOLCALL_REPAIR_ALLOWED_LEADING_RE.test(prefix)) {
+    return false;
+  }
+  return /^[.:'"`-]/.test(prefix) || /^(?:functions?|tools?)[._:/-]?/i.test(prefix);
+}
+
+function tryParseMalformedToolCallArguments(raw: string): ToolCallArgumentRepair | undefined {
+  if (!raw.trim()) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? { args: parsed as Record<string, unknown>, trailingSuffix: "" }
+      : undefined;
+  } catch {
+    const extracted = extractBalancedJsonPrefix(raw);
+    if (!extracted) {
+      return undefined;
+    }
+    const leadingPrefix = raw.slice(0, extracted.startIndex).trim();
+    if (!isAllowedToolCallRepairLeadingPrefix(leadingPrefix)) {
+      return undefined;
+    }
+    const suffix = raw.slice(extracted.startIndex + extracted.json.length).trim();
+    if (
+      suffix.length > MAX_TOOLCALL_REPAIR_TRAILING_CHARS ||
+      (suffix.length > 0 && !TOOLCALL_REPAIR_ALLOWED_TRAILING_RE.test(suffix))
+    ) {
+      return undefined;
+    }
+    try {
+      const parsed = JSON.parse(extracted.json) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? { args: parsed as Record<string, unknown>, trailingSuffix: suffix }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function repairToolCallArgumentsInMessage(
+  message: unknown,
+  contentIndex: number,
+  repairedArgs: Record<string, unknown>,
+): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+  const block = content[contentIndex];
+  if (!block || typeof block !== "object") {
+    return;
+  }
+  const typedBlock = block as { type?: unknown; arguments?: unknown };
+  if (!isToolCallBlockType(typedBlock.type)) {
+    return;
+  }
+  typedBlock.arguments = repairedArgs;
+}
+
+function clearToolCallArgumentsInMessage(message: unknown, contentIndex: number): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+  const block = content[contentIndex];
+  if (!block || typeof block !== "object") {
+    return;
+  }
+  const typedBlock = block as { type?: unknown; arguments?: unknown };
+  if (!isToolCallBlockType(typedBlock.type)) {
+    return;
+  }
+  typedBlock.arguments = {};
+}
+
+function repairMalformedToolCallArgumentsInMessage(
+  message: unknown,
+  repairedArgsByIndex: Map<number, Record<string, unknown>>,
+): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+  for (const [index, repairedArgs] of repairedArgsByIndex.entries()) {
+    repairToolCallArgumentsInMessage(message, index, repairedArgs);
+  }
+}
+
+function wrapStreamRepairMalformedToolCallArguments(
+  stream: ReturnType<typeof streamSimple>,
+): ReturnType<typeof streamSimple> {
+  const partialJsonByIndex = new Map<number, string>();
+  const repairedArgsByIndex = new Map<number, Record<string, unknown>>();
+  const disabledIndices = new Set<number>();
+  const loggedRepairIndices = new Set<number>();
+  const originalResult = stream.result.bind(stream);
+  stream.result = async () => {
+    const message = await originalResult();
+    repairMalformedToolCallArgumentsInMessage(message, repairedArgsByIndex);
+    partialJsonByIndex.clear();
+    repairedArgsByIndex.clear();
+    disabledIndices.clear();
+    loggedRepairIndices.clear();
+    return message;
+  };
+
+  const originalAsyncIterator = stream[Symbol.asyncIterator].bind(stream);
+  (stream as { [Symbol.asyncIterator]: typeof originalAsyncIterator })[Symbol.asyncIterator] =
+    function () {
+      const iterator = originalAsyncIterator();
+      return {
+        async next() {
+          const result = await iterator.next();
+          if (!result.done && result.value && typeof result.value === "object") {
+            const event = result.value as {
+              type?: unknown;
+              contentIndex?: unknown;
+              delta?: unknown;
+              partial?: unknown;
+              message?: unknown;
+              toolCall?: unknown;
+            };
+            if (
+              typeof event.contentIndex === "number" &&
+              Number.isInteger(event.contentIndex) &&
+              event.type === "toolcall_delta" &&
+              typeof event.delta === "string"
+            ) {
+              if (disabledIndices.has(event.contentIndex)) {
+                return result;
+              }
+              const nextPartialJson =
+                (partialJsonByIndex.get(event.contentIndex) ?? "") + event.delta;
+              if (nextPartialJson.length > MAX_TOOLCALL_REPAIR_BUFFER_CHARS) {
+                partialJsonByIndex.delete(event.contentIndex);
+                repairedArgsByIndex.delete(event.contentIndex);
+                disabledIndices.add(event.contentIndex);
+                return result;
+              }
+              partialJsonByIndex.set(event.contentIndex, nextPartialJson);
+              const shouldReevaluateRepair =
+                shouldAttemptMalformedToolCallRepair(nextPartialJson, event.delta) ||
+                repairedArgsByIndex.has(event.contentIndex);
+              if (shouldReevaluateRepair) {
+                const repair = tryParseMalformedToolCallArguments(nextPartialJson);
+                if (repair) {
+                  repairedArgsByIndex.set(event.contentIndex, repair.args);
+                  repairToolCallArgumentsInMessage(event.partial, event.contentIndex, repair.args);
+                  repairToolCallArgumentsInMessage(event.message, event.contentIndex, repair.args);
+                  if (!loggedRepairIndices.has(event.contentIndex)) {
+                    loggedRepairIndices.add(event.contentIndex);
+                    log.warn(
+                      `repairing Kimi tool call arguments after ${repair.trailingSuffix.length} trailing chars`,
+                    );
+                  }
+                } else {
+                  repairedArgsByIndex.delete(event.contentIndex);
+                  clearToolCallArgumentsInMessage(event.partial, event.contentIndex);
+                  clearToolCallArgumentsInMessage(event.message, event.contentIndex);
+                }
+              }
+            }
+            if (
+              typeof event.contentIndex === "number" &&
+              Number.isInteger(event.contentIndex) &&
+              event.type === "toolcall_end"
+            ) {
+              const repairedArgs = repairedArgsByIndex.get(event.contentIndex);
+              if (repairedArgs) {
+                if (event.toolCall && typeof event.toolCall === "object") {
+                  (event.toolCall as { arguments?: unknown }).arguments = repairedArgs;
+                }
+                repairToolCallArgumentsInMessage(event.partial, event.contentIndex, repairedArgs);
+                repairToolCallArgumentsInMessage(event.message, event.contentIndex, repairedArgs);
+              }
+              partialJsonByIndex.delete(event.contentIndex);
+              disabledIndices.delete(event.contentIndex);
+              loggedRepairIndices.delete(event.contentIndex);
+            }
+          }
+          return result;
+        },
+        async return(value?: unknown) {
+          return iterator.return?.(value) ?? { done: true as const, value: undefined };
+        },
+        async throw(error?: unknown) {
+          return iterator.throw?.(error) ?? { done: true as const, value: undefined };
+        },
+      };
+    };
+
+  return stream;
+}
+
+export function wrapStreamFnRepairMalformedToolCallArguments(baseFn: StreamFn): StreamFn {
+  return (model, context, options) => {
+    const maybeStream = baseFn(model, context, options);
+    if (maybeStream && typeof maybeStream === "object" && "then" in maybeStream) {
+      return Promise.resolve(maybeStream).then((stream) =>
+        wrapStreamRepairMalformedToolCallArguments(stream),
+      );
+    }
+    return wrapStreamRepairMalformedToolCallArguments(maybeStream);
+  };
+}
+
+function shouldRepairMalformedAnthropicToolCallArguments(provider?: string): boolean {
+  return normalizeProviderId(provider ?? "") === "kimi";
+}
+
+// ---------------------------------------------------------------------------
+// xAI / Grok: decode HTML entities in tool call arguments
+// ---------------------------------------------------------------------------
+
+const HTML_ENTITY_RE = /&(?:amp|lt|gt|quot|apos|#39|#x[0-9a-f]+|#\d+);/i;
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/gi, (_, dec) => String.fromCodePoint(Number.parseInt(dec, 10)));
+}
+
+export function decodeHtmlEntitiesInObject(obj: unknown): unknown {
+  if (typeof obj === "string") {
+    return HTML_ENTITY_RE.test(obj) ? decodeHtmlEntities(obj) : obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(decodeHtmlEntitiesInObject);
+  }
+  if (obj && typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+      result[key] = decodeHtmlEntitiesInObject(val);
+    }
+    return result;
+  }
+  return obj;
+}
+
+function decodeXaiToolCallArgumentsInMessage(message: unknown): void {
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return;
+  }
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const typedBlock = block as { type?: unknown; arguments?: unknown };
+    if (typedBlock.type !== "toolCall" || !typedBlock.arguments) {
+      continue;
+    }
+    if (typeof typedBlock.arguments === "object") {
+      typedBlock.arguments = decodeHtmlEntitiesInObject(typedBlock.arguments);
+    }
+  }
+}
+
+function wrapStreamDecodeXaiToolCallArguments(
+  stream: ReturnType<typeof streamSimple>,
+): ReturnType<typeof streamSimple> {
+  const originalResult = stream.result.bind(stream);
+  stream.result = async () => {
+    const message = await originalResult();
+    decodeXaiToolCallArgumentsInMessage(message);
+    return message;
+  };
+
+  const originalAsyncIterator = stream[Symbol.asyncIterator].bind(stream);
+  (stream as { [Symbol.asyncIterator]: typeof originalAsyncIterator })[Symbol.asyncIterator] =
+    function () {
+      const iterator = originalAsyncIterator();
+      return {
+        async next() {
+          const result = await iterator.next();
+          if (!result.done && result.value && typeof result.value === "object") {
+            const event = result.value as { partial?: unknown; message?: unknown };
+            decodeXaiToolCallArgumentsInMessage(event.partial);
+            decodeXaiToolCallArgumentsInMessage(event.message);
+          }
+          return result;
+        },
+        async return(value?: unknown) {
+          return iterator.return?.(value) ?? { done: true as const, value: undefined };
+        },
+        async throw(error?: unknown) {
+          return iterator.throw?.(error) ?? { done: true as const, value: undefined };
+        },
+      };
+    };
+  return stream;
+}
+
+function wrapStreamFnDecodeXaiToolCallArguments(baseFn: StreamFn): StreamFn {
+  return (model, context, options) => {
+    const maybeStream = baseFn(model, context, options);
+    if (maybeStream && typeof maybeStream === "object" && "then" in maybeStream) {
+      return Promise.resolve(maybeStream).then((stream) =>
+        wrapStreamDecodeXaiToolCallArguments(stream),
+      );
+    }
+    return wrapStreamDecodeXaiToolCallArguments(maybeStream);
+  };
+}
 
 export {
   appendAttemptCacheTtlIfNeeded,
@@ -190,7 +1330,6 @@ export {
   resolveAttemptSpawnWorkspaceDir,
 } from "./attempt.thread-helpers.js";
 export {
-  buildAfterTurnRuntimeContext,
   prependSystemPromptAddition,
   resolveAttemptFsWorkspaceOnly,
   resolvePromptBuildHookResult,
@@ -203,22 +1342,6 @@ export {
   queueSessionsYieldInterruptMessage,
   stripSessionsYieldArtifacts,
 } from "./attempt.sessions-yield.js";
-export {
-  isOllamaCompatProvider,
-  resolveOllamaCompatNumCtxEnabled,
-  shouldInjectOllamaCompatNumCtx,
-  wrapOllamaCompatNumCtx,
-} from "../../../plugin-sdk/ollama.js";
-export {
-  decodeHtmlEntitiesInObject,
-  wrapStreamFnRepairMalformedToolCallArguments,
-} from "./attempt.tool-call-argument-repair.js";
-export {
-  wrapStreamFnSanitizeMalformedToolCalls,
-  wrapStreamFnTrimToolCallNames,
-} from "./attempt.tool-call-normalization.js";
-
-const MAX_BTW_SNAPSHOT_MESSAGES = 100;
 
 function shouldEnableAnthropicThinkingRecovery(api: string | null | undefined): boolean {
   return api === "anthropic-messages" || api === "bedrock-converse-stream";
@@ -264,6 +1387,66 @@ export function resolveEmbeddedAgentStreamFn(params: {
   }
 
   return currentStreamFn;
+}
+
+/** Build runtime context passed into context-engine afterTurn hooks. */
+export function buildAfterTurnRuntimeContext(params: {
+  attempt?: Pick<
+    EmbeddedRunAttemptParams,
+    | "sessionKey"
+    | "messageChannel"
+    | "messageProvider"
+    | "agentAccountId"
+    | "currentChannelId"
+    | "currentThreadTs"
+    | "currentMessageId"
+    | "config"
+    | "skillsSnapshot"
+    | "senderIsOwner"
+    | "senderId"
+    | "provider"
+    | "modelId"
+    | "thinkLevel"
+    | "reasoningLevel"
+    | "bashElevated"
+    | "extraSystemPrompt"
+    | "ownerNumbers"
+    | "authProfileId"
+  >;
+  workspaceDir: string;
+  agentDir: string;
+}): Partial<CompactEmbeddedPiSessionParams> {
+  const attempt = params.attempt;
+  if (!attempt) {
+    return {
+      workspaceDir: params.workspaceDir,
+      agentDir: params.agentDir,
+    };
+  }
+
+  return buildEmbeddedCompactionRuntimeContext({
+    sessionKey: attempt.sessionKey,
+    messageChannel: attempt.messageChannel,
+    messageProvider: attempt.messageProvider,
+    agentAccountId: attempt.agentAccountId,
+    currentChannelId: attempt.currentChannelId,
+    currentThreadTs: attempt.currentThreadTs,
+    currentMessageId: attempt.currentMessageId,
+    authProfileId: attempt.authProfileId,
+    workspaceDir: params.workspaceDir,
+    agentDir: params.agentDir,
+    config: attempt.config,
+    skillsSnapshot: attempt.skillsSnapshot,
+    senderIsOwner: attempt.senderIsOwner,
+    senderId: attempt.senderId,
+    provider: attempt.provider,
+    modelId: attempt.modelId,
+    thinkLevel: attempt.thinkLevel,
+    reasoningLevel: attempt.reasoningLevel,
+    bashElevated: attempt.bashElevated,
+    extraSystemPrompt: attempt.extraSystemPrompt,
+    ownerNumbers: attempt.ownerNumbers,
+  });
 }
 
 function summarizeMessagePayload(msg: AgentMessage): { textChars: number; imageBlocks: number } {
@@ -934,7 +2117,6 @@ export async function runEmbeddedAttempt(
         modelApi: params.model.api,
         workspaceDir: params.workspaceDir,
       });
-
       const defaultSessionStreamFn = activeSession.agent.streamFn;
       const providerStreamFn = registerProviderStreamForModel({
         model: params.model,
@@ -963,6 +2145,65 @@ export async function runEmbeddedAttempt(
         signal: runAbortController.signal,
         model: params.model,
         authStorage: params.authStorage,
+      });
+      if (params.model.api === "ollama") {
+        const providerConfig = params.config?.models?.providers?.[params.model.provider];
+        const providerBaseUrl =
+          typeof providerConfig?.baseUrl === "string" ? providerConfig.baseUrl : undefined;
+        const ollamaStreamFn = createConfiguredOllamaStreamFn({
+          model: params.model,
+          providerBaseUrl,
+        });
+        activeSession.agent.streamFn = ollamaStreamFn;
+        ensureCustomApiRegistered(params.model.api, ollamaStreamFn);
+      } else if (normalizeProviderId(params.provider) === "gigachat") {
+        const providerConfig = params.config?.models?.providers?.[params.provider];
+        const resolvedGigachatAuth = await resolveGigachatApiKeyForRun({
+          model: params.model,
+          config: params.config,
+          authProfileId: params.authProfileId,
+          agentDir,
+          authStorage: params.authStorage,
+        });
+        const gigachatStore = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+        const gigachatMeta = resolveGigachatAuthProfileMetadata(
+          gigachatStore,
+          resolvedGigachatAuth.authProfileId,
+          {
+            allowDefaultProfileFallback: Boolean(resolvedGigachatAuth.authProfileId),
+          },
+        );
+        const baseUrl = resolveConfiguredGigachatBaseUrl({
+          baseUrl:
+            (typeof providerConfig?.baseUrl === "string" ? providerConfig.baseUrl : undefined) ??
+            (typeof params.model.baseUrl === "string" ? params.model.baseUrl : undefined),
+          envBaseUrl: process.env.GIGACHAT_BASE_URL,
+          metadata: gigachatMeta,
+          apiKey: resolvedGigachatAuth.apiKey,
+          authProfileId: resolvedGigachatAuth.authProfileId,
+        });
+        activeSession.agent.streamFn = createGigachatStreamFn({
+          baseUrl,
+          authMode: resolveGigachatAuthMode({
+            metadata: gigachatMeta,
+            apiKey: resolvedGigachatAuth.apiKey,
+            authProfileId: resolvedGigachatAuth.authProfileId,
+          }),
+          insecureTls: resolveGigachatInsecureTlsOverride(gigachatMeta),
+          scope: gigachatMeta?.scope,
+        });
+      }
+
+      // Ollama with OpenAI-compatible API needs num_ctx in payload.options.
+      // Otherwise Ollama defaults to a 4096 context window.
+      const providerIdForNumCtx =
+        typeof params.model.provider === "string" && params.model.provider.trim().length > 0
+          ? params.model.provider
+          : params.provider;
+      const _shouldInjectNumCtx = shouldInjectOllamaCompatNumCtx({
+        model: params.model,
+        providerId: providerIdForNumCtx,
+        config: params.config,
       });
 
       const { effectiveExtraParams } = applyExtraParamsToAgent(

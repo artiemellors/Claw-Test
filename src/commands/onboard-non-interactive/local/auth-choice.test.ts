@@ -2,6 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { applyNonInteractiveAuthChoice } from "./auth-choice.js";
 
+const applySimpleNonInteractiveApiKeyChoice = vi.hoisted(() =>
+  vi.fn<typeof import("./auth-choice.api-key-providers.js").applySimpleNonInteractiveApiKeyChoice>(
+    async () => undefined,
+  ),
+);
+vi.mock("./auth-choice.api-key-providers.js", () => ({
+  applySimpleNonInteractiveApiKeyChoice,
+}));
+
 const applyNonInteractivePluginProviderChoice = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("./auth-choice.plugin-providers.js", () => ({
   applyNonInteractivePluginProviderChoice,
@@ -12,15 +21,10 @@ vi.mock("../api-keys.js", () => ({
   resolveNonInteractiveApiKey,
 }));
 
-const resolveManifestDeprecatedProviderAuthChoice = vi.hoisted(() => vi.fn(() => undefined));
-const resolveManifestProviderAuthChoices = vi.hoisted(() => vi.fn(() => []));
-vi.mock("../../../plugins/provider-auth-choices.js", () => ({
-  resolveManifestDeprecatedProviderAuthChoice,
-  resolveManifestProviderAuthChoices,
-}));
-
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.OPENCLAW_AGENT_DIR;
+  delete process.env.PI_CODING_AGENT_DIR;
 });
 
 function createRuntime() {
@@ -32,15 +36,15 @@ function createRuntime() {
 }
 
 describe("applyNonInteractiveAuthChoice", () => {
-  it("resolves plugin provider auth before builtin custom-provider handling", async () => {
+  it("resolves plugin provider auth before builtin API key fallbacks", async () => {
     const runtime = createRuntime();
     const nextConfig = { agents: { defaults: {} } } as OpenClawConfig;
-    const resolvedConfig = { auth: { profiles: { "demo-provider:default": { mode: "api_key" } } } };
+    const resolvedConfig = { auth: { profiles: { "openai:default": { mode: "api_key" } } } };
     applyNonInteractivePluginProviderChoice.mockResolvedValueOnce(resolvedConfig as never);
 
     const result = await applyNonInteractiveAuthChoice({
       nextConfig,
-      authChoice: "demo-provider-api-key",
+      authChoice: "openai-api-key",
       opts: {} as never,
       runtime: runtime as never,
       baseConfig: nextConfig,
@@ -48,28 +52,100 @@ describe("applyNonInteractiveAuthChoice", () => {
 
     expect(result).toBe(resolvedConfig);
     expect(applyNonInteractivePluginProviderChoice).toHaveBeenCalledOnce();
+    expect(applySimpleNonInteractiveApiKeyChoice).not.toHaveBeenCalled();
   });
 
-  it("fails with manifest-owned replacement guidance for deprecated auth choices", async () => {
+  it("passes the target agent dir into builtin non-interactive API key flows", async () => {
     const runtime = createRuntime();
-    const nextConfig = { agents: { defaults: {} } } as OpenClawConfig;
-    resolveManifestDeprecatedProviderAuthChoice.mockReturnValueOnce({
-      choiceId: "demo-provider-modern-api",
-    } as never);
+    const nextConfig = {
+      agents: {
+        defaults: {},
+        list: [
+          {
+            id: "work",
+            default: true,
+            agentDir: "/tmp/openclaw-agents/work/agent",
+          },
+        ],
+      },
+    } as OpenClawConfig;
+    applySimpleNonInteractiveApiKeyChoice.mockImplementationOnce(async ({ resolveApiKey }) => {
+      await resolveApiKey({
+        provider: "gigachat",
+        cfg: nextConfig,
+        flagName: "--gigachat-api-key",
+        envVar: "GIGACHAT_CREDENTIALS",
+        runtime: runtime as never,
+      });
+      return null;
+    });
+    resolveNonInteractiveApiKey.mockResolvedValueOnce(null);
 
-    const result = await applyNonInteractiveAuthChoice({
+    await applyNonInteractiveAuthChoice({
       nextConfig,
-      authChoice: "demo-provider-legacy",
+      authChoice: "gigachat-api-key",
       opts: {} as never,
       runtime: runtime as never,
       baseConfig: nextConfig,
     });
 
-    expect(result).toBeNull();
-    expect(runtime.error).toHaveBeenCalledWith(
-      '"demo-provider-legacy" is no longer supported. Use --auth-choice demo-provider-modern-api instead.',
+    expect(applySimpleNonInteractiveApiKeyChoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/tmp/openclaw-agents/work/agent",
+      }),
     );
-    expect(runtime.exit).toHaveBeenCalledWith(1);
-    expect(applyNonInteractivePluginProviderChoice).toHaveBeenCalledOnce();
+    expect(resolveNonInteractiveApiKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/tmp/openclaw-agents/work/agent",
+      }),
+    );
+  });
+
+  it("prefers OPENCLAW_AGENT_DIR overrides for builtin non-interactive API key flows", async () => {
+    const runtime = createRuntime();
+    const nextConfig = {
+      agents: {
+        defaults: {},
+        list: [
+          {
+            id: "work",
+            default: true,
+            agentDir: "/tmp/openclaw-agents/work/agent",
+          },
+        ],
+      },
+    } as OpenClawConfig;
+    process.env.OPENCLAW_AGENT_DIR = "/tmp/openclaw-agents/override/agent";
+    process.env.PI_CODING_AGENT_DIR = "/tmp/openclaw-agents/override/agent";
+    applySimpleNonInteractiveApiKeyChoice.mockImplementationOnce(async ({ resolveApiKey }) => {
+      await resolveApiKey({
+        provider: "gigachat",
+        cfg: nextConfig,
+        flagName: "--gigachat-api-key",
+        envVar: "GIGACHAT_CREDENTIALS",
+        runtime: runtime as never,
+      });
+      return null;
+    });
+    resolveNonInteractiveApiKey.mockResolvedValueOnce(null);
+
+    await applyNonInteractiveAuthChoice({
+      nextConfig,
+      authChoice: "gigachat-api-key",
+      opts: {} as never,
+      runtime: runtime as never,
+      baseConfig: nextConfig,
+    });
+
+    expect(applySimpleNonInteractiveApiKeyChoice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/tmp/openclaw-agents/override/agent",
+      }),
+    );
+    expect(resolveNonInteractiveApiKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/tmp/openclaw-agents/override/agent",
+      }),
+    );
   });
 });

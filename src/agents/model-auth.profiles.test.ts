@@ -736,6 +736,19 @@ describe("getApiKeyForModel", () => {
     );
   });
 
+  it("resolveEnvApiKey('gigachat') ignores password-only basic-auth envs", async () => {
+    await withEnvAsync(
+      {
+        GIGACHAT_CREDENTIALS: undefined,
+        GIGACHAT_PASSWORD: "gigachat-basic-password",
+      },
+      async () => {
+        const resolved = resolveEnvApiKey("gigachat");
+        expect(resolved).toBeNull();
+      },
+    );
+  });
+
   it("resolveEnvApiKey('anthropic-vertex') uses the provided env snapshot", async () => {
     const resolved = resolveEnvApiKey("anthropic-vertex", {
       GOOGLE_CLOUD_PROJECT_ID: "vertex-project",

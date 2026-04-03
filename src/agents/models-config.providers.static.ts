@@ -4,6 +4,14 @@ import {
   listBundledPluginMetadata,
   resolveBundledPluginPublicSurfacePath,
 } from "../plugins/bundled-plugin-metadata.js";
+export { buildKilocodeProvider } from "../plugin-sdk/kilocode.js";
+export { buildKimiCodingProvider } from "../plugin-sdk/kimi-coding.js";
+export {
+  QIANFAN_BASE_URL,
+  QIANFAN_DEFAULT_MODEL_ID,
+  buildQianfanProvider,
+} from "../plugin-sdk/qianfan.js";
+export { XIAOMI_DEFAULT_MODEL_ID, buildXiaomiProvider } from "../plugin-sdk/xiaomi.js";
 
 const PROVIDER_CATALOG_ARTIFACT_BASENAME = "provider-catalog.js";
 const DEFAULT_PROVIDER_CATALOG_ROOT = path.resolve(import.meta.dirname, "../..");

@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  GIGACHAT_BASE_URL,
+  GIGACHAT_BASIC_BASE_URL,
+} from "../../../commands/onboard-auth.models.js";
 import type { OpenClawConfig } from "../../../config/config.js";
 import {
   isOllamaCompatProvider,
@@ -7,14 +11,25 @@ import {
   wrapOllamaCompatNumCtx,
 } from "../../../plugin-sdk/ollama.js";
 import { appendBootstrapPromptWarning } from "../../bootstrap-budget.js";
+import {
+  resolveConfiguredGigachatBaseUrl,
+  resolveGigachatAuthMode,
+  resolveGigachatInsecureTlsOverride,
+} from "../../gigachat-auth.js";
 import { buildAgentSystemPrompt } from "../../system-prompt.js";
 import {
   buildAfterTurnRuntimeContext,
+  buildSessionsYieldContextMessage,
   composeSystemPromptWithHookContext,
+  persistSessionsYieldContextMessage,
   prependSystemPromptAddition,
+  resolveGigachatApiKeyForRun,
+  resolveGigachatAuthProfileMetadata,
+  queueSessionsYieldInterruptMessage,
   resolveAttemptFsWorkspaceOnly,
   resolvePromptBuildHookResult,
   resolvePromptModeForSession,
+  stripSessionsYieldArtifacts,
   decodeHtmlEntitiesInObject,
   wrapStreamFnRepairMalformedToolCallArguments,
   wrapStreamFnSanitizeMalformedToolCalls,
@@ -143,6 +158,302 @@ describe("resolvePromptBuildHookResult", () => {
   });
 });
 
+describe("resolveGigachatAuthProfileMetadata", () => {
+  it("prefers the active GigaChat auth profile metadata over the default profile", () => {
+    expect(
+      resolveGigachatAuthProfileMetadata(
+        {
+          profiles: {
+            "gigachat:default": {
+              type: "api_key",
+              provider: "gigachat",
+              metadata: { scope: "GIGACHAT_API_PERS", insecureTls: "false" },
+            },
+            "gigachat:business": {
+              type: "api_key",
+              provider: "gigachat",
+              metadata: { scope: "GIGACHAT_API_B2B", insecureTls: "true" },
+            },
+          },
+        },
+        "gigachat:business",
+      ),
+    ).toEqual({ scope: "GIGACHAT_API_B2B", insecureTls: "true" });
+  });
+
+  it("falls back to the default GigaChat profile metadata when the active profile is absent", () => {
+    expect(
+      resolveGigachatAuthProfileMetadata(
+        {
+          profiles: {
+            "gigachat:default": {
+              type: "api_key",
+              provider: "gigachat",
+              metadata: { scope: "GIGACHAT_API_PERS", insecureTls: "false" },
+            },
+          },
+        },
+        "gigachat:business",
+      ),
+    ).toEqual({ scope: "GIGACHAT_API_PERS", insecureTls: "false" });
+  });
+
+  it("ignores non-GigaChat active profiles when resolving metadata", () => {
+    expect(
+      resolveGigachatAuthProfileMetadata(
+        {
+          profiles: {
+            "gigachat:default": {
+              type: "api_key",
+              provider: "gigachat",
+              metadata: { scope: "GIGACHAT_API_PERS" },
+            },
+            "openai:p1": {
+              type: "api_key",
+              provider: "openai",
+              metadata: { scope: "not-gigachat" },
+            },
+          },
+        },
+        "openai:p1",
+      ),
+    ).toEqual({ scope: "GIGACHAT_API_PERS" });
+  });
+
+  it("does not inherit the default GigaChat profile when fallback is disabled", () => {
+    expect(
+      resolveGigachatAuthProfileMetadata(
+        {
+          profiles: {
+            "gigachat:default": {
+              type: "api_key",
+              provider: "gigachat",
+              metadata: { scope: "GIGACHAT_API_B2B", insecureTls: "true" },
+            },
+          },
+        },
+        undefined,
+        { allowDefaultProfileFallback: false },
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("resolveGigachatAuthMode", () => {
+  it("infers basic auth for single-separator combined credentials without profile metadata", () => {
+    expect(resolveGigachatAuthMode({ apiKey: "user:password" })).toBe("basic");
+  });
+
+  it("keeps oauth as the fallback for colon-containing credentials keys", () => {
+    expect(resolveGigachatAuthMode({ apiKey: "oauth:credential:with:colon" })).toBe("oauth");
+  });
+
+  it("keeps oauth as the fallback when a profile is selected but has no metadata", () => {
+    expect(
+      resolveGigachatAuthMode({
+        apiKey: "oauth:credential:with:colon",
+        authProfileId: "gigachat:business",
+      }),
+    ).toBe("oauth");
+  });
+
+  it("infers basic auth for single-separator stored profile credentials without metadata", () => {
+    expect(
+      resolveGigachatAuthMode({
+        apiKey: "user:password",
+        authProfileId: "gigachat:default",
+      }),
+    ).toBe("basic");
+  });
+});
+
+describe("resolveGigachatInsecureTlsOverride", () => {
+  it("maps explicit metadata flags to boolean overrides", () => {
+    expect(resolveGigachatInsecureTlsOverride({ insecureTls: "true" })).toBe(true);
+    expect(resolveGigachatInsecureTlsOverride({ insecureTls: "false" })).toBe(false);
+  });
+
+  it("leaves the override unset when metadata does not specify TLS behavior", () => {
+    expect(resolveGigachatInsecureTlsOverride(undefined)).toBeUndefined();
+    expect(resolveGigachatInsecureTlsOverride({ scope: "GIGACHAT_API_PERS" })).toBeUndefined();
+  });
+});
+
+describe("resolveGigachatApiKeyForRun", () => {
+  it("falls back to config-backed GigaChat API keys when authStorage has no key", async () => {
+    const resolved = await resolveGigachatApiKeyForRun({
+      model: {
+        provider: "gigachat",
+        api: "openai-completions",
+        id: "GigaChat-2-Max",
+        input: ["text"],
+      } as never,
+      config: {
+        models: {
+          providers: {
+            gigachat: {
+              baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+              api: "openai-completions",
+              apiKey: "user:password",
+              models: [],
+            },
+          },
+        },
+      },
+      authStorage: {
+        getApiKey: vi.fn(async () => undefined),
+      },
+    });
+
+    expect(resolved).toEqual({
+      apiKey: "user:password",
+      authProfileId: undefined,
+    });
+  });
+
+  it("keeps runtime authStorage keys over config-backed GigaChat API keys", async () => {
+    const resolved = await resolveGigachatApiKeyForRun({
+      model: {
+        provider: "gigachat",
+        api: "openai-completions",
+        id: "GigaChat-2-Max",
+        input: ["text"],
+      } as never,
+      config: {
+        models: {
+          providers: {
+            gigachat: {
+              baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+              api: "openai-completions",
+              apiKey: "config-user:config-pass",
+              models: [],
+            },
+          },
+        },
+      },
+      authStorage: {
+        getApiKey: vi.fn(async () => "runtime-key"),
+      },
+    });
+
+    expect(resolved).toEqual({
+      apiKey: "runtime-key",
+      authProfileId: undefined,
+    });
+  });
+});
+
+describe("resolveConfiguredGigachatBaseUrl", () => {
+  it("treats the stock OAuth host as an implicit default for Basic auth", () => {
+    expect(
+      resolveConfiguredGigachatBaseUrl({
+        baseUrl: GIGACHAT_BASE_URL,
+        apiKey: "user:password",
+      }),
+    ).toBe(GIGACHAT_BASIC_BASE_URL);
+  });
+
+  it("preserves custom hosts for Basic auth", () => {
+    expect(
+      resolveConfiguredGigachatBaseUrl({
+        baseUrl: "https://preview.gigachat.example/v1",
+        apiKey: "user:password",
+      }),
+    ).toBe("https://preview.gigachat.example/v1");
+  });
+});
+
+describe("sessions_yield helpers", () => {
+  it("builds a hidden follow-up context note", () => {
+    expect(buildSessionsYieldContextMessage("Waiting for subagent")).toContain(
+      "Waiting for subagent",
+    );
+    expect(buildSessionsYieldContextMessage("Waiting for subagent")).toContain(
+      "ended intentionally via sessions_yield",
+    );
+  });
+
+  it("queues a hidden interrupt steering message", () => {
+    const steer = vi.fn();
+    queueSessionsYieldInterruptMessage({ agent: { steer } });
+    expect(steer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "custom",
+        customType: "openclaw.sessions_yield_interrupt",
+        display: false,
+        details: { source: "sessions_yield" },
+      }),
+    );
+  });
+
+  it("persists a hidden yield context message without triggering a turn", async () => {
+    const sendCustomMessage = vi.fn(async () => {});
+    await persistSessionsYieldContextMessage(
+      {
+        sendCustomMessage,
+      },
+      "Waiting for subagent",
+    );
+    expect(sendCustomMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "openclaw.sessions_yield",
+        display: false,
+        details: { source: "sessions_yield", message: "Waiting for subagent" },
+        content: expect.stringContaining("Waiting for subagent"),
+      }),
+      { triggerTurn: false },
+    );
+  });
+
+  it("strips trailing yield interrupt artifacts from memory and transcript state", () => {
+    const replaceMessages = vi.fn();
+    const rewriteFile = vi.fn();
+    const activeSession = {
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+        { role: "custom", customType: "openclaw.sessions_yield_interrupt" },
+        { role: "assistant", stopReason: "aborted" },
+      ],
+      agent: { replaceMessages },
+      sessionManager: {
+        fileEntries: [
+          { type: "session", id: "session-root" },
+          {
+            type: "custom_message",
+            id: "interrupt",
+            parentId: "session-root",
+            customType: "openclaw.sessions_yield_interrupt",
+          },
+          {
+            type: "message",
+            id: "aborted",
+            parentId: "interrupt",
+            message: { role: "assistant", stopReason: "aborted" },
+          },
+        ],
+        byId: new Map([
+          ["interrupt", { id: "interrupt" }],
+          ["aborted", { id: "aborted" }],
+        ]),
+        leafId: "aborted",
+        _rewriteFile: rewriteFile,
+      },
+    };
+
+    stripSessionsYieldArtifacts(activeSession as never);
+
+    expect(replaceMessages).toHaveBeenCalledWith([
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+    ]);
+    expect(activeSession.sessionManager.fileEntries).toEqual([
+      { type: "session", id: "session-root" },
+    ]);
+    expect(activeSession.sessionManager.byId.has("interrupt")).toBe(false);
+    expect(activeSession.sessionManager.byId.has("aborted")).toBe(false);
+    expect(activeSession.sessionManager.leafId).toBe("session-root");
+    expect(rewriteFile).toHaveBeenCalledTimes(1);
+  });
+});
 describe("composeSystemPromptWithHookContext", () => {
   it("returns undefined when no hook system context is provided", () => {
     expect(composeSystemPromptWithHookContext({ baseSystemPrompt: "base" })).toBeUndefined();
@@ -1985,6 +2296,18 @@ describe("prependSystemPromptAddition", () => {
 });
 
 describe("buildAfterTurnRuntimeContext", () => {
+  it("returns workspace-only context when attempt data is missing", () => {
+    const legacy = buildAfterTurnRuntimeContext({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+    });
+
+    expect(legacy).toEqual({
+      workspaceDir: "/tmp/workspace",
+      agentDir: "/tmp/agent",
+    });
+  });
+
   it("uses primary model when compaction.model is not set", () => {
     const legacy = buildAfterTurnRuntimeContext({
       attempt: {

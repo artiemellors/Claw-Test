@@ -6,8 +6,8 @@ import type {
 } from "../src/channels/plugins/types.js";
 import type { OpenClawConfig } from "../src/config/config.js";
 import type { OutboundSendDeps } from "../src/infra/outbound/deliver.js";
-import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../src/plugins/runtime.js";
 import type { PluginRegistry } from "../src/plugins/registry.js";
+import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../src/plugins/runtime.js";
 import { installSharedTestSetup } from "./setup.shared.js";
 
 const testEnv = installSharedTestSetup();

@@ -9,11 +9,25 @@ const CORE_PROVIDER_AUTH_ENV_VAR_CANDIDATES = {
   litellm: ["LITELLM_API_KEY"],
   "anthropic-openai": ["ANTHROPIC_API_KEY"],
   "qwen-dashscope": ["DASHSCOPE_API_KEY"],
+  "vercel-ai-gateway": ["AI_GATEWAY_API_KEY"],
+  opencode: ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
+  "opencode-go": ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
+  together: ["TOGETHER_API_KEY"],
+  huggingface: ["HUGGINGFACE_HUB_TOKEN", "HF_TOKEN"],
+  qianfan: ["QIANFAN_API_KEY"],
+  xai: ["XAI_API_KEY"],
+  mistral: ["MISTRAL_API_KEY"],
+  gigachat: ["GIGACHAT_CREDENTIALS"],
+  kilocode: ["KILOCODE_API_KEY"],
+  modelstudio: ["MODELSTUDIO_API_KEY"],
+  volcengine: ["VOLCANO_ENGINE_API_KEY"],
+  byteplus: ["BYTEPLUS_API_KEY"],
 } as const;
 
 const CORE_PROVIDER_SETUP_ENV_VAR_OVERRIDES = {
   anthropic: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
   chutes: ["CHUTES_API_KEY", "CHUTES_OAUTH_TOKEN"],
+  gigachat: ["GIGACHAT_CREDENTIALS", "GIGACHAT_PASSWORD"],
   "minimax-cn": ["MINIMAX_API_KEY"],
 } as const;
 

@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { resolveDefaultModelForAgent } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
@@ -454,6 +457,9 @@ export function makeForumGroupMessageCtx(params?: {
 
 beforeEach(() => {
   resetInboundDedupe();
+  fs.rmSync(path.join(os.homedir(), ".openclaw", "credentials", "telegram-pairing.json"), {
+    force: true,
+  });
   loadConfig.mockReset();
   loadConfig.mockReturnValue(DEFAULT_TELEGRAM_TEST_CONFIG);
   sessionStoreEntries.value = {};

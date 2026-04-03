@@ -1,4 +1,6 @@
 import {
+  createApproverRestrictedNativeApprovalAdapter,
+  resolveExecApprovalSessionTarget,
   createChannelApproverDmTargetResolver,
   createChannelNativeOriginTargetResolver,
   createApproverRestrictedNativeApprovalCapability,

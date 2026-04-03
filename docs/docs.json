@@ -1229,6 +1229,7 @@
                   "providers/deepgram",
                   "providers/deepseek",
                   "providers/github-copilot",
+                  "providers/gigachat",
                   "providers/glm",
                   "providers/google",
                   "providers/groq",

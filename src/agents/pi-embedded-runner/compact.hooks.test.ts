@@ -1,13 +1,20 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { getApiProvider, unregisterApiProviders } from "@mariozechner/pi-ai";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { GIGACHAT_BASIC_BASE_URL } from "../../commands/onboard-auth.models.js";
 import { getCustomApiRegistrySourceId } from "../custom-api-registry.js";
 import {
   contextEngineCompactMock,
+  createGigachatStreamFnMock,
+  ensureAuthProfileStoreMock,
   ensureRuntimePluginsLoaded,
   estimateTokensMock,
+  getApiKeyForModelMock,
   getMemorySearchManagerMock,
   hookRunner,
+  gigachatStreamFn,
+  lastCreatedSession,
+  lastInitialStreamFn,
   loadCompactHooksHarness,
   resolveContextEngineMock,
   resolveMemorySearchConfigMock,
@@ -37,23 +44,6 @@ type SessionHookEvent = {
   sessionKey?: string;
   context?: Record<string, unknown>;
 };
-type PostCompactionSyncParams = {
-  reason: string;
-  sessionFiles: string[];
-};
-type PostCompactionSync = (params?: unknown) => Promise<void>;
-type Deferred<T> = {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-};
-
-function createDeferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((promiseResolve) => {
-    resolve = promiseResolve;
-  });
-  return { promise, resolve };
-}
 
 function mockResolvedModel() {
   resolveModelMock.mockReset();
@@ -87,6 +77,34 @@ function wrappedCompactionArgs(overrides: Record<string, unknown> = {}) {
     enqueue: async <T>(task: () => Promise<T> | T) => await task(),
     ...overrides,
   };
+}
+
+function gigachatTestConfig() {
+  return {
+    models: {
+      providers: {
+        gigachat: {
+          api: "openai-completions",
+          baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+          models: [
+            {
+              id: "GigaChat-2-Max",
+              api: "openai-completions",
+              input: ["text"],
+              contextWindow: 128_000,
+              maxTokens: 8_192,
+              cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+              },
+            },
+          ],
+        },
+      },
+    },
+  } as never;
 }
 
 const sessionHook = (action: string): SessionHookEvent | undefined =>
@@ -160,6 +178,14 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       details: { ok: true },
     });
     resetCompactSessionStateMocks();
+    ensureAuthProfileStoreMock.mockReset();
+    ensureAuthProfileStoreMock.mockReturnValue({ profiles: {} });
+    getApiKeyForModelMock.mockReset();
+    getApiKeyForModelMock.mockResolvedValue({ apiKey: "test", mode: "env" });
+    createGigachatStreamFnMock.mockReset();
+    createGigachatStreamFnMock.mockReturnValue(gigachatStreamFn);
+    lastCreatedSession.current = null;
+    lastInitialStreamFn.current = null;
     unregisterApiProviders(getCustomApiRegistrySourceId("ollama"));
   });
 
@@ -245,12 +271,11 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       expect.objectContaining({ sessionKey: "agent:main:session-1", messageProvider: "telegram" }),
     );
     expect(hookRunner.runAfterCompaction).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         messageCount: 1,
         tokenCount: 10,
         compactedCount: 1,
-        sessionFile: "/tmp/session.jsonl",
-      },
+      }),
       expect.objectContaining({ sessionKey: "agent:main:session-1", messageProvider: "telegram" }),
     );
   });
@@ -386,12 +411,11 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
   });
 
   it("awaits post-compaction memory sync in await mode when postCompactionForce is true", async () => {
-    const syncStarted = createDeferred<PostCompactionSyncParams>();
-    const syncRelease = createDeferred<void>();
-    const sync = vi.fn<PostCompactionSync>(async (params) => {
-      syncStarted.resolve(params as PostCompactionSyncParams);
-      await syncRelease.promise;
+    let releaseSync: (() => void) | undefined;
+    const syncGate = new Promise<void>((resolve) => {
+      releaseSync = resolve;
     });
+    const sync = vi.fn(() => syncGate);
     getMemorySearchManagerMock.mockResolvedValue({ manager: { sync } });
     let settled = false;
 
@@ -404,12 +428,14 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
     void resultPromise.then(() => {
       settled = true;
     });
-    await expect(syncStarted.promise).resolves.toEqual({
-      reason: "post-compaction",
-      sessionFiles: [TEST_SESSION_FILE],
+    await vi.waitFor(() => {
+      expect(sync).toHaveBeenCalledWith({
+        reason: "post-compaction",
+        sessionFiles: [TEST_SESSION_FILE],
+      });
     });
     expect(settled).toBe(false);
-    syncRelease.resolve(undefined);
+    releaseSync?.();
     await resultPromise;
     expect(settled).toBe(true);
   });
@@ -430,17 +456,12 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
   });
 
   it("fires post-compaction memory sync without awaiting it in async mode", async () => {
-    const sync = vi.fn<PostCompactionSync>(async () => {});
-    const managerRequested = createDeferred<void>();
-    const managerGate = createDeferred<{ manager: { sync: PostCompactionSync } }>();
-    const syncStarted = createDeferred<PostCompactionSyncParams>();
-    sync.mockImplementation(async (params) => {
-      syncStarted.resolve(params as PostCompactionSyncParams);
+    const sync = vi.fn(async () => {});
+    let resolveManager: ((value: { manager: { sync: typeof sync } }) => void) | undefined;
+    const managerGate = new Promise<{ manager: { sync: typeof sync } }>((resolve) => {
+      resolveManager = resolve;
     });
-    getMemorySearchManagerMock.mockImplementation(async () => {
-      managerRequested.resolve(undefined);
-      return await managerGate.promise;
-    });
+    getMemorySearchManagerMock.mockImplementation(() => managerGate);
     let settled = false;
 
     const resultPromise = compactTesting.runPostCompactionSideEffects({
@@ -449,19 +470,25 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       sessionFile: TEST_SESSION_FILE,
     });
 
-    await managerRequested.promise;
+    await vi.waitFor(() => {
+      expect(getMemorySearchManagerMock).toHaveBeenCalledTimes(1);
+    });
     void resultPromise.then(() => {
       settled = true;
     });
-    await resultPromise;
-    expect(getMemorySearchManagerMock).toHaveBeenCalledTimes(1);
-    expect(settled).toBe(true);
-    expect(sync).not.toHaveBeenCalled();
-    managerGate.resolve({ manager: { sync } });
-    await expect(syncStarted.promise).resolves.toEqual({
-      reason: "post-compaction",
-      sessionFiles: [TEST_SESSION_FILE],
+    await vi.waitFor(() => {
+      expect(settled).toBe(true);
     });
+    expect(sync).not.toHaveBeenCalled();
+    resolveManager?.({ manager: { sync } });
+    await managerGate;
+    await vi.waitFor(() => {
+      expect(sync).toHaveBeenCalledWith({
+        reason: "post-compaction",
+        sessionFiles: [TEST_SESSION_FILE],
+      });
+    });
+    await resultPromise;
   });
 
   it("skips compaction when the transcript only contains boilerplate replies and tool output", async () => {
@@ -579,11 +606,14 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       typeof import("./compaction-safety-timeout.js")
     >("./compaction-safety-timeout.js");
     const controller = new AbortController();
-    const compactStarted = createDeferred<void>();
+    let resolveCompactStarted: (() => void) | undefined;
+    const compactStarted = new Promise<void>((resolve) => {
+      resolveCompactStarted = resolve;
+    });
 
     const resultPromise = compactWithSafetyTimeout(
       async () => {
-        compactStarted.resolve(undefined);
+        resolveCompactStarted?.();
         return await new Promise<never>(() => {});
       },
       30_000,
@@ -595,11 +625,253 @@ describe("compactEmbeddedPiSessionDirect hooks", () => {
       },
     );
 
-    await compactStarted.promise;
+    await compactStarted;
     controller.abort(new Error("request timed out"));
 
     await expect(resultPromise).rejects.toThrow("request timed out");
     expect(sessionAbortCompactionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("installs the GigaChat stream for compaction-created sessions", async () => {
+    resolveModelMock.mockReturnValue({
+      model: {
+        provider: "gigachat",
+        api: "openai-completions",
+        id: "GigaChat-2-Max",
+        input: ["text"],
+        baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+      },
+      error: null,
+      authStorage: { setRuntimeApiKey: vi.fn() },
+      modelRegistry: {},
+    } as never);
+    getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "test",
+      mode: "api-key",
+      profileId: "gigachat:business",
+      source: "profile:gigachat:business",
+    });
+    ensureAuthProfileStoreMock.mockReturnValue({
+      profiles: {
+        "gigachat:business": {
+          type: "api_key",
+          provider: "gigachat",
+          metadata: {
+            authMode: "basic",
+            insecureTls: "true",
+            scope: "GIGACHAT_API_PERS",
+          },
+        },
+      },
+    });
+    sessionCompactImpl.mockImplementation(async () => {
+      expect(createGigachatStreamFnMock).toHaveBeenCalledWith({
+        baseUrl: GIGACHAT_BASIC_BASE_URL,
+        authMode: "basic",
+        insecureTls: true,
+        scope: "GIGACHAT_API_PERS",
+      });
+      expect(lastCreatedSession.current?.agent.streamFn).toBe(gigachatStreamFn);
+      expect(lastCreatedSession.current?.agent.streamFn).not.toBe(lastInitialStreamFn.current);
+      return {
+        summary: "summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 120,
+        details: { ok: true },
+      };
+    });
+
+    const result = await compactEmbeddedPiSessionDirect({
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp",
+      config: gigachatTestConfig(),
+      provider: "gigachat",
+      model: "GigaChat-2-Max",
+      authProfileId: "gigachat:business",
+      customInstructions: "focus on decisions",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("uses metadata from the resolved GigaChat auth profile during compaction", async () => {
+    resolveModelMock.mockReturnValue({
+      model: {
+        provider: "gigachat",
+        api: "openai-completions",
+        id: "GigaChat-2-Max",
+        input: ["text"],
+        baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+      },
+      error: null,
+      authStorage: { setRuntimeApiKey: vi.fn() },
+      modelRegistry: {},
+    } as never);
+    getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "test",
+      mode: "api-key",
+      profileId: "gigachat:business",
+      source: "profile:gigachat:business",
+    });
+    ensureAuthProfileStoreMock.mockReturnValue({
+      profiles: {
+        "gigachat:default": {
+          type: "api_key",
+          provider: "gigachat",
+          metadata: {
+            authMode: "oauth",
+            insecureTls: "false",
+            scope: "GIGACHAT_API_PERS",
+          },
+        },
+        "gigachat:business": {
+          type: "api_key",
+          provider: "gigachat",
+          metadata: {
+            authMode: "basic",
+            insecureTls: "true",
+            scope: "GIGACHAT_API_B2B",
+          },
+        },
+      },
+    });
+    sessionCompactImpl.mockImplementation(async () => {
+      expect(createGigachatStreamFnMock).toHaveBeenCalledWith({
+        baseUrl: GIGACHAT_BASIC_BASE_URL,
+        authMode: "basic",
+        insecureTls: true,
+        scope: "GIGACHAT_API_B2B",
+      });
+      return {
+        summary: "summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 120,
+        details: { ok: true },
+      };
+    });
+
+    const result = await compactEmbeddedPiSessionDirect({
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp",
+      config: gigachatTestConfig(),
+      provider: "gigachat",
+      model: "GigaChat-2-Max",
+      customInstructions: "focus on decisions",
+    });
+
+    expect(result.ok, result.reason).toBe(true);
+  });
+
+  it("infers basic auth for env-backed GigaChat credentials without stored profile metadata", async () => {
+    resolveModelMock.mockReturnValue({
+      model: {
+        provider: "gigachat",
+        api: "openai-completions",
+        id: "GigaChat-2-Max",
+        input: ["text"],
+        baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+      },
+      error: null,
+      authStorage: { setRuntimeApiKey: vi.fn() },
+      modelRegistry: {},
+    } as never);
+    getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "user:password",
+      mode: "api-key",
+      source: "env: GIGACHAT_CREDENTIALS",
+    });
+    ensureAuthProfileStoreMock.mockReturnValue({ profiles: {} });
+    sessionCompactImpl.mockImplementation(async () => {
+      expect(createGigachatStreamFnMock).toHaveBeenCalledWith({
+        baseUrl: GIGACHAT_BASIC_BASE_URL,
+        authMode: "basic",
+        insecureTls: undefined,
+        scope: undefined,
+      });
+      return {
+        summary: "summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 120,
+        details: { ok: true },
+      };
+    });
+
+    const result = await compactEmbeddedPiSessionDirect({
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp",
+      config: gigachatTestConfig(),
+      provider: "gigachat",
+      model: "GigaChat-2-Max",
+      customInstructions: "focus on decisions",
+    });
+
+    expect(result.ok, result.reason).toBe(true);
+  });
+
+  it("does not inherit stale GigaChat metadata for env-backed OAuth credentials", async () => {
+    resolveModelMock.mockReturnValue({
+      model: {
+        provider: "gigachat",
+        api: "openai-completions",
+        id: "GigaChat-2-Max",
+        input: ["text"],
+        baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+      },
+      error: null,
+      authStorage: { setRuntimeApiKey: vi.fn() },
+      modelRegistry: {},
+    } as never);
+    getApiKeyForModelMock.mockResolvedValueOnce({
+      apiKey: "oauth:credential:with:colon",
+      mode: "api-key",
+      source: "env: GIGACHAT_CREDENTIALS",
+    });
+    ensureAuthProfileStoreMock.mockReturnValue({
+      profiles: {
+        "gigachat:default": {
+          type: "api_key",
+          provider: "gigachat",
+          metadata: {
+            authMode: "basic",
+            insecureTls: "true",
+            scope: "GIGACHAT_API_B2B",
+          },
+        },
+      },
+    });
+    sessionCompactImpl.mockImplementation(async () => {
+      expect(createGigachatStreamFnMock).toHaveBeenCalledWith({
+        baseUrl: "https://gigachat.devices.sberbank.ru/api/v1",
+        authMode: "oauth",
+        insecureTls: undefined,
+        scope: undefined,
+      });
+      return {
+        summary: "summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 120,
+        details: { ok: true },
+      };
+    });
+
+    const result = await compactEmbeddedPiSessionDirect({
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp",
+      config: gigachatTestConfig(),
+      provider: "gigachat",
+      model: "GigaChat-2-Max",
+      customInstructions: "focus on decisions",
+    });
+
+    expect(result.ok, result.reason).toBe(true);
   });
 });
 

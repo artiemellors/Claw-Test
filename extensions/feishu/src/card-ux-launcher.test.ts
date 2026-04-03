@@ -1,11 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRuntimeEnv } from "../../../test/helpers/plugins/runtime-env.js";
 import type { ClawdbotConfig, RuntimeEnv } from "../runtime-api.js";
-import {
-  createQuickActionLauncherCard,
-  isFeishuQuickActionMenuEventKey,
-  maybeHandleFeishuQuickActionMenu,
-} from "./card-ux-launcher.js";
 
 const sendCardFeishuMock = vi.hoisted(() => vi.fn());
 
@@ -13,12 +8,22 @@ vi.mock("./send.js", () => ({
   sendCardFeishu: sendCardFeishuMock,
 }));
 
-describe("feishu quick-action launcher", () => {
-  const cfg: ClawdbotConfig = {};
+let createQuickActionLauncherCard: typeof import("./card-ux-launcher.js").createQuickActionLauncherCard;
+let isFeishuQuickActionMenuEventKey: typeof import("./card-ux-launcher.js").isFeishuQuickActionMenuEventKey;
+let maybeHandleFeishuQuickActionMenu: typeof import("./card-ux-launcher.js").maybeHandleFeishuQuickActionMenu;
 
-  beforeEach(() => {
+describe("feishu quick-action launcher", () => {
+  beforeEach(async () => {
+    vi.resetModules();
     vi.clearAllMocks();
+    ({
+      createQuickActionLauncherCard,
+      isFeishuQuickActionMenuEventKey,
+      maybeHandleFeishuQuickActionMenu,
+    } = await import("./card-ux-launcher.js"));
   });
+
+  const cfg: ClawdbotConfig = {};
 
   it("recognizes the quick-actions bot menu key", () => {
     expect(isFeishuQuickActionMenuEventKey("quick-actions")).toBe(true);

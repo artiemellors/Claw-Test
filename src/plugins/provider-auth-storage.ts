@@ -1,6 +1,18 @@
 import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
 import { upsertAuthProfile } from "../agents/auth-profiles.js";
 import type { SecretInput } from "../config/types.secrets.js";
+export { CLOUDFLARE_AI_GATEWAY_DEFAULT_MODEL_REF } from "../plugin-sdk/cloudflare-ai-gateway.js";
+export {
+  GIGACHAT_DEFAULT_MODEL_REF,
+  MISTRAL_DEFAULT_MODEL_REF,
+  MODELSTUDIO_DEFAULT_MODEL_REF,
+  XAI_DEFAULT_MODEL_REF,
+} from "../commands/onboard-auth.models.js";
+export {
+  KILOCODE_DEFAULT_MODEL_REF,
+  LITELLM_DEFAULT_MODEL_REF,
+  OPENROUTER_DEFAULT_MODEL_REF,
+} from "../commands/onboard-auth.credentials.js";
 import {
   buildApiKeyCredential,
   type ApiKeyStorageOptions,
@@ -59,7 +71,6 @@ function createProviderApiKeySetters<const T extends Record<string, ProviderApiK
   ]);
   return Object.fromEntries(entries) as { [K in keyof T]: ProviderApiKeySetter };
 }
-
 export {
   buildApiKeyCredential,
   type ApiKeyStorageOptions,
@@ -113,6 +124,7 @@ const {
   setModelStudioApiKey: { provider: "modelstudio" },
   setXaiApiKey: { provider: "xai" },
   setMistralApiKey: { provider: "mistral" },
+  setGigachatApiKey: { provider: "gigachat" },
   setKilocodeApiKey: { provider: "kilocode" },
 });
 
@@ -139,6 +151,21 @@ export {
   setMistralApiKey,
   setKilocodeApiKey,
 };
+
+export async function setGigachatApiKey(
+  key: SecretInput,
+  agentDir?: string,
+  options?: ApiKeyStorageOptions,
+  metadata?: Record<string, string>,
+) {
+  upsertProviderApiKeyProfile({
+    provider: "gigachat",
+    key,
+    agentDir,
+    options,
+    metadata,
+  });
+}
 
 export async function setMinimaxApiKey(
   key: SecretInput,

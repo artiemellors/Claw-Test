@@ -1,4 +1,4 @@
-import { resolveLegacyAuthChoiceAliasesForCli } from "./auth-choice-legacy.js";
+import { AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI } from "./auth-choice-legacy.js";
 import type { AuthChoice, AuthChoiceGroupId } from "./onboard-types.js";
 
 export type { AuthChoiceGroupId };
@@ -21,6 +21,45 @@ export type AuthChoiceGroup = {
 
 export const CORE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
   {
+    value: "chutes",
+    label: "Chutes (OAuth)",
+    groupId: "chutes",
+    groupLabel: "Chutes",
+    groupHint: "OAuth",
+  },
+  {
+    value: "gigachat-api-key",
+    label: "GigaChat credentials key",
+    hint: "OAuth credentials key",
+    groupId: "gigachat",
+    groupLabel: "GigaChat",
+    groupHint: "OAuth + Basic auth",
+  },
+  {
+    value: "gigachat-personal",
+    label: "GigaChat Personal",
+    hint: "Individual developer account (OAuth)",
+    groupId: "gigachat",
+    groupLabel: "GigaChat",
+    groupHint: "OAuth + Basic auth",
+  },
+  {
+    value: "gigachat-business",
+    label: "GigaChat Business",
+    hint: "Corporate account (OAuth or Basic auth)",
+    groupId: "gigachat",
+    groupLabel: "GigaChat",
+    groupHint: "OAuth + Basic auth",
+  },
+  {
+    value: "litellm-api-key",
+    label: "LiteLLM API key",
+    hint: "Unified gateway for 100+ LLM providers",
+    groupId: "litellm",
+    groupLabel: "LiteLLM",
+    groupHint: "Unified LLM gateway (100+ providers)",
+  },
+  {
     value: "custom-api-key",
     label: "Custom Provider",
     hint: "Any OpenAI or Anthropic compatible endpoint",
@@ -33,9 +72,6 @@ export const CORE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
 export function formatStaticAuthChoiceChoicesForCli(params?: {
   includeSkip?: boolean;
   includeLegacyAliases?: boolean;
-  config?: import("../config/config.js").OpenClawConfig;
-  workspaceDir?: string;
-  env?: NodeJS.ProcessEnv;
 }): string {
   const includeSkip = params?.includeSkip ?? true;
   const includeLegacyAliases = params?.includeLegacyAliases ?? false;
@@ -45,7 +81,7 @@ export function formatStaticAuthChoiceChoicesForCli(params?: {
     values.push("skip");
   }
   if (includeLegacyAliases) {
-    values.push(...resolveLegacyAuthChoiceAliasesForCli(params));
+    values.push(...AUTH_CHOICE_LEGACY_ALIASES_FOR_CLI);
   }
 
   return values.join("|");

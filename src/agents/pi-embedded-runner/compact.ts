@@ -17,6 +17,7 @@ import {
 } from "../../context-engine/index.js";
 import { getMachineDisplayName } from "../../infra/machine-name.js";
 import { generateSecureToken } from "../../infra/secure-random.js";
+import { createConfiguredOllamaStreamFn } from "../../plugin-sdk/ollama.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { prepareProviderRuntimeAuth } from "../../plugins/provider-runtime.js";
 import { type enqueueCommand, enqueueCommandInLane } from "../../process/command-queue.js";
@@ -40,15 +41,25 @@ import {
   isRealConversationMessage,
 } from "../compaction-real-conversation.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
+import { ensureCustomApiRegistered } from "../custom-api-registry.js";
 import { formatUserTime, resolveUserTimeFormat, resolveUserTimezone } from "../date-time.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { resolveOpenClawDocsPath } from "../docs-path.js";
 import {
+  resolveConfiguredGigachatBaseUrl,
+  resolveGigachatAuthMode,
+  resolveGigachatAuthProfileMetadata,
+  resolveGigachatInsecureTlsOverride,
+} from "../gigachat-auth.js";
+import { createGigachatStreamFn } from "../gigachat-stream.js";
+import {
   applyAuthHeaderOverride,
   applyLocalNoAuthHeaderOverride,
+  ensureAuthProfileStore,
   getApiKeyForModel,
   resolveModelAuthMode,
 } from "../model-auth.js";
+import { normalizeProviderId } from "../model-selection.js";
 import { supportsModelTools } from "../model-tool-support.js";
 import { ensureOpenClawModelsJson } from "../models-config.js";
 import { resolveOwnerDisplaySetting } from "../owner-display.js";
@@ -756,14 +767,59 @@ export async function compactEmbeddedPiSessionDirect(
         resourceLoader,
       });
       applySystemPromptOverrideToSession(session, systemPromptOverride());
-      const providerStreamFn = registerProviderStreamForModel({
-        model,
-        cfg: params.config,
-        agentDir,
-        workspaceDir: effectiveWorkspace,
-      });
-      if (providerStreamFn) {
-        session.agent.streamFn = providerStreamFn;
+      if (model.api === "ollama") {
+        const providerBaseUrl =
+          typeof params.config?.models?.providers?.[model.provider]?.baseUrl === "string"
+            ? params.config.models.providers[model.provider]?.baseUrl
+            : undefined;
+        ensureCustomApiRegistered(
+          model.api,
+          createConfiguredOllamaStreamFn({
+            model,
+            providerBaseUrl,
+          }),
+        );
+      } else if (normalizeProviderId(provider) === "gigachat") {
+        const providerConfig = params.config?.models?.providers?.[provider];
+        const gigachatStore = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
+        const resolvedGigachatProfileId = apiKeyInfo?.profileId?.trim() || authProfileId?.trim();
+        const gigachatMeta = resolveGigachatAuthProfileMetadata(
+          gigachatStore,
+          resolvedGigachatProfileId,
+          {
+            allowDefaultProfileFallback: Boolean(resolvedGigachatProfileId),
+          },
+        );
+        const baseUrl = resolveConfiguredGigachatBaseUrl({
+          baseUrl:
+            (typeof providerConfig?.baseUrl === "string" ? providerConfig.baseUrl : undefined) ??
+            (typeof model.baseUrl === "string" ? model.baseUrl : undefined),
+          envBaseUrl: process.env.GIGACHAT_BASE_URL,
+          metadata: gigachatMeta,
+          apiKey: apiKeyInfo?.apiKey,
+          authProfileId: resolvedGigachatProfileId,
+        });
+
+        session.agent.streamFn = createGigachatStreamFn({
+          baseUrl,
+          authMode: resolveGigachatAuthMode({
+            metadata: gigachatMeta,
+            apiKey: apiKeyInfo?.apiKey,
+            authProfileId: resolvedGigachatProfileId,
+          }),
+          insecureTls: resolveGigachatInsecureTlsOverride(gigachatMeta),
+          scope: gigachatMeta?.scope,
+        });
+      } else {
+        const providerStreamFn = registerProviderStreamForModel({
+          model,
+          cfg: params.config,
+          agentDir,
+          workspaceDir: effectiveWorkspace,
+        });
+        if (providerStreamFn) {
+          session.agent.streamFn = providerStreamFn;
+        }
       }
 
       try {

@@ -1,5 +1,10 @@
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+  type OpenClawConfig,
+} from "../../../src/config/config.js";
 import { escapeRegExp, formatEnvelopeTimestamp } from "../../../test/helpers/envelope-timestamp.js";
 import { withEnvAsync } from "../../../test/helpers/plugins/env.js";
 const harness = await import("./bot.create-telegram-bot.test-harness.js");
@@ -9,6 +14,7 @@ const {
   botCtorSpy,
   commandSpy,
   dispatchReplyWithBufferedBlockDispatcher,
+  editMessageTextSpy,
   getLoadWebMediaMock,
   getChatSpy,
   getLoadConfigMock,
@@ -33,21 +39,25 @@ const {
   throttlerSpy,
   useSpy,
 } = harness;
-const { resolveTelegramFetch } = await import("./fetch.js");
-const {
-  createTelegramBot: createTelegramBotBase,
-  getTelegramSequentialKey,
-  setTelegramBotRuntimeForTest,
-} = await import("./bot.js");
-let createTelegramBot: (
-  opts: Parameters<typeof import("./bot.js").createTelegramBot>[0],
-) => ReturnType<typeof import("./bot.js").createTelegramBot>;
-
+let resolveTelegramFetch!: typeof import("./fetch.js").resolveTelegramFetch;
+let setTelegramBotRuntimeForTest!: typeof import("./bot.js").setTelegramBotRuntimeForTest;
+let createTelegramBotBase!: typeof import("./bot.js").createTelegramBot;
+let getTelegramSequentialKey!: typeof import("./bot.js").getTelegramSequentialKey;
 const loadConfig = getLoadConfigMock();
 const loadSessionStore = getLoadSessionStoreMock();
 const loadWebMedia = getLoadWebMediaMock();
 const readChannelAllowFromStore = getReadChannelAllowFromStoreMock();
 const upsertChannelPairingRequest = getUpsertChannelPairingRequestMock();
+const resolveHarnessConfig = () => (loadConfig as unknown as () => OpenClawConfig)();
+const createTelegramBot = (opts: Parameters<typeof createTelegramBotBase>[0]) => {
+  const cfg = opts.config ?? resolveHarnessConfig();
+  setRuntimeConfigSnapshot(cfg);
+  return createTelegramBotBase({
+    ...opts,
+    config: cfg,
+    telegramDeps: telegramBotDepsForTest,
+  });
+};
 
 const ORIGINAL_TZ = process.env.TZ;
 const TELEGRAM_TEST_TIMINGS = {
@@ -56,21 +66,25 @@ const TELEGRAM_TEST_TIMINGS = {
 } as const;
 
 describe("createTelegramBot", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
+    ({ resolveTelegramFetch } = await import("./fetch.js"));
+    ({
+      setTelegramBotRuntimeForTest,
+      createTelegramBot: createTelegramBotBase,
+      getTelegramSequentialKey,
+    } = await import("./bot.js"));
     process.env.TZ = "UTC";
   });
   afterAll(() => {
     process.env.TZ = ORIGINAL_TZ;
   });
+  afterEach(() => {
+    clearRuntimeConfigSnapshot();
+  });
   beforeEach(() => {
     setTelegramBotRuntimeForTest(
       telegramBotRuntimeForTest as unknown as Parameters<typeof setTelegramBotRuntimeForTest>[0],
     );
-    createTelegramBot = (opts) =>
-      createTelegramBotBase({
-        ...opts,
-        telegramDeps: telegramBotDepsForTest,
-      });
   });
 
   // groupPolicy tests
@@ -362,12 +376,34 @@ describe("createTelegramBot", () => {
     const buildModelsProviderDataMock =
       telegramBotDepsForTest.buildModelsProviderData as unknown as ReturnType<typeof vi.fn>;
     let boundAgentId = "agent-a";
+    buildModelsProviderDataMock.mockImplementation(
+      async (_cfg: OpenClawConfig, agentId?: string) => {
+        if (agentId === "agent-b") {
+          return {
+            byProvider: new Map([
+              ["anthropic", new Set(["claude-opus-4-5"])],
+              ["openai", new Set(["gpt-4.1"])],
+            ]),
+            providers: ["anthropic", "openai"],
+            resolvedDefault: { provider: "anthropic", model: "claude-opus-4-5" },
+          };
+        }
+        return {
+          byProvider: new Map([
+            ["gemini", new Set(["gemini-2.5-pro"])],
+            ["openai", new Set(["gpt-4.1"])],
+          ]),
+          providers: ["gemini", "openai"],
+          resolvedDefault: { provider: "openai", model: "gpt-4.1" },
+        };
+      },
+    );
     loadConfig.mockImplementation(() => ({
       agents: {
         defaults: {
           model: "openai/gpt-4.1",
         },
-        list: [{ id: "agent-a" }, { id: "agent-b" }],
+        list: [{ id: "agent-a" }, { id: "agent-b", model: "anthropic/claude-opus-4-5" }],
       },
       channels: {
         telegram: { dmPolicy: "open", allowFrom: ["*"] },
@@ -403,13 +439,42 @@ describe("createTelegramBot", () => {
     };
 
     buildModelsProviderDataMock.mockClear();
+    editMessageTextSpy.mockClear();
     await sendModelCallback(1);
     expect(buildModelsProviderDataMock).toHaveBeenCalled();
     expect(buildModelsProviderDataMock.mock.calls.at(-1)?.[1]).toBe("agent-a");
+    expect(editMessageTextSpy).toHaveBeenCalledTimes(1);
+    expect(
+      editMessageTextSpy.mock.calls.at(-1)?.[3]?.reply_markup?.inline_keyboard?.flat(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: "gemini (1)",
+          callback_data: "mdl_list_gemini_1",
+        }),
+        expect.objectContaining({
+          text: "openai (1)",
+          callback_data: "mdl_list_openai_1",
+        }),
+      ]),
+    );
 
     boundAgentId = "agent-b";
+    buildModelsProviderDataMock.mockClear();
+    editMessageTextSpy.mockClear();
     await sendModelCallback(2);
     expect(buildModelsProviderDataMock.mock.calls.at(-1)?.[1]).toBe("agent-b");
+    expect(editMessageTextSpy).toHaveBeenCalledTimes(1);
+    expect(
+      editMessageTextSpy.mock.calls.at(-1)?.[3]?.reply_markup?.inline_keyboard?.flat(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: "anthropic (1)",
+          callback_data: "mdl_list_anthropic_1",
+        }),
+      ]),
+    );
   });
   it("wraps inbound message with Telegram envelope", async () => {
     await withEnvAsync({ TZ: "Europe/Vienna" }, async () => {

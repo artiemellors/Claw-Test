@@ -86,10 +86,17 @@ function loadHookFromDir(params: {
   pluginId?: string;
   nameHint?: string;
 }): LoadedHook | null {
-  const hookMdPath = path.join(params.hookDir, "HOOK.md");
+  let canonicalHookDir = path.resolve(params.hookDir);
+  try {
+    canonicalHookDir = fs.realpathSync.native(params.hookDir);
+  } catch {
+    // Fall back to the discovered path when realpath is unavailable.
+  }
+
+  const hookMdPath = path.join(canonicalHookDir, "HOOK.md");
   const content = readBoundaryFileUtf8({
     absolutePath: hookMdPath,
-    rootPath: params.hookDir,
+    rootPath: canonicalHookDir,
     boundaryLabel: "hook directory",
   });
   if (content === null) {
@@ -104,10 +111,10 @@ function loadHookFromDir(params: {
     const handlerCandidates = ["handler.ts", "handler.js", "index.ts", "index.js"];
     let handlerPath: string | undefined;
     for (const candidate of handlerCandidates) {
-      const candidatePath = path.join(params.hookDir, candidate);
+      const candidatePath = path.join(canonicalHookDir, candidate);
       const safeCandidatePath = resolveBoundaryFilePath({
         absolutePath: candidatePath,
-        rootPath: params.hookDir,
+        rootPath: canonicalHookDir,
         boundaryLabel: "hook directory",
       });
       if (safeCandidatePath) {
@@ -121,13 +128,6 @@ function loadHookFromDir(params: {
       return null;
     }
 
-    let baseDir = params.hookDir;
-    try {
-      baseDir = fs.realpathSync.native(params.hookDir);
-    } catch {
-      // keep the discovered path when realpath is unavailable
-    }
-
     return {
       hook: {
         name,
@@ -135,7 +135,7 @@ function loadHookFromDir(params: {
         source: params.source,
         pluginId: params.pluginId,
         filePath: hookMdPath,
-        baseDir,
+        baseDir: canonicalHookDir,
         handlerPath,
       },
       frontmatter,

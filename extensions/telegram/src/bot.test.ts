@@ -4,7 +4,14 @@ import {
   clearPluginInteractiveHandlers,
   registerPluginInteractiveHandler,
 } from "openclaw/plugin-sdk/plugin-runtime";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectChannelInboundContextContract as expectInboundContextContract } from "../../../src/channels/plugins/contracts/suites.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+  type OpenClawConfig,
+} from "../../../src/config/config.js";
+import { escapeRegExp, formatEnvelopeTimestamp } from "../../../test/helpers/envelope-timestamp.js";
 const {
   answerCallbackQuerySpy,
   commandSpy,
@@ -26,25 +33,31 @@ const {
   telegramBotRuntimeForTest,
   wasSentByBot,
 } = await import("./bot.create-telegram-bot.test-harness.js");
+const CHECK_MARK_EMOJI = "\u2705";
+const CROSS_MARK_EMOJI = "\u274C";
+const EYES_EMOJI = "\u{1F440}";
+const FIRE_EMOJI = "\u{1F525}";
+const HEART_EMOJI = "\u2764\uFE0F";
+const INFO_EMOJI = "\u2139\uFE0F";
+const PARTY_EMOJI = "\u{1F389}";
+const PUZZLE_EMOJI = "\u{1F9E9}";
+const THUMBS_UP_EMOJI = "\u{1F44D}";
 
 let loadSessionStore: typeof import("../../../src/config/sessions.js").loadSessionStore;
-let createTelegramBotBase: typeof import("./bot.js").createTelegramBot;
-let setTelegramBotRuntimeForTest: typeof import("./bot.js").setTelegramBotRuntimeForTest;
-let createTelegramBot: (
-  opts: Parameters<typeof import("./bot.js").createTelegramBot>[0],
-) => ReturnType<typeof import("./bot.js").createTelegramBot>;
-
+let createTelegramBotBase!: typeof import("./bot.js").createTelegramBot;
+let setTelegramBotRuntimeForTest!: typeof import("./bot.js").setTelegramBotRuntimeForTest;
 const loadConfig = getLoadConfigMock();
 const readChannelAllowFromStore = getReadChannelAllowFromStoreMock();
-const PUZZLE_EMOJI = "\u{1F9E9}";
-const CROSS_MARK_EMOJI = "\u{274C}";
-const INFO_EMOJI = "\u{2139}\u{FE0F}";
-const CHECK_MARK_EMOJI = "\u{2705}";
-const THUMBS_UP_EMOJI = "\u{1F44D}";
-const FIRE_EMOJI = "\u{1F525}";
-const PARTY_EMOJI = "\u{1F389}";
-const EYES_EMOJI = "\u{1F440}";
-const HEART_EMOJI = "\u{2764}\u{FE0F}";
+const resolveHarnessConfig = () => (loadConfig as unknown as () => OpenClawConfig)();
+const createTelegramBot = (opts: Parameters<typeof createTelegramBotBase>[0]) => {
+  const cfg = opts.config ?? resolveHarnessConfig();
+  setRuntimeConfigSnapshot(cfg);
+  return createTelegramBotBase({
+    ...opts,
+    config: cfg,
+    telegramDeps: telegramBotDepsForTest,
+  });
+};
 
 function createSignal() {
   let resolve!: () => void;
@@ -52,6 +65,20 @@ function createSignal() {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+async function loadEnvelopeTimestampHelpers() {
+  return await import("../../../test/helpers/envelope-timestamp.js");
+}
+
+async function loadInboundContextContract() {
+  return await import("./test-support/inbound-context-contract.js");
+}
+
+function waitForNextSetMyCommands() {
+  return vi.waitFor(() => {
+    expect(setMyCommandsSpy).toHaveBeenCalled();
+  });
 }
 
 function waitForReplyCalls(count: number) {
@@ -68,14 +95,6 @@ function waitForReplyCalls(count: number) {
   return done.promise;
 }
 
-async function loadEnvelopeTimestampHelpers() {
-  return await import("../../../test/helpers/envelope-timestamp.js");
-}
-
-async function loadInboundContextContract() {
-  return await import("./test-support/inbound-context-contract.js");
-}
-
 const ORIGINAL_TZ = process.env.TZ;
 describe("createTelegramBot", () => {
   beforeAll(async () => {
@@ -88,6 +107,9 @@ describe("createTelegramBot", () => {
   });
   afterAll(() => {
     process.env.TZ = ORIGINAL_TZ;
+  });
+  afterEach(() => {
+    clearRuntimeConfigSnapshot();
   });
 
   beforeEach(() => {
@@ -106,11 +128,6 @@ describe("createTelegramBot", () => {
     setTelegramBotRuntimeForTest(
       telegramBotRuntimeForTest as unknown as Parameters<typeof setTelegramBotRuntimeForTest>[0],
     );
-    createTelegramBot = (opts) =>
-      createTelegramBotBase({
-        ...opts,
-        telegramDeps: telegramBotDepsForTest,
-      });
   });
 
   it("blocks callback_query when inline buttons are allowlist-only and sender not authorized", async () => {
@@ -1016,6 +1033,70 @@ describe("createTelegramBot", () => {
       'Could not resolve model "shared-model".',
     );
     expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-model-compact-2");
+  });
+
+  it("does not resolve compact model callbacks through a narrower configured subset", async () => {
+    onSpy.mockClear();
+    replySpy.mockClear();
+    editMessageTextSpy.mockClear();
+
+    const buildModelsProviderDataMock =
+      telegramBotDepsForTest.buildModelsProviderData as unknown as ReturnType<typeof vi.fn>;
+    const modelId = "us.anthropic.claude-3-5-sonnet-20240620-v1:0";
+    buildModelsProviderDataMock.mockImplementationOnce(async (_cfg: OpenClawConfig) => ({
+      byProvider: new Map([
+        ["anthropic", new Set([modelId])],
+        ["openai", new Set([modelId])],
+      ]),
+      providers: ["anthropic", "openai"],
+      resolvedDefault: { provider: "openai", model: modelId },
+    }));
+
+    createTelegramBot({
+      token: "tok",
+      config: {
+        agents: {
+          defaults: {
+            model: `openai/${modelId}`,
+            models: {
+              [`openai/${modelId}`]: {},
+            },
+          },
+        },
+        channels: {
+          telegram: {
+            dmPolicy: "open",
+            allowFrom: ["*"],
+          },
+        },
+      },
+    });
+    const callbackHandler = onSpy.mock.calls.find((call) => call[0] === "callback_query")?.[1] as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+    expect(callbackHandler).toBeDefined();
+
+    await callbackHandler({
+      callbackQuery: {
+        id: "cbq-model-compact-3",
+        data: `mdl_sel/${modelId}`,
+        from: { id: 9, first_name: "Ada", username: "ada_bot" },
+        message: {
+          chat: { id: 1234, type: "private" },
+          date: 1736380800,
+          message_id: 17,
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(replySpy).not.toHaveBeenCalled();
+    expect(editMessageTextSpy).toHaveBeenCalledTimes(1);
+    expect(editMessageTextSpy.mock.calls[0]?.[2]).toContain(
+      `Could not resolve model "${modelId}".`,
+    );
+    expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-model-compact-3");
   });
 
   it("includes sender identity in group envelope headers", async () => {
