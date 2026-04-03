@@ -23,12 +23,12 @@ export function normalizeGatewayProfile(profile?: string): string | null {
 }
 
 export function resolveGatewayProfileSuffix(profile?: string): string {
-  const normalized = normalizeGatewayProfile(profile);
+  const normalized = normalizeGatewayProfile(profile ?? process.env.OPENCLAW_PROFILE);
   return normalized ? `-${normalized}` : "";
 }
 
 export function resolveGatewayLaunchAgentLabel(profile?: string): string {
-  const normalized = normalizeGatewayProfile(profile);
+  const normalized = normalizeGatewayProfile(profile ?? process.env.OPENCLAW_PROFILE);
   if (!normalized) {
     return GATEWAY_LAUNCH_AGENT_LABEL;
   }
@@ -49,7 +49,7 @@ export function resolveGatewaySystemdServiceName(profile?: string): string {
 }
 
 export function resolveGatewayWindowsTaskName(profile?: string): string {
-  const normalized = normalizeGatewayProfile(profile);
+  const normalized = normalizeGatewayProfile(profile ?? process.env.OPENCLAW_PROFILE);
   if (!normalized) {
     return GATEWAY_WINDOWS_TASK_NAME;
   }

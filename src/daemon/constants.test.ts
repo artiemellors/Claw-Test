@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   formatGatewayServiceDescription,
   GATEWAY_LAUNCH_AGENT_LABEL,
@@ -12,6 +12,10 @@ import {
   resolveGatewaySystemdServiceName,
   resolveGatewayWindowsTaskName,
 } from "./constants.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("normalizeGatewayProfile", () => {
   it("returns null for empty/default profiles", () => {
@@ -30,45 +34,64 @@ describe("normalizeGatewayProfile", () => {
 
 describe("resolveGatewayLaunchAgentLabel", () => {
   it("returns default label when no profile is set", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "");
     const result = resolveGatewayLaunchAgentLabel();
     expect(result).toBe(GATEWAY_LAUNCH_AGENT_LABEL);
     expect(result).toBe("ai.openclaw.gateway");
   });
 
-  it("returns profile-specific label when profile is set", () => {
+  it("returns profile-specific label when profile arg is set", () => {
     const result = resolveGatewayLaunchAgentLabel("dev");
     expect(result).toBe("ai.openclaw.dev");
+  });
+
+  it("reads profile from OPENCLAW_PROFILE env when no arg is given", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "work");
+    expect(resolveGatewayLaunchAgentLabel()).toBe("ai.openclaw.work");
   });
 });
 
 describe("resolveGatewaySystemdServiceName", () => {
   it("returns default service name when no profile is set", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "");
     const result = resolveGatewaySystemdServiceName();
     expect(result).toBe(GATEWAY_SYSTEMD_SERVICE_NAME);
     expect(result).toBe("openclaw-gateway");
   });
 
-  it("returns profile-specific service name when profile is set", () => {
+  it("returns profile-specific service name when profile arg is set", () => {
     const result = resolveGatewaySystemdServiceName("dev");
     expect(result).toBe("openclaw-gateway-dev");
+  });
+
+  it("reads profile from OPENCLAW_PROFILE env when no arg is given", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "work");
+    expect(resolveGatewaySystemdServiceName()).toBe("openclaw-gateway-work");
   });
 });
 
 describe("resolveGatewayWindowsTaskName", () => {
   it("returns default task name when no profile is set", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "");
     const result = resolveGatewayWindowsTaskName();
     expect(result).toBe(GATEWAY_WINDOWS_TASK_NAME);
     expect(result).toBe("OpenClaw Gateway");
   });
 
-  it("returns profile-specific task name when profile is set", () => {
+  it("returns profile-specific task name when profile arg is set", () => {
     const result = resolveGatewayWindowsTaskName("dev");
     expect(result).toBe("OpenClaw Gateway (dev)");
+  });
+
+  it("reads profile from OPENCLAW_PROFILE env when no arg is given", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "work");
+    expect(resolveGatewayWindowsTaskName()).toBe("OpenClaw Gateway (work)");
   });
 });
 
 describe("resolveGatewayProfileSuffix", () => {
   it("returns empty string when no profile is set", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "");
     expect(resolveGatewayProfileSuffix()).toBe("");
   });
 
@@ -83,6 +106,11 @@ describe("resolveGatewayProfileSuffix", () => {
 
   it("trims whitespace from profiles", () => {
     expect(resolveGatewayProfileSuffix("  staging  ")).toBe("-staging");
+  });
+
+  it("reads profile from OPENCLAW_PROFILE env when no arg is given", () => {
+    vi.stubEnv("OPENCLAW_PROFILE", "work");
+    expect(resolveGatewayProfileSuffix()).toBe("-work");
   });
 });
 
