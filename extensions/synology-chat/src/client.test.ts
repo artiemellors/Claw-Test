@@ -213,7 +213,6 @@ describe("resolveChatUserId", () => {
     fakeNowMs += 10 * 60 * 1000;
     vi.setSystemTime(fakeNowMs);
     await resolveChatUserId(baseUrl, "anyone");
-    });
     const httpsGet = vi.mocked((https as any).get);
     expect(httpsGet).toHaveBeenCalledWith(
       expect.stringContaining("method=user_list"),
