@@ -33,6 +33,7 @@ export type ResolvedWhatsAppAccount = {
   ackReaction?: WhatsAppAccountConfig["ackReaction"];
   reactionLevel?: WhatsAppAccountConfig["reactionLevel"];
   groups?: WhatsAppAccountConfig["groups"];
+  direct?: WhatsAppAccountConfig["direct"];
   debounceMs?: number;
 };
 
@@ -146,6 +147,7 @@ export function resolveWhatsAppAccount(params: {
     ackReaction: merged.ackReaction,
     reactionLevel: merged.reactionLevel,
     groups: merged.groups,
+    direct: merged.direct,
     debounceMs: merged.debounceMs,
   };
 }
