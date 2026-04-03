@@ -110,6 +110,8 @@ export async function loadSubagentSpawnModuleForTest(params: {
   loadConfig?: () => Record<string, unknown>;
   updateSessionStoreMock?: MockFn;
   pruneLegacyStoreKeysMock?: MockFn;
+  loadSessionEntryMock?: MockFn;
+  readSessionMessagesMock?: MockFn;
   registerSubagentRunMock?: MockFn;
   emitSessionLifecycleEventMock?: MockFn;
   hookRunner?: HookRunner;
@@ -117,6 +119,8 @@ export async function loadSubagentSpawnModuleForTest(params: {
   resolveAgentWorkspaceDir?: (cfg: Record<string, unknown>, agentId: string) => string;
   resolveSubagentSpawnModelSelection?: () => string | undefined;
   resolveSandboxRuntimeStatus?: () => { sandboxed: boolean };
+  runEmbeddedPiAgentMock?: MockFn;
+  mockSubagentSystemPrompt?: boolean;
   workspaceDir?: string;
   sessionStorePath?: string;
 }) {
@@ -146,17 +150,32 @@ export async function loadSubagentSpawnModuleForTest(params: {
   }
 
   if (params.pruneLegacyStoreKeysMock) {
+  const shouldMockSessionUtils =
+    Boolean(params.pruneLegacyStoreKeysMock) ||
+    Boolean(params.loadSessionEntryMock) ||
+    Boolean(params.readSessionMessagesMock);
+  if (shouldMockSessionUtils) {
     vi.doMock("../gateway/session-utils.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../gateway/session-utils.js")>();
       return {
         ...actual,
-        resolveGatewaySessionStoreTarget: (targetParams: { key: string }) => ({
-          agentId: "main",
-          storePath: params.sessionStorePath ?? "/tmp/subagent-spawn-model-session.json",
-          canonicalKey: targetParams.key,
-          storeKeys: [targetParams.key],
-        }),
-        pruneLegacyStoreKeys: (...args: unknown[]) => params.pruneLegacyStoreKeysMock?.(...args),
+        ...(params.pruneLegacyStoreKeysMock
+          ? {
+              resolveGatewaySessionStoreTarget: (targetParams: { key: string }) => ({
+                agentId: "main",
+                storePath: params.sessionStorePath ?? "/tmp/subagent-spawn-model-session.json",
+                canonicalKey: targetParams.key,
+                storeKeys: [targetParams.key],
+              }),
+              pruneLegacyStoreKeys: (...args: unknown[]) => params.pruneLegacyStoreKeysMock?.(...args),
+            }
+          : {}),
+        ...(params.loadSessionEntryMock
+          ? { loadSessionEntry: (...args: unknown[]) => params.loadSessionEntryMock?.(...args) }
+          : {}),
+        ...(params.readSessionMessagesMock
+          ? { readSessionMessages: (...args: unknown[]) => params.readSessionMessagesMock?.(...args) }
+          : {}),
       };
     });
   }
@@ -173,13 +192,15 @@ export async function loadSubagentSpawnModuleForTest(params: {
     });
   }
 
-  vi.doMock("./subagent-announce.js", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("./subagent-announce.js")>();
-    return {
-      ...actual,
-      buildSubagentSystemPrompt: () => "system-prompt",
-    };
-  });
+  if (params.mockSubagentSystemPrompt !== false) {
+    vi.doMock("./subagent-announce.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./subagent-announce.js")>();
+      return {
+        ...actual,
+        buildSubagentSystemPrompt: () => "system-prompt",
+      };
+    });
+  }
 
   vi.doMock("./agent-scope.js", async (importOriginal) => {
     const actual = await importOriginal<typeof import("./agent-scope.js")>();
@@ -212,6 +233,16 @@ export async function loadSubagentSpawnModuleForTest(params: {
         params.resolveSandboxRuntimeStatus ?? actual.resolveSandboxRuntimeStatus,
     };
   });
+
+  if (params.runEmbeddedPiAgentMock) {
+    vi.doMock("./pi-embedded-runner.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./pi-embedded-runner.js")>();
+      return {
+        ...actual,
+        runEmbeddedPiAgent: (...args: unknown[]) => params.runEmbeddedPiAgentMock?.(...args),
+      };
+    });
+  }
 
   vi.doMock("../plugins/hook-runner-global.js", () => ({
     getGlobalHookRunner: () => params.hookRunner ?? { hasHooks: () => false },

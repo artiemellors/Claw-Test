@@ -83,6 +83,44 @@ describe("sessions_spawn tool", () => {
     expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
   });
 
+  it("forwards includeContext=summary to subagent spawn", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+    });
+
+    await tool.execute("call-summary", {
+      task: "summarize and build",
+      includeContext: "summary",
+    });
+
+    expect(hoisted.spawnSubagentDirectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: "summarize and build",
+        includeContext: "summary",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("forwards includeContext=full to subagent spawn", async () => {
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+    });
+
+    await tool.execute("call-full", {
+      task: "use full context",
+      includeContext: "full",
+    });
+
+    expect(hoisted.spawnSubagentDirectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: "use full context",
+        includeContext: "full",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("passes inherited workspaceDir from tool context, not from tool args", async () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",

@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
 import { promises as fs } from "node:fs";
 import { formatThinkingLevels, normalizeThinkLevel } from "../auto-reply/thinking.js";
 import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
@@ -9,6 +11,8 @@ import { ADMIN_SCOPE, isAdminOnlyMethod } from "../gateway/method-scopes.js";
 import {
   pruneLegacyStoreKeys,
   resolveGatewaySessionStoreTarget,
+  readSessionMessages,
+  loadSessionEntry,
 } from "../gateway/session-utils.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
@@ -19,10 +23,22 @@ import {
   parseAgentSessionKey,
 } from "../routing/session-key.js";
 import { emitSessionLifecycleEvent } from "../sessions/session-lifecycle-events.js";
+import { extractTextFromChatContent } from "../shared/chat-content.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
-import { resolveAgentConfig } from "./agent-scope.js";
+import {
+  resolveAgentConfig,
+  resolveAgentEffectiveModelPrimary,
+  resolveAgentDir,
+} from "./agent-scope.js";
+import { resolveContextTokensForModel } from "./context.js";
+import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import { AGENT_LANE_SUBAGENT } from "./lanes.js";
-import { resolveSubagentSpawnModelSelection } from "./model-selection.js";
+import {
+  resolveSubagentSpawnModelSelection,
+  parseModelRef,
+} from "./model-selection.js";
+import { runEmbeddedPiAgent } from "./pi-embedded-runner.js";
+import { extractAssistantText } from "./pi-embedded-utils.js";
 import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 import {
   mapToolContextToSpawnedRunMetadata,
@@ -67,6 +83,7 @@ const defaultSubagentSpawnDeps: SubagentSpawnDeps = {
 };
 
 let subagentSpawnDeps: SubagentSpawnDeps = defaultSubagentSpawnDeps;
+export type SpawnSubagentIncludeContext = "none" | "summary" | "full";
 
 export type SpawnSubagentParams = {
   task: string;
@@ -79,6 +96,7 @@ export type SpawnSubagentParams = {
   mode?: SpawnSubagentMode;
   cleanup?: "delete" | "keep";
   sandbox?: SpawnSubagentSandboxMode;
+  includeContext?: SpawnSubagentIncludeContext;
   expectsCompletionMessage?: boolean;
   attachments?: Array<{
     name: string;
@@ -287,6 +305,92 @@ function summarizeError(err: unknown): string {
   return "error";
 }
 
+const INCLUDE_CONTEXT_MAX_MESSAGES_FALLBACK = 60;
+const INCLUDE_CONTEXT_MAX_CHARS_FALLBACK = 24_000;
+const INCLUDE_CONTEXT_TOKENS_FALLBACK = 64_000;
+
+function clampInt(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function resolveIncludeContextLimits(params: {
+  cfg?: unknown;
+  model?: string;
+  scale?: number;
+}): { maxMessages: number; maxChars: number } {
+  const scale =
+    typeof params.scale === "number" && Number.isFinite(params.scale)
+      ? Math.max(0.1, Math.min(1, params.scale))
+      : 1;
+  const contextTokens =
+    resolveContextTokensForModel({
+      cfg: params.cfg as any,
+      model: params.model,
+      fallbackContextTokens: INCLUDE_CONTEXT_TOKENS_FALLBACK,
+      allowAsyncLoad: false,
+    }) ?? INCLUDE_CONTEXT_TOKENS_FALLBACK;
+
+  const maxMessages = clampInt(contextTokens / 2_000, 20, 80);
+  const maxChars = clampInt(contextTokens * 2, 8_000, 50_000);
+
+  return {
+    maxMessages: clampInt(maxMessages * scale, 10, 80),
+    maxChars: clampInt(maxChars * scale, 4_000, 50_000),
+  };
+}
+
+function formatSessionTranscript(
+  messages: unknown[],
+  opts?: { cfg?: unknown; model?: string; scale?: number; maxMessages?: number; maxChars?: number },
+) {
+  const resolved = resolveIncludeContextLimits({
+    cfg: opts?.cfg,
+    model: opts?.model,
+    scale: opts?.scale,
+  });
+  const maxMessages =
+    typeof opts?.maxMessages === "number" && Number.isFinite(opts.maxMessages)
+      ? Math.max(1, Math.floor(opts.maxMessages))
+      : resolved.maxMessages || INCLUDE_CONTEXT_MAX_MESSAGES_FALLBACK;
+  const maxChars =
+    typeof opts?.maxChars === "number" && Number.isFinite(opts.maxChars)
+      ? Math.max(1, Math.floor(opts.maxChars))
+      : resolved.maxChars || INCLUDE_CONTEXT_MAX_CHARS_FALLBACK;
+
+  const recent = messages.slice(-maxMessages);
+  const lines = recent
+    .map((m: any) => {
+      const role = typeof m?.role === "string" ? m.role : "unknown";
+      if (role === "user") {
+        const raw =
+          extractTextFromChatContent(m.content, {
+            joinWith: "\n",
+            normalizeText: (text) => text.trim(),
+          }) ?? "";
+        const content = raw || "(no content)";
+        return `USER: ${content}`;
+      }
+      if (role === "assistant") {
+        const text = extractAssistantText(m);
+        const content = text || "(no content)";
+        return `ASSISTANT: ${content}`;
+      }
+      return null;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  const transcript = lines.join("\n\n");
+  if (transcript.length <= maxChars) {
+    return transcript;
+  }
+  const tail = transcript.slice(transcript.length - maxChars);
+  return `...(truncated; showing last ${maxChars} chars)\n${tail}`;
+}
+
 async function ensureThreadBindingForSubagentSpawn(params: {
   hookRunner: SubagentLifecycleHookRunner | null;
   childSessionKey: string;
@@ -345,6 +449,107 @@ async function ensureThreadBindingForSubagentSpawn(params: {
       status: "error",
       error: `Thread bind failed: ${summarizeError(err)}`,
     };
+  }
+}
+
+async function getSubagentFullSessionContext(params: {
+  sessionKey: string;
+  cfg: unknown;
+  model?: string;
+}): Promise<string | undefined> {
+  const { storePath, entry } = loadSessionEntry(params.sessionKey);
+  if (!entry || !entry.sessionId) return undefined;
+
+  const messages = readSessionMessages(
+    entry.sessionId,
+    storePath,
+    entry.sessionFile,
+  );
+
+  if (!messages || messages.length === 0) return undefined;
+
+  return formatSessionTranscript(messages, { cfg: params.cfg, model: params.model, scale: 1 });
+}
+
+async function generateSubagentSessionSummary(
+  _params: SpawnSubagentParams,
+  ctx: SpawnSubagentContext,
+  requesterSessionKey: string,
+  requesterAgentId: string,
+): Promise<string | undefined> {
+  const config = loadConfig();
+  const { storePath, entry } = loadSessionEntry(requesterSessionKey);
+  if (!entry || !entry.sessionId) return undefined;
+
+  const messages = readSessionMessages(
+    entry.sessionId,
+    storePath,
+    entry.sessionFile,
+  );
+
+  if (!messages || messages.length === 0) return undefined;
+
+  const modelRef = resolveAgentEffectiveModelPrimary(config, requesterAgentId);
+
+  let provider = DEFAULT_PROVIDER;
+  let model = DEFAULT_MODEL;
+
+  if (modelRef) {
+    const parsed = parseModelRef(modelRef, DEFAULT_PROVIDER);
+    if (parsed) {
+      provider = parsed.provider;
+      model = parsed.model;
+    }
+  }
+
+  const transcript = formatSessionTranscript(messages, {
+    cfg: config,
+    model: `${provider}/${model}`,
+    scale: 0.6,
+  });
+  if (!transcript) return undefined;
+
+  const summaryPrompt = `Please provide a concise technical summary of the following conversation history to help a sub-agent understand the current context, goals, and decisions. Focus on key details and constraints.\n\nCONVERSATION HISTORY:\n${transcript}`;
+
+  const runId = crypto.randomUUID();
+  const sessionId = `summary-${runId}`;
+  const sessionFile = path.join(os.tmpdir(), `${sessionId}.jsonl`);
+
+  try {
+    const result = await runEmbeddedPiAgent({
+      sessionId,
+      runId,
+      sessionFile,
+      agentId: requesterAgentId,
+      workspaceDir: ctx.workspaceDir || os.tmpdir(),
+      agentDir: resolveAgentDir(config, requesterAgentId),
+      prompt: summaryPrompt,
+      model: model as string,
+      provider: provider as string,
+      disableTools: true,
+      timeoutMs: 30_000,
+      trigger: "memory",
+      extraSystemPrompt:
+        "You are a helpful assistant summarizing a conversation for another agent. Be concise and technical. Do not include introductory or concluding remarks.",
+    });
+
+    const summary =
+      result.payloads
+        ?.filter((payload) => payload && typeof payload === "object" && payload.isReasoning !== true)
+        .map((payload) => (typeof payload.text === "string" ? payload.text : ""))
+        .filter((text) => text.trim())
+        .join("\n")
+        .trim() ?? "";
+    return summary || undefined;
+  } catch (e) {
+    console.error(`Failed to generate subagent session summary: ${e}`);
+    return undefined;
+  } finally {
+    try {
+      await fs.rm(sessionFile, { force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
   }
 }
 
@@ -622,12 +827,29 @@ export async function spawnSubagentDirect(
   }
   const mountPathHint = sanitizeMountPathHint(params.attachMountPath);
 
+  let sessionSummary: string | undefined;
+  if (params.includeContext === "summary") {
+    sessionSummary = await generateSubagentSessionSummary(
+      params,
+      ctx,
+      requesterInternalKey,
+      requesterAgentId,
+    );
+  } else if (params.includeContext === "full") {
+    sessionSummary = await getSubagentFullSessionContext({
+      sessionKey: requesterInternalKey,
+      cfg,
+      model: resolvedModel ?? modelOverride,
+    });
+  }
+
   let childSystemPrompt = buildSubagentSystemPrompt({
     requesterSessionKey,
     requesterOrigin,
     childSessionKey,
     label: label || undefined,
     task,
+    sessionSummary,
     acpEnabled: cfg.acp?.enabled !== false && !childRuntime.sandboxed,
     childDepth,
     maxSpawnDepth,

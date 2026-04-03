@@ -63,6 +63,7 @@ export function buildSubagentSystemPrompt(params: {
   childSessionKey: string;
   label?: string;
   task?: string;
+  sessionSummary?: string;
   /** Whether ACP-specific routing guidance should be included. Defaults to true. */
   acpEnabled?: boolean;
   /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
@@ -93,6 +94,19 @@ export function buildSubagentSystemPrompt(params: {
     "- Complete this task. That's your entire purpose.",
     `- You are NOT the ${parentLabel}. Don't try to be.`,
     "",
+  ];
+
+  if (params.sessionSummary) {
+    lines.push(
+      "## Parent Session Summary",
+      "The following is a summary of the parent session context to help you understand the background of your task:",
+      "",
+      params.sessionSummary,
+      "",
+    );
+  }
+
+  lines.push(
     "## Rules",
     "1. **Stay focused** - Do your assigned task, nothing else",
     `2. **Complete the task** - Your final message will be automatically reported to the ${parentLabel}`,

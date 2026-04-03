@@ -158,6 +158,85 @@ describe("spawnSubagentDirect seam flow", () => {
     expect(operations.indexOf("gateway:agent")).toBeGreaterThan(operations.indexOf("store:update"));
   });
 
+  it("injects parent session summary into child system prompt when includeContext=summary", async () => {
+    const captured: { extraSystemPrompt?: string } = {};
+
+    ({ resetSubagentRegistryForTests, spawnSubagentDirect } = await loadSubagentSpawnModuleForTest({
+      callGatewayMock: hoisted.callGatewayMock,
+      loadConfig: () => hoisted.configOverride,
+      updateSessionStoreMock: hoisted.updateSessionStoreMock,
+      pruneLegacyStoreKeysMock: hoisted.pruneLegacyStoreKeysMock,
+      registerSubagentRunMock: hoisted.registerSubagentRunMock,
+      emitSessionLifecycleEventMock: hoisted.emitSessionLifecycleEventMock,
+      resolveAgentConfig: () => undefined,
+      resolveSubagentSpawnModelSelection: () => "openai-codex/gpt-5.4",
+      resolveSandboxRuntimeStatus: () => ({ sandboxed: false }),
+      sessionStorePath: "/tmp/subagent-spawn-session-store.json",
+      mockSubagentSystemPrompt: false,
+      loadSessionEntryMock: () => ({
+        storePath: "/tmp/session-store.json",
+        entry: { sessionId: "sess-1", sessionFile: "/tmp/sess-1.jsonl" },
+      }),
+      readSessionMessagesMock: () => [
+        { role: "user", content: "user message" },
+        { role: "assistant", content: "assistant message" },
+      ],
+      runEmbeddedPiAgentMock: async () => ({
+        payloads: [{ text: "SUMMARY_TEXT" }],
+        meta: { durationMs: 1 },
+      }),
+    }));
+
+    resetSubagentRegistryForTests();
+    hoisted.callGatewayMock.mockReset();
+    hoisted.updateSessionStoreMock.mockReset();
+    hoisted.pruneLegacyStoreKeysMock.mockReset();
+    hoisted.registerSubagentRunMock.mockReset();
+    hoisted.emitSessionLifecycleEventMock.mockReset();
+    hoisted.configOverride = createConfigOverride();
+
+    hoisted.callGatewayMock.mockImplementation(async (request: any) => {
+      if (request.method === "agent") {
+        captured.extraSystemPrompt = request.params?.extraSystemPrompt;
+        return { runId: "run-1" };
+      }
+      if (request.method?.startsWith("sessions.")) {
+        return { ok: true };
+      }
+      return {};
+    });
+
+    hoisted.updateSessionStoreMock.mockImplementation(
+      async (
+        _storePath: string,
+        mutator: (store: Record<string, Record<string, unknown>>) => unknown,
+      ) => {
+        const store: Record<string, Record<string, unknown>> = {};
+        await mutator(store);
+        return store;
+      },
+    );
+
+    const result = await spawnSubagentDirect(
+      {
+        task: "check summary injection",
+        includeContext: "summary",
+        model: "openai-codex/gpt-5.4",
+      },
+      {
+        agentSessionKey: "agent:main:main",
+        agentChannel: "discord",
+        agentAccountId: "acct-1",
+        agentTo: "user-1",
+        workspaceDir: "/tmp/requester-workspace",
+      },
+    );
+
+    expect(result.status).toBe("accepted");
+    expect(captured.extraSystemPrompt).toContain("## Parent Session Summary");
+    expect(captured.extraSystemPrompt).toContain("SUMMARY_TEXT");
+  });
+
   it("pins admin-only methods to operator.admin and preserves least-privilege for others (#59428)", async () => {
     const capturedCalls: Array<{ method?: string; scopes?: string[] }> = [];
 

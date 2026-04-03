@@ -18,6 +18,7 @@ import {
 
 const SESSIONS_SPAWN_RUNTIMES = ["subagent", "acp"] as const;
 const SESSIONS_SPAWN_SANDBOX_MODES = ["inherit", "require"] as const;
+const SESSIONS_SPAWN_INCLUDE_CONTEXT_MODES = ["none", "summary", "full"] as const;
 // Keep the schema local to avoid a circular import through acp-spawn/openclaw-tools.
 const SESSIONS_SPAWN_ACP_STREAM_TARGETS = ["parent"] as const;
 const UNSUPPORTED_SESSIONS_SPAWN_PARAM_KEYS = [
@@ -91,7 +92,16 @@ const SessionsSpawnToolSchema = Type.Object({
   thread: Type.Optional(Type.Boolean()),
   mode: optionalStringEnum(SUBAGENT_SPAWN_MODES),
   cleanup: optionalStringEnum(["delete", "keep"] as const),
-  sandbox: optionalStringEnum(SESSIONS_SPAWN_SANDBOX_MODES),
+  sandbox: optionalStringEnum(SESSIONS_SPAWN_SANDBOX_MODES, {
+    description:
+      "Sandbox mode: inherit (default) uses requester's sandbox status; require ensures subagent runs in a sandbox.",
+  }),
+  includeContext: optionalStringEnum(SESSIONS_SPAWN_INCLUDE_CONTEXT_MODES, {
+    description:
+      "Whether to include the current session's context in the subagent's startup. " +
+      "'none' (default) starts fresh; 'summary' generates a summary of the current session; " +
+      "'full' injects the current session transcript in text form (may be truncated).",
+  }),
   streamTo: optionalStringEnum(SESSIONS_SPAWN_ACP_STREAM_TARGETS),
 
   // Inline attachments (snapshot-by-value).
@@ -134,7 +144,7 @@ export function createSessionsSpawnTool(
     description:
       'Spawn an isolated session (runtime="subagent" or runtime="acp"). mode="run" is one-shot and mode="session" is persistent/thread-bound. Subagents inherit the parent workspace directory automatically.',
     parameters: SessionsSpawnToolSchema,
-    execute: async (_toolCallId, args) => {
+    execute: async (_toolCallId: string, args: unknown) => {
       const params = args as Record<string, unknown>;
       const unsupportedParam = UNSUPPORTED_SESSIONS_SPAWN_PARAM_KEYS.find((key) =>
         Object.hasOwn(params, key),
@@ -156,6 +166,7 @@ export function createSessionsSpawnTool(
       const cleanup =
         params.cleanup === "keep" || params.cleanup === "delete" ? params.cleanup : "keep";
       const sandbox = params.sandbox === "require" ? "require" : "inherit";
+      const includeContext = params.includeContext as "none" | "summary" | "full" | undefined;
       const streamTo = params.streamTo === "parent" ? "parent" : undefined;
       // Back-compat: older callers used timeoutSeconds for this tool.
       const timeoutSecondsCandidate =
@@ -296,6 +307,7 @@ export function createSessionsSpawnTool(
           mode,
           cleanup,
           sandbox,
+          includeContext,
           expectsCompletionMessage: true,
           attachments,
           attachMountPath:
