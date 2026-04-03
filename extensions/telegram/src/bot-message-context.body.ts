@@ -1,10 +1,4 @@
 import {
-  findModelInCatalog,
-  loadModelCatalog,
-  modelSupportsVision,
-} from "openclaw/plugin-sdk/agent-runtime";
-import { resolveDefaultModelForAgent } from "openclaw/plugin-sdk/agent-runtime";
-import {
   buildMentionRegexes,
   formatLocationText,
   logInboundDrop,
@@ -12,8 +6,8 @@ import {
   resolveMentionGatingWithBypass,
   type NormalizedLocation,
 } from "openclaw/plugin-sdk/channel-inbound";
-import { resolveControlCommandGate } from "openclaw/plugin-sdk/command-auth";
-import { hasControlCommand } from "openclaw/plugin-sdk/command-auth";
+import { resolveControlCommandGate } from "openclaw/plugin-sdk/command-auth-native";
+import { hasControlCommand } from "openclaw/plugin-sdk/command-detection";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type {
   TelegramDirectConfig,
@@ -35,13 +29,13 @@ import type {
 } from "./bot-message-context.types.js";
 import {
   buildSenderLabel,
-  buildTelegramGroupPeerId,
   expandTextLinks,
   extractTelegramLocation,
   getTelegramTextParts,
   hasBotMention,
-  resolveTelegramMediaPlaceholder,
-} from "./bot/helpers.js";
+  resolveTelegramPrimaryMedia,
+} from "./bot/body-helpers.js";
+import { buildTelegramGroupPeerId } from "./bot/helpers.js";
 import type { TelegramContext } from "./bot/types.js";
 import { isTelegramForumServiceMessage } from "./forum-service-message.js";
 
@@ -62,16 +56,8 @@ async function resolveStickerVisionSupport(params: {
   agentId?: string;
 }): Promise<boolean> {
   try {
-    const catalog = await loadModelCatalog({ config: params.cfg });
-    const defaultModel = resolveDefaultModelForAgent({
-      cfg: params.cfg,
-      agentId: params.agentId,
-    });
-    const entry = findModelInCatalog(catalog, defaultModel.provider, defaultModel.model);
-    if (!entry) {
-      return false;
-    }
-    return modelSupportsVision(entry);
+    const { resolveStickerVisionSupportRuntime } = await import("./sticker-vision.runtime.js");
+    return await resolveStickerVisionSupportRuntime(params);
   } catch {
     return false;
   }
@@ -141,7 +127,8 @@ export async function resolveTelegramInboundBody(params: {
   const commandAuthorized = commandGate.commandAuthorized;
   const historyKey = isGroup ? buildTelegramGroupPeerId(chatId, resolvedThreadId) : undefined;
 
-  let placeholder = resolveTelegramMediaPlaceholder(msg) ?? "";
+  const primaryMedia = resolveTelegramPrimaryMedia(msg);
+  let placeholder = primaryMedia?.placeholder ?? "";
   const cachedStickerDescription = allMedia[0]?.stickerMetadata?.cachedDescription;
   const stickerSupportsVision = msg.sticker
     ? await resolveStickerVisionSupport({ cfg, agentId: routeAgentId })
@@ -167,10 +154,18 @@ export async function resolveTelegramInboundBody(params: {
   }
 
   let bodyText = rawBody;
+  if (allMedia.length === 0 && placeholder && rawBody !== placeholder) {
+    const mediaTag = primaryMedia?.fileRef.file_id
+      ? `${placeholder} [file_id:${primaryMedia.fileRef.file_id}]`
+      : placeholder;
+    bodyText = `${mediaTag}\n${bodyText}`.trim();
+  }
   const hasAudio = allMedia.some((media) => media.contentType?.startsWith("audio/"));
   const disableAudioPreflight =
     (topicConfig?.disableAudioPreflight ??
       (groupConfig as TelegramGroupConfig | undefined)?.disableAudioPreflight) === true;
+  const senderAllowedForAudioPreflight =
+    !useAccessGroups || !allowForCommands.hasEntries || senderAllowedForCommands;
 
   let preflightTranscript: string | undefined;
   const needsPreflightTranscription =
@@ -179,7 +174,8 @@ export async function resolveTelegramInboundBody(params: {
     hasAudio &&
     !hasUserText &&
     mentionRegexes.length > 0 &&
-    !disableAudioPreflight;
+    !disableAudioPreflight &&
+    senderAllowedForAudioPreflight;
 
   if (needsPreflightTranscription) {
     try {

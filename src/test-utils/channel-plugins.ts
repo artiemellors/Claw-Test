@@ -29,6 +29,7 @@ export const createTestRegistry = (channels: TestChannelRegistration[] = []): Pl
   speechProviders: [],
   mediaUnderstandingProviders: [],
   imageGenerationProviders: [],
+  webFetchProviders: [],
   webSearchProviders: [],
   gatewayHandlers: {},
   httpRoutes: [],
@@ -43,6 +44,7 @@ export const createChannelTestPluginBase = (params: {
   id: ChannelId;
   label?: string;
   docsPath?: string;
+  markdownCapable?: boolean;
   capabilities?: ChannelCapabilities;
   config?: Partial<ChannelPlugin["config"]>;
 }): Pick<ChannelPlugin, "id" | "meta" | "capabilities" | "config"> => ({
@@ -53,6 +55,7 @@ export const createChannelTestPluginBase = (params: {
     selectionLabel: params.label ?? String(params.id),
     docsPath: params.docsPath ?? `/channels/${params.id}`,
     blurb: "test stub.",
+    ...(params.markdownCapable !== undefined ? { markdownCapable: params.markdownCapable } : {}),
   },
   capabilities: params.capabilities ?? { chatTypes: ["direct"] },
   config: {
