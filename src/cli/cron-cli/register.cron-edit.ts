@@ -79,9 +79,12 @@ function computeDisplayAfterSchedule(
         !Array.isArray(existingVal)
       ) {
         const e = existingVal as Record<string, unknown>;
-        if (e["kind"] === "cron" && e["staggerMs"] !== undefined) {
-          // Path 1: existing is cron — preserve existing staggerMs (mirrors applyJobPatch)
-          return { ...p, staggerMs: e["staggerMs"] };
+        if (e["kind"] === "cron") {
+          // Path 1: cron → cron — preserve existing staggerMs (or keep it absent if undefined),
+          // mirroring applyJobPatch which never synthesizes a default for an existing cron job.
+          return e["staggerMs"] !== undefined
+            ? { ...p, staggerMs: e["staggerMs"] }
+            : p;
         }
       }
       // Path 2: non-cron → cron conversion — synthesize default stagger just as applyJobPatch does
