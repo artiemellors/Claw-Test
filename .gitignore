@@ -141,3 +141,13 @@ changelog/fragments/
 
 # Local scratch workspace
 .tmp/
+
+# Workspace-specific local state
+MEMORY.md
+HEARTBEAT.md
+memory/private/
+.openclaw/*
+!.openclaw/extensions/
+.openclaw/extensions/*
+!.openclaw/extensions/auto-session-closeout/
+!.openclaw/extensions/auto-session-closeout/**
