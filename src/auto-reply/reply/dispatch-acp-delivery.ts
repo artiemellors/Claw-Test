@@ -8,6 +8,7 @@ import type { FinalizedMsgContext } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
 import { routeReply } from "./route-reply.js";
+import { isNonTextVisibleFinal } from "./tool-only-filter.js";
 
 export type AcpDispatchDeliveryMeta = {
   toolCallId?: string;
@@ -200,12 +201,8 @@ export function createAcpDispatchDeliveryCoordinator(params: {
       if (kind === "tool") {
         return false;
       }
-      if (kind === "final") {
-        const hasMedia = Boolean(payload.mediaUrl || payload.mediaUrls?.length);
-        const isError = Boolean(payload.isError);
-        if (!hasMedia && !isError) {
-          return false;
-        }
+      if (kind === "final" && !isNonTextVisibleFinal(payload)) {
+        return false;
       }
     }
 
