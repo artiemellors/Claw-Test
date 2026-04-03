@@ -19,6 +19,7 @@ import {
   createAgentEventHandler,
   createChatRunState,
   createSessionEventSubscriberRegistry,
+  createSessionMessageSubscriberRegistry,
   createToolEventRecipientRegistry,
 } from "./server-chat.js";
 
@@ -72,6 +73,7 @@ describe("agent event handler", () => {
     const chatRunState = createChatRunState();
     const toolEventRecipients = createToolEventRecipientRegistry();
     const sessionEventSubscribers = createSessionEventSubscriberRegistry();
+    const sessionMessageSubscribers = createSessionMessageSubscriberRegistry();
 
     const handler = createAgentEventHandler({
       broadcast,
@@ -83,6 +85,7 @@ describe("agent event handler", () => {
       clearAgentRunContext: vi.fn(),
       toolEventRecipients,
       sessionEventSubscribers,
+      sessionMessageSubscribers,
     });
 
     return {
@@ -94,6 +97,7 @@ describe("agent event handler", () => {
       chatRunState,
       toolEventRecipients,
       sessionEventSubscribers,
+      sessionMessageSubscribers,
       handler,
     };
   }
@@ -1214,5 +1218,61 @@ describe("agent event handler", () => {
     expect(payload.message?.content?.[0]?.text).toBe(
       "Disk usage crossed 95 percent on /data and needs cleanup now.",
     );
+  });
+
+  it("targets broadcastToConnIds when session message subscribers exist", () => {
+    const { broadcast, broadcastToConnIds, chatRunState, sessionMessageSubscribers, handler } =
+      createHarness({ now: 1_000 });
+    chatRunState.registry.add("run-iso-sub", {
+      sessionKey: "session-iso",
+      clientRunId: "client-iso",
+    });
+    registerAgentRunContext("run-iso-sub", {
+      sessionKey: "session-iso",
+      verboseLevel: "off",
+    });
+    sessionMessageSubscribers.subscribe("conn-a", "session-iso");
+
+    handler({
+      runId: "run-iso-sub",
+      seq: 0,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "isolated message" },
+    });
+    emitLifecycleEnd(handler, "run-iso-sub");
+
+    expect(broadcast).not.toHaveBeenCalledWith("chat", expect.anything());
+    const chatCalls = broadcastToConnIds.mock.calls.filter((c) => c[0] === "chat");
+    expect(chatCalls.length).toBeGreaterThan(0);
+    const subscribers = chatCalls[0][2] as Set<string>;
+    expect(subscribers.has("conn-a")).toBe(true);
+  });
+
+  it("falls back to global broadcast when no session message subscribers exist", () => {
+    const { broadcast, broadcastToConnIds, chatRunState, handler } = createHarness({
+      now: 1_000,
+    });
+    chatRunState.registry.add("run-iso-nosub", {
+      sessionKey: "session-nosub",
+      clientRunId: "client-nosub",
+    });
+    registerAgentRunContext("run-iso-nosub", {
+      sessionKey: "session-nosub",
+      verboseLevel: "off",
+    });
+
+    handler({
+      runId: "run-iso-nosub",
+      seq: 0,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "fallback message" },
+    });
+    emitLifecycleEnd(handler, "run-iso-nosub");
+
+    const chatCalls = broadcast.mock.calls.filter((c) => c[0] === "chat");
+    expect(chatCalls.length).toBeGreaterThan(0);
+    expect(broadcastToConnIds).not.toHaveBeenCalled();
   });
 });

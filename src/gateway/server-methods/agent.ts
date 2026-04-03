@@ -237,6 +237,7 @@ function dispatchAgentRunFromGateway(params: {
       params.respond(true, payload, undefined, { runId: params.runId });
     })
     .catch((err) => {
+      params.context.deleteChatSenderConnId(params.idempotencyKey);
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
       const payload = {
         runId: params.runId,
@@ -625,6 +626,12 @@ export const agentHandlers: GatewayRequestHandlers = {
           bestEffortDeliver = true;
         }
       }
+      // Track the sender connection for all sessions (not just main/global)
+      // so that scoped chat fanout always includes the requester.
+      const senderConnId = typeof client?.connId === "string" ? client.connId : undefined;
+      if (senderConnId) {
+        context.setChatSenderConnId(idem, senderConnId);
+      }
       registerAgentRunContext(idem, { sessionKey: canonicalSessionKey });
     }
 
@@ -706,6 +713,7 @@ export const agentHandlers: GatewayRequestHandlers = {
           resolvedChannel,
         });
         if (!shouldDowngrade) {
+          context.deleteChatSenderConnId(idem);
           respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(err)));
           return;
         }
@@ -733,6 +741,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         resolvedChannel,
       });
       if (!shouldDowngrade) {
+        context.deleteChatSenderConnId(idem);
         respond(
           false,
           undefined,

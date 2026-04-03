@@ -975,6 +975,7 @@ function createChatAbortOps(context: GatewayRequestContext): ChatAbortOps {
     chatDeltaSentAt: context.chatDeltaSentAt,
     chatDeltaLastBroadcastLen: context.chatDeltaLastBroadcastLen,
     chatAbortedRuns: context.chatAbortedRuns,
+    senderConnIds: context.chatSenderConnIds,
     removeChatRun: context.removeChatRun,
     agentRunSeq: context.agentRunSeq,
     broadcast: context.broadcast,
@@ -1133,8 +1134,56 @@ function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: strin
   return next;
 }
 
+function chatBroadcast(
+  context: Pick<
+    GatewayRequestContext,
+    | "broadcast"
+    | "broadcastToConnIds"
+    | "getSessionMessageSubscribers"
+    | "getSessionEventSubscriberConnIds"
+    | "getChatSenderConnId"
+    | "nodeSendToSession"
+    | "agentRunSeq"
+  >,
+  event: string,
+  payload: Record<string, unknown> & { sessionKey: string; runId?: string },
+  opts?: { dropIfSlow?: boolean },
+) {
+  const subscribers = context.getSessionMessageSubscribers(payload.sessionKey);
+  const operators = context.getSessionEventSubscriberConnIds();
+  if (subscribers.size > 0 || operators.size > 0) {
+    const targets = new Set(subscribers);
+    for (const id of operators) {
+      targets.add(id);
+    }
+    // Always include the sender connection so clients that never
+    // call subscribe (e.g. iOS chat/talk transports) still receive
+    // responses to their own requests.
+    if (payload.runId) {
+      const senderConnId = context.getChatSenderConnId(payload.runId);
+      if (senderConnId) {
+        targets.add(senderConnId);
+      }
+    }
+    context.broadcastToConnIds(event, payload, targets, opts);
+  } else {
+    context.broadcast(event, payload, opts);
+  }
+  context.nodeSendToSession(payload.sessionKey, event, payload);
+}
+
 function broadcastChatFinal(params: {
-  context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
+  context: Pick<
+    GatewayRequestContext,
+    | "broadcast"
+    | "broadcastToConnIds"
+    | "getSessionMessageSubscribers"
+    | "getSessionEventSubscriberConnIds"
+    | "getChatSenderConnId"
+    | "deleteChatSenderConnId"
+    | "nodeSendToSession"
+    | "agentRunSeq"
+  >;
   runId: string;
   sessionKey: string;
   message?: Record<string, unknown>;
@@ -1150,9 +1199,9 @@ function broadcastChatFinal(params: {
     state: "final" as const,
     message: stripInlineDirectiveTagsFromMessageForDisplay(strippedEnvelopeMessage),
   };
-  params.context.broadcast("chat", payload);
-  params.context.nodeSendToSession(params.sessionKey, "chat", payload);
+  chatBroadcast(params.context, "chat", payload);
   params.context.agentRunSeq.delete(params.runId);
+  params.context.deleteChatSenderConnId(params.runId);
 }
 
 function isBtwReplyPayload(payload: ReplyPayload | undefined): payload is ReplyPayload & {
@@ -1168,22 +1217,37 @@ function isBtwReplyPayload(payload: ReplyPayload | undefined): payload is ReplyP
 }
 
 function broadcastSideResult(params: {
-  context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
+  context: Pick<
+    GatewayRequestContext,
+    | "broadcast"
+    | "broadcastToConnIds"
+    | "getSessionMessageSubscribers"
+    | "getSessionEventSubscriberConnIds"
+    | "getChatSenderConnId"
+    | "nodeSendToSession"
+    | "agentRunSeq"
+  >;
   payload: SideResultPayload;
 }) {
   const seq = nextChatSeq({ agentRunSeq: params.context.agentRunSeq }, params.payload.runId);
-  params.context.broadcast("chat.side_result", {
-    ...params.payload,
-    seq,
-  });
-  params.context.nodeSendToSession(params.payload.sessionKey, "chat.side_result", {
+  chatBroadcast(params.context, "chat.side_result", {
     ...params.payload,
     seq,
   });
 }
 
 function broadcastChatError(params: {
-  context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
+  context: Pick<
+    GatewayRequestContext,
+    | "broadcast"
+    | "broadcastToConnIds"
+    | "getSessionMessageSubscribers"
+    | "getSessionEventSubscriberConnIds"
+    | "getChatSenderConnId"
+    | "deleteChatSenderConnId"
+    | "nodeSendToSession"
+    | "agentRunSeq"
+  >;
   runId: string;
   sessionKey: string;
   errorMessage?: string;
@@ -1196,9 +1260,9 @@ function broadcastChatError(params: {
     state: "error" as const,
     errorMessage: params.errorMessage,
   };
-  params.context.broadcast("chat", payload);
-  params.context.nodeSendToSession(params.sessionKey, "chat", payload);
+  chatBroadcast(params.context, "chat", payload);
   params.context.agentRunSeq.delete(params.runId);
+  params.context.deleteChatSenderConnId(params.runId);
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
@@ -1731,6 +1795,13 @@ export const chatHandlers: GatewayRequestHandlers = {
         );
       });
 
+      // Track the sender connection immediately so broadcasts always include
+      // it, even if the agent run fails before onAgentRunStart fires.
+      const senderConnId = typeof client?.connId === "string" ? client.connId : undefined;
+      if (senderConnId) {
+        context.setChatSenderConnId(clientRunId, senderConnId);
+      }
+
       let agentRunStarted = false;
       void dispatchInboundMessage({
         ctx,
@@ -1760,6 +1831,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                 }
               }
             }
+            // Sender connId already set before dispatchInboundMessage above.
           },
           onModelSelected,
         },
@@ -1970,8 +2042,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         stripEnvelopeFromMessage(appended.message) as Record<string, unknown>,
       ),
     };
-    context.broadcast("chat", chatPayload);
-    context.nodeSendToSession(sessionKey, "chat", chatPayload);
+    chatBroadcast(context, "chat", chatPayload);
 
     respond(true, { ok: true, messageId: appended.messageId });
   },

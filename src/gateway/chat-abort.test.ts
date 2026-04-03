@@ -37,6 +37,7 @@ function createOps(params: {
     chatDeltaSentAt: new Map([[runId, Date.now()]]),
     chatDeltaLastBroadcastLen: new Map([[runId, buffer?.length ?? 0]]),
     chatAbortedRuns: new Map(),
+    senderConnIds: new Map(),
     removeChatRun,
     agentRunSeq: new Map(),
     broadcast,

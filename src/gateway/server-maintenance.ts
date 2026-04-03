@@ -28,7 +28,7 @@ export function startGatewayMaintenanceTimers(params: {
   logHealth: { error: (msg: string) => void };
   dedupe: Map<string, DedupeEntry>;
   chatAbortControllers: Map<string, ChatAbortControllerEntry>;
-  chatRunState: { abortedRuns: Map<string, number> };
+  chatRunState: { abortedRuns: Map<string, number>; senderConnIds: Map<string, string> };
   chatRunBuffers: Map<string, string>;
   chatDeltaSentAt: Map<string, number>;
   chatDeltaLastBroadcastLen: Map<string, number>;
@@ -114,6 +114,7 @@ export function startGatewayMaintenanceTimers(params: {
           chatDeltaSentAt: params.chatDeltaSentAt,
           chatDeltaLastBroadcastLen: params.chatDeltaLastBroadcastLen,
           chatAbortedRuns: params.chatRunState.abortedRuns,
+          senderConnIds: params.chatRunState.senderConnIds,
           removeChatRun: params.removeChatRun,
           agentRunSeq: params.agentRunSeq,
           broadcast: params.broadcast,

@@ -951,6 +951,7 @@ export async function startGatewayServer(
             clearAgentRunContext,
             toolEventRecipients,
             sessionEventSubscribers,
+            sessionMessageSubscribers,
           }),
         );
 
@@ -1274,10 +1275,14 @@ export async function startGatewayServer(
       agentRunSeq,
       chatAbortControllers,
       chatAbortedRuns: chatRunState.abortedRuns,
+      chatSenderConnIds: chatRunState.senderConnIds,
       chatRunBuffers: chatRunState.buffers,
       chatDeltaSentAt: chatRunState.deltaSentAt,
       chatDeltaLastBroadcastLen: chatRunState.deltaLastBroadcastLen,
       addChatRun,
+      setChatSenderConnId: (runId: string, connId: string) => {
+        chatRunState.senderConnIds.set(runId, connId);
+      },
       removeChatRun,
       subscribeSessionEvents: sessionEventSubscribers.subscribe,
       unsubscribeSessionEvents: sessionEventSubscribers.unsubscribe,
@@ -1288,6 +1293,11 @@ export async function startGatewayServer(
         sessionMessageSubscribers.unsubscribeAll(connId);
       },
       getSessionEventSubscriberConnIds: sessionEventSubscribers.getAll,
+      getSessionMessageSubscribers: sessionMessageSubscribers.get,
+      getChatSenderConnId: (runId: string) => chatRunState.senderConnIds.get(runId),
+      deleteChatSenderConnId: (runId: string) => {
+        chatRunState.senderConnIds.delete(runId);
+      },
       registerToolEventRecipient: toolEventRecipients.add,
       dedupe,
       wizardSessions,

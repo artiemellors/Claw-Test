@@ -207,6 +207,8 @@ export type ChatRunState = {
   /** Length of text at the time of the last broadcast, used to avoid duplicate flushes. */
   deltaLastBroadcastLen: Map<string, number>;
   abortedRuns: Map<string, number>;
+  /** Maps clientRunId → sender connection ID, so broadcasts always include the originator. */
+  senderConnIds: Map<string, string>;
   clear: () => void;
 };
 
@@ -217,12 +219,15 @@ export function createChatRunState(): ChatRunState {
   const deltaLastBroadcastLen = new Map<string, number>();
   const abortedRuns = new Map<string, number>();
 
+  const senderConnIds = new Map<string, string>();
+
   const clear = () => {
     registry.clear();
     buffers.clear();
     deltaSentAt.clear();
     deltaLastBroadcastLen.clear();
     abortedRuns.clear();
+    senderConnIds.clear();
   };
 
   return {
@@ -231,6 +236,7 @@ export function createChatRunState(): ChatRunState {
     deltaSentAt,
     deltaLastBroadcastLen,
     abortedRuns,
+    senderConnIds,
     clear,
   };
 }
@@ -450,6 +456,7 @@ export type AgentEventHandlerOptions = {
   clearAgentRunContext: (runId: string) => void;
   toolEventRecipients: ToolEventRecipientRegistry;
   sessionEventSubscribers: SessionEventSubscriberRegistry;
+  sessionMessageSubscribers: SessionMessageSubscriberRegistry;
 };
 
 export function createAgentEventHandler({
@@ -462,7 +469,45 @@ export function createAgentEventHandler({
   clearAgentRunContext,
   toolEventRecipients,
   sessionEventSubscribers,
+  sessionMessageSubscribers,
 }: AgentEventHandlerOptions) {
+  /**
+   * Broadcast a chat event to connections subscribed to the given session.
+   * Falls back to global broadcast when no session-specific subscribers exist,
+   * preserving backward compatibility for operator-level UIs.
+   */
+  const broadcastChatToSession = (
+    event: string,
+    payload: unknown,
+    sessionKey: string | undefined,
+    runId: string | undefined,
+    opts?: { dropIfSlow?: boolean },
+  ) => {
+    if (sessionKey) {
+      const subscribers = sessionMessageSubscribers.get(sessionKey);
+      // Also include operator-level UIs subscribed to all session events
+      const operators = sessionEventSubscribers.getAll();
+      if (subscribers.size > 0 || operators.size > 0) {
+        const targets = new Set(subscribers);
+        for (const id of operators) {
+          targets.add(id);
+        }
+        // Always include the sender connection so clients that never
+        // call subscribe (e.g. iOS chat/talk transports) still receive
+        // responses to their own requests.
+        if (runId) {
+          const senderConnId = chatRunState.senderConnIds.get(runId);
+          if (senderConnId) {
+            targets.add(senderConnId);
+          }
+        }
+        broadcastToConnIds(event, payload, targets, opts);
+        return;
+      }
+    }
+    broadcast(event, payload, opts);
+  };
+
   const buildSessionEventSnapshot = (sessionKey: string, evt?: AgentEventPayload) => {
     const row = loadGatewaySessionRow(sessionKey);
     const lifecyclePatch = evt
@@ -580,7 +625,7 @@ export function createAgentEventHandler({
         timestamp: now,
       },
     };
-    broadcast("chat", payload, { dropIfSlow: true });
+    broadcastChatToSession("chat", payload, sessionKey, clientRunId, { dropIfSlow: true });
     nodeSendToSession(sessionKey, "chat", payload);
   };
 
@@ -637,7 +682,7 @@ export function createAgentEventHandler({
         timestamp: now,
       },
     };
-    broadcast("chat", flushPayload, { dropIfSlow: true });
+    broadcastChatToSession("chat", flushPayload, sessionKey, clientRunId, { dropIfSlow: true });
     nodeSendToSession(sessionKey, "chat", flushPayload);
     chatRunState.deltaLastBroadcastLen.set(clientRunId, text.length);
     chatRunState.deltaSentAt.set(clientRunId, now);
@@ -661,6 +706,8 @@ export function createAgentEventHandler({
     chatRunState.deltaLastBroadcastLen.delete(clientRunId);
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
+    // Note: senderConnIds deleted after final broadcast below, not here,
+    // so the sender connection is still available for final/error events.
     if (jobState === "done") {
       const payload = {
         runId: clientRunId,
@@ -677,8 +724,9 @@ export function createAgentEventHandler({
               }
             : undefined,
       };
-      broadcast("chat", payload);
+      broadcastChatToSession("chat", payload, sessionKey, clientRunId);
       nodeSendToSession(sessionKey, "chat", payload);
+      chatRunState.senderConnIds.delete(clientRunId);
       return;
     }
     const payload = {
@@ -688,8 +736,9 @@ export function createAgentEventHandler({
       state: "error" as const,
       errorMessage: error ? formatForLog(error) : undefined,
     };
-    broadcast("chat", payload);
+    broadcastChatToSession("chat", payload, sessionKey, clientRunId);
     nodeSendToSession(sessionKey, "chat", payload);
+    chatRunState.senderConnIds.delete(clientRunId);
   };
 
   const resolveToolVerboseLevel = (runId: string, sessionKey?: string) => {
@@ -845,6 +894,7 @@ export function createAgentEventHandler({
         chatRunState.abortedRuns.delete(evt.runId);
         chatRunState.buffers.delete(clientRunId);
         chatRunState.deltaSentAt.delete(clientRunId);
+        chatRunState.senderConnIds.delete(clientRunId);
         if (chatLink) {
           chatRunState.registry.remove(evt.runId, clientRunId, sessionKey);
         }
@@ -856,6 +906,7 @@ export function createAgentEventHandler({
       clearAgentRunContext(evt.runId);
       agentRunSeq.delete(evt.runId);
       agentRunSeq.delete(clientRunId);
+      chatRunState.senderConnIds.delete(clientRunId);
     }
 
     if (
