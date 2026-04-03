@@ -207,7 +207,7 @@ describe("plugins cli install", () => {
       pluginId: "demo",
       install: {
         source: "clawhub",
-        spec: "clawhub:demo@1.2.3",
+        spec: "clawhub:demo",
         installPath: cliInstallPath("demo"),
         clawhubPackage: "demo",
         clawhubFamily: "code-plugin",
@@ -244,7 +244,7 @@ describe("plugins cli install", () => {
       expect.objectContaining({
         pluginId: "demo",
         source: "clawhub",
-        spec: "clawhub:demo@1.2.3",
+        spec: "clawhub:demo",
         clawhubPackage: "demo",
         clawhubFamily: "code-plugin",
         clawhubChannel: "official",
@@ -266,7 +266,7 @@ describe("plugins cli install", () => {
       pluginId: "demo",
       install: {
         source: "clawhub",
-        spec: "clawhub:demo@1.2.3",
+        spec: "clawhub:demo",
         installPath: cliInstallPath("demo"),
         clawhubPackage: "demo",
       },
@@ -297,6 +297,52 @@ describe("plugins cli install", () => {
     );
     expect(installPluginFromNpmSpec).not.toHaveBeenCalled();
     expect(writeConfigFile).toHaveBeenCalledWith(installedCfg);
+  });
+
+  it("keeps explicit ClawHub versions pinned in install records", async () => {
+    const cfg = {
+      plugins: {
+        entries: {},
+      },
+    } as OpenClawConfig;
+    const enabledCfg = createEnabledPluginConfig("demo");
+    const installedCfg = createClawHubInstalledConfig({
+      pluginId: "demo",
+      install: {
+        source: "clawhub",
+        spec: "clawhub:demo@1.2.3",
+        installPath: cliInstallPath("demo"),
+        clawhubPackage: "demo",
+      },
+    });
+
+    loadConfig.mockReturnValue(cfg);
+    parseClawHubPluginSpec.mockReturnValue({ name: "demo", version: "1.2.3" });
+    installPluginFromClawHub.mockResolvedValue(
+      createClawHubInstallResult({
+        pluginId: "demo",
+        packageName: "demo",
+        version: "1.2.3",
+        channel: "community",
+      }),
+    );
+    enablePluginInConfig.mockReturnValue({ config: enabledCfg });
+    recordPluginInstall.mockReturnValue(installedCfg);
+    applyExclusiveSlotSelection.mockReturnValue({
+      config: installedCfg,
+      warnings: [],
+    });
+
+    await runPluginsCommand(["plugins", "install", "clawhub:demo@1.2.3"]);
+
+    expect(recordPluginInstall).toHaveBeenCalledWith(
+      enabledCfg,
+      expect.objectContaining({
+        pluginId: "demo",
+        source: "clawhub",
+        spec: "clawhub:demo@1.2.3",
+      }),
+    );
   });
 
   it("falls back to npm when ClawHub does not have the package", async () => {
