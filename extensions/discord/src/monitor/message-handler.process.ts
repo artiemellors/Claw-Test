@@ -40,6 +40,7 @@ import { resolveDiscordMaxLinesPerMessage } from "../accounts.js";
 import { chunkDiscordTextWithMode } from "../chunk.js";
 import { resolveDiscordDraftStreamingChunking } from "../draft-chunking.js";
 import { createDiscordDraftStream } from "../draft-stream.js";
+import { rewriteDiscordKnownMentions } from "../mentions.js";
 import { reactMessageDiscord, removeReactionDiscord } from "../send.js";
 import { editMessageDiscord } from "../send.messages.js";
 import { normalizeDiscordSlug } from "./allow-list.js";
@@ -699,7 +700,9 @@ export async function processDiscordMessage(
           const reply = resolveSendableOutboundReplyParts(payload);
           const hasMedia = reply.hasMedia;
           const finalText = payload.text;
-          const previewFinalText = resolvePreviewFinalText(finalText);
+          const previewFinalText = resolvePreviewFinalText(
+            finalText ? rewriteDiscordKnownMentions(finalText, { accountId }) : finalText,
+          );
           const previewMessageId = draftStream.messageId();
 
           // Try to finalize via preview edit (text-only, fits in 2000 chars, not an error)

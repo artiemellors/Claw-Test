@@ -19,6 +19,7 @@ import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-runtime";
 import { resolveDiscordAccount } from "../accounts.js";
 import { chunkDiscordTextWithMode } from "../chunk.js";
+import { rewriteDiscordKnownMentions } from "../mentions.js";
 import { createDiscordRetryRunner } from "../retry.js";
 import { sendMessageDiscord, sendVoiceMessageDiscord, sendWebhookMessageDiscord } from "../send.js";
 import { sendDiscordText } from "../send.shared.js";
@@ -161,7 +162,7 @@ async function sendDiscordChunkWithFallback(params: {
   if (!params.text.trim()) {
     return;
   }
-  const text = params.text;
+  const text = rewriteDiscordKnownMentions(params.text, { accountId: params.accountId });
   const binding = params.binding;
   if (binding?.webhookId && binding?.webhookToken) {
     try {
