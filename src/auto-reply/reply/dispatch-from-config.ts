@@ -55,6 +55,7 @@ import {
 import { shouldSkipDuplicateInbound } from "./inbound-dedupe.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
+import { isNonTextVisibleFinal } from "./tool-only-filter.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
 
 let routeReplyRuntimePromise: Promise<typeof import("./route-reply.runtime.js")> | null = null;
@@ -612,6 +613,7 @@ export async function dispatchReplyFromConfig(params: {
       sessionTtsAuto,
       ttsChannel,
       suppressUserDelivery: suppressAcpChildUserDelivery,
+      replyMode: cfg.agents?.defaults?.replyMode,
       shouldRouteToOriginating,
       originatingChannel,
       originatingTo,
@@ -679,6 +681,25 @@ export async function dispatchReplyFromConfig(params: {
         suppressTyping: typing.suppressTyping,
         onToolResult: (payload: ReplyPayload) => {
           const run = async () => {
+            // replyMode "tool-only": suppress text-only auto-delivery (media still delivered)
+            // but allow exec-approval payloads through so users can approve/deny commands
+            const hasMedia = payload.mediaUrls?.length || payload.mediaUrl;
+            const cd =
+              payload.channelData &&
+              typeof payload.channelData === "object" &&
+              !Array.isArray(payload.channelData)
+                ? payload.channelData
+                : undefined;
+            const isExecApprovalPayload =
+              (cd?.execApproval && typeof cd.execApproval === "object") ||
+              (cd?.execApprovalUnavailable && typeof cd.execApprovalUnavailable === "object");
+            if (
+              (cfg.agents?.defaults?.replyMode ?? "auto") === "tool-only" &&
+              !hasMedia &&
+              !isExecApprovalPayload
+            ) {
+              return;
+            }
             const ttsPayload = await maybeApplyTtsToPayload({
               payload,
               cfg,
@@ -701,6 +722,10 @@ export async function dispatchReplyFromConfig(params: {
         },
         onBlockReply: (payload: ReplyPayload, context?: BlockReplyContext) => {
           const run = async () => {
+            // replyMode "tool-only": suppress all streaming block delivery
+            if ((cfg.agents?.defaults?.replyMode ?? "auto") === "tool-only") {
+              return;
+            }
             // Suppress reasoning payloads — channels using this generic dispatch
             // path (WhatsApp, web, etc.) do not have a dedicated reasoning lane.
             // Telegram has its own dispatch path that handles reasoning splitting.
@@ -763,6 +788,8 @@ export async function dispatchReplyFromConfig(params: {
         inboundAudio,
         sessionTtsAuto,
         ttsChannel,
+        suppressUserDelivery: suppressAcpChildUserDelivery,
+        replyMode: cfg.agents?.defaults?.replyMode,
         shouldRouteToOriginating,
         originatingChannel,
         originatingTo,
@@ -778,6 +805,7 @@ export async function dispatchReplyFromConfig(params: {
     }
 
     const replies = replyResult ? (Array.isArray(replyResult) ? replyResult : [replyResult]) : [];
+    const isToolOnlyMode = (cfg.agents?.defaults?.replyMode ?? "auto") === "tool-only";
 
     let queuedFinal = false;
     let routedFinalCount = 0;
@@ -785,6 +813,11 @@ export async function dispatchReplyFromConfig(params: {
       // Suppress reasoning payloads from channel delivery — channels using this
       // generic dispatch path do not have a dedicated reasoning lane.
       if (reply.isReasoning === true) {
+        continue;
+      }
+
+      // replyMode "tool-only": skip text-only finals; deliver media/error/interactive/channelData
+      if (isToolOnlyMode && !isNonTextVisibleFinal(reply)) {
         continue;
       }
       const finalReply = await sendFinalPayload(reply);

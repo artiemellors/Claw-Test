@@ -9,6 +9,7 @@ import type { FinalizedMsgContext } from "../templating.js";
 import type { ReplyPayload } from "../types.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
 import { routeReply } from "./route-reply.js";
+import { isNonTextVisibleFinal } from "./tool-only-filter.js";
 
 export type AcpDispatchDeliveryMeta = {
   toolCallId?: string;
@@ -112,6 +113,7 @@ export function createAcpDispatchDeliveryCoordinator(params: {
   sessionTtsAuto?: TtsAutoMode;
   ttsChannel?: string;
   suppressUserDelivery?: boolean;
+  replyMode?: string;
   shouldRouteToOriginating: boolean;
   originatingChannel?: string;
   originatingTo?: string;
@@ -224,6 +226,21 @@ export function createAcpDispatchDeliveryCoordinator(params: {
 
     if (params.suppressUserDelivery) {
       return false;
+    }
+
+    // ── tool-only mode: suppress everything except media/error finals ──
+    // Block streaming text, ACP tool summaries (auto-generated narration),
+    // and text-only finals. Allow media-bearing finals and error finals through.
+    if (params.replyMode === "tool-only") {
+      if (kind === "block") {
+        return false;
+      }
+      if (kind === "tool") {
+        return false;
+      }
+      if (kind === "final" && !isNonTextVisibleFinal(payload)) {
+        return false;
+      }
     }
 
     const ttsPayload = meta?.skipTts

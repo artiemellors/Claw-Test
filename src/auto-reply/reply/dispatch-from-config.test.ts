@@ -3030,10 +3030,12 @@ describe("before_dispatch hook", () => {
       ...overrides,
     });
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeAll(async () => {
     ({ dispatchReplyFromConfig } = await import("./dispatch-from-config.js"));
     ({ resetInboundDedupe } = await import("./inbound-dedupe.js"));
+  });
+
+  beforeEach(() => {
     resetInboundDedupe();
     mocks.routeReply.mockReset();
     mocks.routeReply.mockResolvedValue({ ok: true, messageId: "mock" });
