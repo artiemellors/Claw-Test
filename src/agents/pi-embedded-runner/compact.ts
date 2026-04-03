@@ -486,7 +486,9 @@ export async function compactEmbeddedPiSessionDirect(
       let authResolved = false;
       for (const fallbackSpec of fallbacks) {
         const trimmed = fallbackSpec?.trim();
-        if (!trimmed) continue;
+        if (!trimmed) {
+          continue;
+        }
         let fbProvider: string;
         let fbModelId: string;
         const slashIdx = trimmed.indexOf("/");
@@ -503,7 +505,9 @@ export async function compactEmbeddedPiSessionDirect(
         );
         try {
           const fbResult = await resolveModelAsync(fbProvider, fbModelId, agentDir, params.config);
-          if (!fbResult.model) continue;
+          if (!fbResult.model) {
+            continue;
+          }
           const fbAuthProfileId =
             fbProvider.toLowerCase() !== effectiveProvider.toLowerCase()
               ? undefined
