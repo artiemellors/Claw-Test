@@ -2876,6 +2876,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                   requireAgentId: {
                     type: "boolean",
                   },
+                  awaitEnabled: {
+                    description:
+                      "Enable the sessions_await tool and suppressAnnounce/waitForCompletion params on sessions_spawn for parallel sub-agent orchestration. Default: false.",
+                    type: "boolean",
+                  },
                 },
                 additionalProperties: false,
               },
@@ -4058,6 +4063,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                       type: "string",
                     },
                     requireAgentId: {
+                      type: "boolean",
+                    },
+                    awaitEnabled: {
+                      description:
+                        "Enable the sessions_await tool and suppressAnnounce/waitForCompletion params on sessions_spawn for parallel sub-agent orchestration. Default: false.",
                       type: "boolean",
                     },
                   },

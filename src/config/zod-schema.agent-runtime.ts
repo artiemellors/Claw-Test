@@ -806,6 +806,12 @@ export const AgentEntrySchema = z
           .optional(),
         thinking: z.string().optional(),
         requireAgentId: z.boolean().optional(),
+        awaitEnabled: z
+          .boolean()
+          .optional()
+          .describe(
+            "Enable the sessions_await tool and suppressAnnounce/waitForCompletion params on sessions_spawn for parallel sub-agent orchestration. Default: false.",
+          ),
       })
       .strict()
       .optional(),
