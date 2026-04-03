@@ -220,6 +220,8 @@ export function createBlueBubblesDebounceRegistry(params: {
           await baseDebouncer.enqueue(sanitizeDebounceEntry(item));
         },
         flushKey: (key) => baseDebouncer.flushKey(key),
+        flushAll: () => baseDebouncer.flushAll(),
+        unregister: () => baseDebouncer.unregister(),
       };
 
       targetDebouncers.set(target, debouncer);

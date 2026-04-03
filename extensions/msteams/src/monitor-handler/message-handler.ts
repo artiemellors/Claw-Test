@@ -2,6 +2,7 @@ import { resolveInboundMentionDecision } from "openclaw/plugin-sdk/channel-inbou
 import {
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
+  DEFAULT_GROUP_HISTORY_LIMIT,
   dispatchReplyFromConfigWithSettledDispatcher,
   evaluateSenderGroupAccessForPolicy,
   filterSupplementalContextItems,
