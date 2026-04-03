@@ -256,6 +256,56 @@ function resolveResponsesLimits(
   };
 }
 
+/**
+ * Normalize tool definitions to OpenAI function-tool format.
+ *
+ * Clients (including Anthropic SDK users and OpenClaw cron isolated sessions)
+ * sometimes pass tools in the Anthropic/flat format:
+ *   { name, description, input_schema }
+ *
+ * The OpenResponses schema expects the OpenAI format:
+ *   { type: "function", function: { name, description, parameters } }
+ *
+ * This function converts flat-format tool definitions before schema validation
+ * so both formats are accepted transparently.
+ *
+ * @see https://github.com/openclaw/openclaw/issues/39359
+ */
+export function normalizeToolDefinitions(
+  tools: unknown[] | undefined,
+): unknown[] | undefined {
+  if (!tools || !Array.isArray(tools)) {
+    return tools;
+  }
+  return tools.map((tool) => {
+    if (typeof tool !== "object" || tool === null) {
+      return tool;
+    }
+    const t = tool as Record<string, unknown>;
+    // Already in OpenAI format — pass through
+    if (t.type === "function" && t.function) {
+      return tool;
+    }
+    // Detect Anthropic/flat format: has `name` at top level but no `function` wrapper
+    if (typeof t.name === "string" && !t.function) {
+      return {
+        type: "function",
+        function: {
+          name: t.name,
+          ...(t.description !== undefined && { description: t.description }),
+          // Anthropic uses `input_schema`, OpenAI uses `parameters`
+          ...(t.input_schema !== undefined
+            ? { parameters: t.input_schema }
+            : t.parameters !== undefined
+              ? { parameters: t.parameters }
+              : {}),
+        },
+      };
+    }
+    return tool;
+  });
+}
+
 function extractClientTools(body: CreateResponseBody): ClientToolDefinition[] {
   // Normalize from Responses API flat format to the internal wrapped format.
   return (body.tools ?? []).map((tool) => ({
@@ -482,6 +532,13 @@ export async function handleOpenResponsesHttpRequest(
   // On the compat surface, shared-secret bearer auth is also treated as an
   // owner sender so owner-only tool policy matches the documented contract.
   const senderIsOwner = resolveOpenAiCompatibleHttpSenderIsOwner(req, handled.requestAuth);
+
+  // Normalize tool definitions before validation (accept both OpenAI and Anthropic formats)
+  if (handled.body && typeof handled.body === "object" && Array.isArray((handled.body as Record<string, unknown>).tools)) {
+    (handled.body as Record<string, unknown>).tools = normalizeToolDefinitions(
+      (handled.body as Record<string, unknown>).tools as unknown[],
+    );
+  }
 
   // Validate request body with Zod
   const parseResult = CreateResponseBodySchema.safeParse(handled.body);
