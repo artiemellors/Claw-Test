@@ -2544,7 +2544,7 @@ export async function writeConfigFile(
     notifyConfigWriteListeners({
       configPath: io.configPath,
       sourceConfig: nextCfg,
-      runtimeConfig: runtimeConfigSnapshot,
+      runtimeConfig: nextCfg,
       persistedHash: writeResult.persistedHash,
       writtenAtMs: Date.now(),
     });

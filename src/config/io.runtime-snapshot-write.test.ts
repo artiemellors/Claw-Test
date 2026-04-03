@@ -289,4 +289,68 @@ describe("runtime config snapshot writes", () => {
       }
     });
   });
+
+  it("does not propagate __OPENCLAW_REDACTED__ sentinels to write listeners when runtime snapshot is redacted", async () => {
+    await withTempHome("openclaw-config-redaction-listener-", async (home) => {
+      const configPath = path.join(home, ".openclaw", "openclaw.json");
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      await fs.writeFile(configPath, `${JSON.stringify({ gateway: { port: 18789 } }, null, 2)}\n`);
+
+      // Source config with a resolved secret value
+      const sourceConfig: OpenClawConfig = {
+        models: {
+          providers: {
+            minimax: {
+              baseUrl: "https://api.minimax.io/v1",
+              apiKey: "sk-actual-secret-value", // pragma: allowlist secret
+              models: [{ id: "minimax", name: "MiniMax-Text-01", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 1000 }],
+            },
+          },
+        },
+      };
+
+      // Runtime config that has been redacted by the UI (e.g., after a prior UI save)
+      const redactedRuntimeConfig: OpenClawConfig = {
+        models: {
+          providers: {
+            minimax: {
+              baseUrl: "https://api.minimax.io/v1",
+              // Simulate what the UI sends back after displaying a redacted form field
+              apiKey: "__OPENCLAW_REDACTED__" as unknown as string,  // eslint-disable-line @typescript-eslint/no-explicit-any
+              models: [{ id: "minimax", name: "MiniMax-Text-01", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 1000 }],
+            },
+          },
+        },
+      };
+
+      const seen: Array<{ configPath: string; runtimeConfig: OpenClawConfig }> = [];
+      const unsubscribe = registerConfigWriteListener((event) => {
+        seen.push({
+          configPath: event.configPath,
+          runtimeConfig: event.runtimeConfig,
+        });
+      });
+
+      try {
+        setRuntimeConfigSnapshot(redactedRuntimeConfig, sourceConfig);
+
+        // Simulate a UI write that patches just the port (secret unchanged)
+        await writeConfigFile({
+          ...loadConfig(),
+          gateway: { port: 19003 },
+        });
+
+        expect(seen).toHaveLength(1);
+        // The critical assertion: the write listener must receive the de-redacted
+        // nextCfg (with the real secret), NOT the redacted runtimeConfigSnapshot
+        const receivedApiKey =
+          seen[0]?.runtimeConfig.models?.providers?.minimax?.apiKey;
+        expect(receivedApiKey).toBe("sk-actual-secret-value");
+        expect(receivedApiKey).not.toBe("__OPENCLAW_REDACTED__");
+      } finally {
+        unsubscribe();
+        resetRuntimeConfigState();
+      }
+    });
+  });
 });
