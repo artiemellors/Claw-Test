@@ -108,4 +108,40 @@ describe("cron add --dry-run", () => {
     const params = writeJsonSpy.mock.calls[0][0] as Record<string, unknown>;
     expect(params).toMatchObject({ name: "my-job" });
   });
+
+  it("--dry-run --json output is a plain object with no human-readable wrapper text", async () => {
+    const cron = program.command("cron");
+    registerCronAddCommand(cron);
+
+    await program.parseAsync(
+      [
+        "node",
+        "openclaw",
+        "cron",
+        "add",
+        "--name",
+        "json-purity-test",
+        "--message",
+        "ping",
+        "--every",
+        "30m",
+        "--dry-run",
+        "--json",
+      ],
+      { from: "node" },
+    );
+
+    expect(writeStdoutSpy).not.toHaveBeenCalled();
+    expect(writeJsonSpy).toHaveBeenCalledOnce();
+
+    const params = writeJsonSpy.mock.calls[0][0];
+    // Must be a plain object, not a string (no "Dry run — …" prefix wrapping)
+    expect(typeof params).toBe("object");
+    expect(params).not.toBeNull();
+    expect(typeof params).not.toBe("string");
+    // Spot-check expected fields are present at top level (not buried in a string)
+    expect(params).toMatchObject({ name: "json-purity-test" });
+    expect(params).toHaveProperty("payload");
+    expect(params).toHaveProperty("schedule");
+  });
 });
