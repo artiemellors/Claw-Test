@@ -89,6 +89,8 @@ type DeliverModule = typeof import("./deliver.js");
 
 let deliverOutboundPayloads: DeliverModule["deliverOutboundPayloads"];
 let normalizeOutboundPayloads: DeliverModule["normalizeOutboundPayloads"];
+let DeliveryError: DeliverModule["DeliveryError"];
+type DeliveryErrorType = InstanceType<DeliverModule["DeliveryError"]>;
 
 const telegramChunkConfig: OpenClawConfig = {
   channels: { telegram: { botToken: "tok-1", textChunkLimit: 2 } },
@@ -148,7 +150,7 @@ async function runChunkedWhatsAppDelivery(params?: {
   const cfg: OpenClawConfig = {
     channels: { whatsapp: { textChunkLimit: 2 } },
   };
-  const results = await deliverOutboundPayloads({
+  const outcome = await deliverOutboundPayloads({
     cfg,
     channel: "whatsapp",
     to: "+1555",
@@ -156,7 +158,7 @@ async function runChunkedWhatsAppDelivery(params?: {
     deps: { sendWhatsApp },
     ...(params?.mirror ? { mirror: params.mirror } : {}),
   });
-  return { sendWhatsApp, results };
+  return { sendWhatsApp, results: outcome.results };
 }
 
 async function deliverSingleWhatsAppForHookTest(params?: { sessionKey?: string }) {
@@ -178,7 +180,7 @@ async function runBestEffortPartialFailureDelivery() {
     .mockResolvedValueOnce({ messageId: "w2", toJid: "jid" });
   const onError = vi.fn();
   const cfg: OpenClawConfig = {};
-  const results = await deliverOutboundPayloads({
+  const outcome = await deliverOutboundPayloads({
     cfg,
     channel: "whatsapp",
     to: "+1555",
@@ -187,7 +189,7 @@ async function runBestEffortPartialFailureDelivery() {
     bestEffort: true,
     onError,
   });
-  return { sendWhatsApp, onError, results };
+  return { sendWhatsApp, onError, results: outcome.results };
 }
 
 function expectSuccessfulWhatsAppInternalHookPayload(
@@ -210,7 +212,8 @@ function expectSuccessfulWhatsAppInternalHookPayload(
 describe("deliverOutboundPayloads", () => {
   beforeAll(async () => {
     vi.resetModules();
-    ({ deliverOutboundPayloads, normalizeOutboundPayloads } = await import("./deliver.js"));
+    ({ deliverOutboundPayloads, normalizeOutboundPayloads, DeliveryError } =
+      await import("./deliver.js"));
   });
 
   beforeEach(() => {
@@ -240,7 +243,7 @@ describe("deliverOutboundPayloads", () => {
   it("chunks telegram markdown and passes through accountId", async () => {
     const sendTelegram = vi.fn().mockResolvedValue({ messageId: "m1", chatId: "c1" });
     await withEnvAsync({ TELEGRAM_BOT_TOKEN: "" }, async () => {
-      const results = await deliverOutboundPayloads({
+      const { results } = await deliverOutboundPayloads({
         cfg: telegramChunkConfig,
         channel: "telegram",
         to: "123",
@@ -603,7 +606,7 @@ describe("deliverOutboundPayloads", () => {
     const sendSignal = vi.fn().mockResolvedValue({ messageId: "s1", timestamp: 123 });
     const cfg: OpenClawConfig = { channels: { signal: { mediaMaxMb: 2 } } };
 
-    const results = await deliverOutboundPayloads({
+    const { results } = await deliverOutboundPayloads({
       cfg,
       channel: "signal",
       to: "+1555",
@@ -707,7 +710,7 @@ describe("deliverOutboundPayloads", () => {
 
   it("drops whitespace-only WhatsApp text payloads when no media is attached", async () => {
     const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "w1", toJid: "jid" });
-    const results = await deliverWhatsAppPayload({
+    const { results } = await deliverWhatsAppPayload({
       sendWhatsApp,
       payload: { text: "   \n\t   " },
     });
@@ -718,7 +721,7 @@ describe("deliverOutboundPayloads", () => {
 
   it("drops HTML-only WhatsApp text payloads after sanitization", async () => {
     const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "w1", toJid: "jid" });
-    const results = await deliverWhatsAppPayload({
+    const { results } = await deliverWhatsAppPayload({
       sendWhatsApp,
       payload: { text: "<br><br>" },
     });
@@ -748,7 +751,7 @@ describe("deliverOutboundPayloads", () => {
 
   it("drops non-WhatsApp HTML-only text payloads after sanitization", async () => {
     const sendSignal = vi.fn().mockResolvedValue({ messageId: "s1", toJid: "jid" });
-    const results = await deliverOutboundPayloads({
+    const { results } = await deliverOutboundPayloads({
       cfg: {},
       channel: "signal",
       to: "+1555",
@@ -1129,7 +1132,7 @@ describe("deliverOutboundPayloads", () => {
       ]),
     );
 
-    const results = await deliverOutboundPayloads({
+    const { results } = await deliverOutboundPayloads({
       cfg: {},
       channel: "line",
       to: "U123",
@@ -1160,7 +1163,7 @@ describe("deliverOutboundPayloads", () => {
       ]),
     );
 
-    const results = await deliverOutboundPayloads({
+    const { results } = await deliverOutboundPayloads({
       cfg: {},
       channel: "matrix",
       to: "!room:1",
@@ -1198,7 +1201,7 @@ describe("deliverOutboundPayloads", () => {
       ]),
     );
 
-    const results = await deliverOutboundPayloads({
+    const { results } = await deliverOutboundPayloads({
       cfg: {},
       channel: "matrix",
       to: "!room:1",
@@ -1296,6 +1299,156 @@ describe("deliverOutboundPayloads", () => {
       }),
       expect.objectContaining({ channelId: "whatsapp" }),
     );
+  });
+
+  // --- DeliveryOutcome tests (#57766) ---
+
+  it("returns cancelledCount and allCancelledByHook when hook cancels all payloads", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    (hookMocks.runner as Record<string, unknown>).runMessageSending = vi
+      .fn()
+      .mockResolvedValue({ cancel: true });
+    const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "w1", toJid: "jid" });
+
+    const outcome = await deliverOutboundPayloads({
+      cfg: whatsappChunkConfig,
+      channel: "whatsapp",
+      to: "+1555",
+      payloads: [{ text: "a" }, { text: "b" }],
+      deps: { sendWhatsApp },
+    });
+
+    expect(outcome.results).toEqual([]);
+    expect(outcome.cancelledCount).toBe(2);
+    expect(outcome.allCancelledByHook).toBe(true);
+    expect(sendWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it("returns partial cancelledCount when hook cancels some payloads", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    (hookMocks.runner as Record<string, unknown>).runMessageSending = vi
+      .fn()
+      .mockResolvedValueOnce({ cancel: true })
+      .mockResolvedValueOnce(null);
+    const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "w1", toJid: "jid" });
+
+    const outcome = await deliverOutboundPayloads({
+      cfg: whatsappChunkConfig,
+      channel: "whatsapp",
+      to: "+1555",
+      payloads: [{ text: "a" }, { text: "b" }],
+      deps: { sendWhatsApp },
+    });
+
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.cancelledCount).toBe(1);
+    expect(outcome.allCancelledByHook).toBe(false);
+    expect(sendWhatsApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns cancelledCount=0 and allCancelledByHook=false on normal delivery", async () => {
+    const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "w1", toJid: "jid" });
+
+    const outcome = await deliverOutboundPayloads({
+      cfg: whatsappChunkConfig,
+      channel: "whatsapp",
+      to: "+1555",
+      payloads: [{ text: "hello" }],
+      deps: { sendWhatsApp },
+    });
+
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.cancelledCount).toBe(0);
+    expect(outcome.allCancelledByHook).toBe(false);
+  });
+
+  it("throws DeliveryError with sentBeforeError when non-bestEffort fails after partial send", async () => {
+    const sendWhatsApp = vi
+      .fn()
+      .mockResolvedValueOnce({ messageId: "w1", toJid: "jid" })
+      .mockRejectedValueOnce(new Error("second payload failed"));
+
+    let caughtError: unknown;
+    try {
+      await deliverOutboundPayloads({
+        cfg: whatsappChunkConfig,
+        channel: "whatsapp",
+        to: "+1555",
+        payloads: [{ text: "a" }, { text: "b" }],
+        deps: { sendWhatsApp },
+        bestEffort: false,
+      });
+    } catch (err) {
+      caughtError = err;
+    }
+
+    expect(caughtError).toBeInstanceOf(DeliveryError);
+    const deliveryErr = caughtError as DeliveryErrorType;
+    expect(deliveryErr.sentBeforeError).toHaveLength(1);
+    expect(deliveryErr.sentBeforeError[0]).toMatchObject({ messageId: "w1" });
+    expect(deliveryErr.message).toBe("second payload failed");
+  });
+
+  it("throws original error (not DeliveryError) when non-bestEffort fails on first payload", async () => {
+    const sendWhatsApp = vi.fn().mockRejectedValue(new Error("first payload failed"));
+
+    await expect(
+      deliverOutboundPayloads({
+        cfg: whatsappChunkConfig,
+        channel: "whatsapp",
+        to: "+1555",
+        payloads: [{ text: "a" }],
+        deps: { sendWhatsApp },
+        bestEffort: false,
+      }),
+    ).rejects.toThrow("first payload failed");
+
+    // Should NOT be a DeliveryError since nothing was sent yet
+    await expect(
+      deliverOutboundPayloads({
+        cfg: whatsappChunkConfig,
+        channel: "whatsapp",
+        to: "+1555",
+        payloads: [{ text: "a" }],
+        deps: { sendWhatsApp },
+        bestEffort: false,
+      }),
+    ).rejects.not.toBeInstanceOf(DeliveryError);
+  });
+
+  it("preserves AbortError identity even after partial send (not wrapped in DeliveryError)", async () => {
+    const abortController = new AbortController();
+    const sendWhatsApp = vi
+      .fn()
+      .mockResolvedValueOnce({ messageId: "w1", toJid: "jid" })
+      .mockImplementationOnce(async () => {
+        abortController.abort();
+        throw new DOMException("The operation was aborted", "AbortError");
+      });
+
+    await expect(
+      deliverOutboundPayloads({
+        cfg: whatsappChunkConfig,
+        channel: "whatsapp",
+        to: "+1555",
+        payloads: [{ text: "a" }, { text: "b" }],
+        deps: { sendWhatsApp },
+        bestEffort: false,
+        abortSignal: abortController.signal,
+      }),
+    ).rejects.not.toBeInstanceOf(DeliveryError);
+
+    await expect(
+      deliverOutboundPayloads({
+        cfg: whatsappChunkConfig,
+        channel: "whatsapp",
+        to: "+1555",
+        payloads: [{ text: "a" }, { text: "b" }],
+        deps: { sendWhatsApp },
+        bestEffort: false,
+        abortSignal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("AbortError");
   });
 });
 
