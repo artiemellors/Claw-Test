@@ -62,12 +62,12 @@ async function runDangerousNameMatchReply(
   await handler(req, res);
 
   expect(res._status).toBe(204);
-  expect(resolveChatUserId).toHaveBeenCalledWith({
-    incomingUrl: "https://nas.example.com/incoming",
-    mutableWebhookUsername: "testuser",
-    allowInsecureSsl: true,
+  expect(resolveChatUserId).toHaveBeenCalledWith(
+    "https://nas.example.com/incoming",
+    "testuser",
+    true,
     log,
-  });
+  );
 
   return { deliver };
 }
