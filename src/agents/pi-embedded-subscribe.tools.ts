@@ -88,9 +88,23 @@ export function isWarningOnlyToolResult(result: unknown): boolean {
     return false;
   }
   const record = result as Record<string, unknown>;
-  const warning = readErrorCandidate(record.warning);
+  // Check warning at the top level and inside details.  jsonResult() wraps
+  // payloads under result.details, so Telegram reaction soft-fail payloads
+  // store warning in details.warning rather than at the root.
+  const details =
+    record.details && typeof record.details === "object"
+      ? (record.details as Record<string, unknown>)
+      : undefined;
+  const warning =
+    readErrorCandidate(record.warning) ??
+    (details ? readErrorCandidate(details.warning) : undefined);
   if (!warning) {
     return false;
+  }
+  // When the warning originated from details, verify details carries no
+  // hard-error fields (error / message / reason / error-like status).
+  if (details && !record.warning) {
+    return !extractErrorField(details) && !extractErrorField(record);
   }
   return !extractErrorField(record.details) && !extractErrorField(record);
 }
