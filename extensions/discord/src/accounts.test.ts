@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveDiscordAccount, resolveDiscordMaxLinesPerMessage } from "./accounts.js";
+import {
+  resolveConfiguredDiscordBotAgentIdsByBotUserId,
+  resolveDiscordAccount,
+  resolveDiscordMaxLinesPerMessage,
+} from "./accounts.js";
 
 describe("resolveDiscordAccount allowFrom precedence", () => {
   it("prefers accounts.default.allowFrom over top-level for default account", () => {
@@ -113,5 +117,145 @@ describe("resolveDiscordMaxLinesPerMessage", () => {
     });
 
     expect(resolved).toBe(80);
+  });
+});
+
+describe("resolveConfiguredDiscordBotAgentIdsByBotUserId", () => {
+  it("maps the current account bot id to its explicitly owned agent", () => {
+    const cfg = {
+      channels: {
+        discord: {
+          accounts: {
+            ops: { token: "MTIz.abc.def" },
+          },
+        },
+      },
+      bindings: [
+        {
+          agentId: "ops-agent",
+          match: { channel: "discord", accountId: "ops" },
+        },
+      ],
+    };
+
+    expect(
+      resolveConfiguredDiscordBotAgentIdsByBotUserId({
+        cfg,
+        currentAccountId: "ops",
+        currentBotUserId: "BOT-OPS",
+      }),
+    ).toEqual(new Map([["BOT-OPS", "ops-agent"]]));
+  });
+
+  it("falls back to the current account token when the startup bot id is unavailable", () => {
+    const cfg = {
+      channels: {
+        discord: {
+          accounts: {
+            ops: { token: "MTIz.abc.def" },
+          },
+        },
+      },
+      bindings: [
+        {
+          agentId: "ops-agent",
+          match: { channel: "discord", accountId: "ops" },
+        },
+      ],
+    };
+
+    expect(
+      resolveConfiguredDiscordBotAgentIdsByBotUserId({
+        cfg,
+        currentAccountId: "ops",
+      }).get("123"),
+    ).toBe("ops-agent");
+  });
+
+  it("skips accounts that do not have an explicit ownership binding", () => {
+    const cfg = {
+      agents: {
+        list: [{ id: "main", default: true, model: "gpt-5" }],
+      },
+      channels: {
+        discord: {
+          accounts: {
+            ops: { token: "MTIz.abc.def" },
+          },
+        },
+      },
+    };
+
+    expect(
+      resolveConfiguredDiscordBotAgentIdsByBotUserId({
+        cfg,
+        currentAccountId: "ops",
+        currentBotUserId: "BOT-OPS",
+      }).size,
+    ).toBe(0);
+  });
+
+  it("fails closed when one bot user id resolves to multiple owners", () => {
+    const cfg = {
+      channels: {
+        discord: {
+          token: "MTIz.shared.token",
+          accounts: {
+            ops: {},
+            alerts: {},
+          },
+        },
+      },
+      bindings: [
+        {
+          agentId: "ops-agent",
+          match: { channel: "discord", accountId: "ops" },
+        },
+        {
+          agentId: "alerts-agent",
+          match: { channel: "discord", accountId: "alerts" },
+        },
+      ],
+    };
+
+    expect(
+      resolveConfiguredDiscordBotAgentIdsByBotUserId({
+        cfg,
+        currentAccountId: "ops",
+        currentBotUserId: "123",
+      }).get("123"),
+    ).toBeUndefined();
+  });
+
+  it("keeps the mapping when duplicate accounts resolve to the same owner", () => {
+    const cfg = {
+      channels: {
+        discord: {
+          token: "MTIz.shared.token",
+          accounts: {
+            ops: {},
+            alerts: {},
+          },
+        },
+      },
+      bindings: [
+        {
+          agentId: "ops-agent",
+          match: { channel: "discord", accountId: "ops" },
+        },
+        {
+          agentId: "ops-agent",
+          match: { channel: "discord", accountId: "alerts" },
+        },
+      ],
+    };
+
+    expect(
+      resolveConfiguredDiscordBotAgentIdsByBotUserId({
+        cfg,
+        currentAccountId: "ops",
+        currentBotUserId: "123",
+      }).get("123"),
+    ).toBe("ops-agent");
   });
 });

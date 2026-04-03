@@ -4,7 +4,11 @@ import {
   resolveMergedAccountConfig,
 } from "openclaw/plugin-sdk/account-helpers";
 import { normalizeAccountId } from "openclaw/plugin-sdk/account-id";
-import { resolveAccountEntry } from "openclaw/plugin-sdk/routing";
+import {
+  resolveAccountEntry,
+  resolveOwningAgentIdForChannelAccount,
+} from "openclaw/plugin-sdk/routing";
+import { parseApplicationIdFromToken } from "./probe.js";
 import type { DiscordAccountConfig, DiscordActionConfig, OpenClawConfig } from "./runtime-api.js";
 import { resolveDiscordToken } from "./token.js";
 
@@ -90,4 +94,60 @@ export function listEnabledDiscordAccounts(cfg: OpenClawConfig): ResolvedDiscord
   return listDiscordAccountIds(cfg)
     .map((accountId) => resolveDiscordAccount({ cfg, accountId }))
     .filter((account) => account.enabled);
+}
+
+function normalizeDiscordBotUserId(botUserId?: string | null): string | undefined {
+  const normalizedBotUserId = botUserId?.trim();
+  return normalizedBotUserId || undefined;
+}
+
+function resolveDiscordAccountBotUserId(params: {
+  account: ResolvedDiscordAccount;
+  currentAccountId: string;
+  currentBotUserId?: string | null;
+}): string | undefined {
+  if (params.account.accountId === params.currentAccountId) {
+    return (
+      normalizeDiscordBotUserId(params.currentBotUserId) ??
+      parseApplicationIdFromToken(params.account.token)
+    );
+  }
+  return parseApplicationIdFromToken(params.account.token);
+}
+
+export function resolveConfiguredDiscordBotAgentIdsByBotUserId(params: {
+  cfg: OpenClawConfig;
+  currentAccountId: string;
+  currentBotUserId?: string | null;
+}): ReadonlyMap<string, string> {
+  const identityAgentIds = new Map<string, string>();
+  const ambiguousBotUserIds = new Set<string>();
+  for (const account of listEnabledDiscordAccounts(params.cfg)) {
+    const senderAgentId = resolveOwningAgentIdForChannelAccount(
+      params.cfg,
+      "discord",
+      account.accountId,
+    );
+    if (!senderAgentId) {
+      continue;
+    }
+    const botUserId = resolveDiscordAccountBotUserId({
+      account,
+      currentAccountId: params.currentAccountId,
+      currentBotUserId: params.currentBotUserId,
+    });
+    if (!botUserId || ambiguousBotUserIds.has(botUserId)) {
+      continue;
+    }
+    const existingAgentId = identityAgentIds.get(botUserId);
+    if (!existingAgentId) {
+      identityAgentIds.set(botUserId, senderAgentId);
+      continue;
+    }
+    if (existingAgentId !== senderAgentId) {
+      identityAgentIds.delete(botUserId);
+      ambiguousBotUserIds.add(botUserId);
+    }
+  }
+  return identityAgentIds;
 }

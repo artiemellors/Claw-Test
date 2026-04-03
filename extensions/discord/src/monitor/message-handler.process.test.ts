@@ -245,11 +245,11 @@ function getLastRouteUpdate():
 }
 
 function getLastDispatchCtx():
-  | { SessionKey?: string; MessageThreadId?: string | number }
+  | { SessionKey?: string; MessageThreadId?: string | number; SenderAgentId?: string }
   | undefined {
   const callArgs = dispatchInboundMessage.mock.calls.at(-1) as unknown[] | undefined;
   const params = callArgs?.[0] as
-    | { ctx?: { SessionKey?: string; MessageThreadId?: string | number } }
+    | { ctx?: { SessionKey?: string; MessageThreadId?: string | number; SenderAgentId?: string } }
     | undefined;
   return params?.ctx;
 }
@@ -277,6 +277,60 @@ function createMockDraftStreamForTest() {
   createDiscordDraftStream.mockReturnValueOnce(draftStream);
   return draftStream;
 }
+
+describe("processDiscordMessage sender ownership", () => {
+  it("passes provider-resolved senderAgentId through inbound dispatch", async () => {
+    const ctx = await createBaseContext({
+      author: {
+        id: "BOT-OPS",
+        username: "opsbot",
+        discriminator: "0",
+        globalName: "Ops Bot",
+      },
+      sender: {
+        id: "BOT-OPS",
+        label: "ops-bot",
+        name: "Ops Bot",
+        tag: "ops-bot",
+      },
+      identityAgentIds: new Map([["BOT-OPS", "ops-agent"]]),
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(getLastDispatchCtx()).toEqual(
+      expect.objectContaining({
+        SenderAgentId: "ops-agent",
+      }),
+    );
+  });
+
+  it("omits senderAgentId when the bot user id is owned by multiple agents", async () => {
+    const ctx = await createBaseContext({
+      author: {
+        id: "BOT-OPS",
+        username: "sharedbot",
+        discriminator: "0",
+        globalName: "Shared Bot",
+      },
+      sender: {
+        id: "BOT-OPS",
+        label: "shared-bot",
+        name: "Shared Bot",
+        tag: "shared-bot",
+      },
+      identityAgentIds: new Map(),
+    });
+
+    await runProcessDiscordMessage(ctx);
+
+    expect(getLastDispatchCtx()).toEqual(
+      expect.not.objectContaining({
+        SenderAgentId: expect.anything(),
+      }),
+    );
+  });
+});
 
 function expectSinglePreviewEdit() {
   expect(editMessageDiscord).toHaveBeenCalledWith(

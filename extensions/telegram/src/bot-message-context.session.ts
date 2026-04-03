@@ -19,6 +19,7 @@ import {
 import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { evaluateSupplementalContextVisibility } from "openclaw/plugin-sdk/security-runtime";
+import { resolveConfiguredTelegramBotAgentIdsByBotId } from "./accounts.js";
 import type { NormalizedAllowFrom } from "./bot-access.js";
 import { isSenderAllowed, normalizeAllowFrom } from "./bot-access.js";
 import type {
@@ -44,6 +45,7 @@ type FinalizedTelegramInboundContext = ReturnType<
 
 export async function buildTelegramInboundContextPayload(params: {
   cfg: OpenClawConfig;
+  ownershipCfg?: OpenClawConfig;
   primaryCtx: TelegramContext;
   msg: TelegramContext["message"];
   allMedia: TelegramMediaRef[];
@@ -77,6 +79,7 @@ export async function buildTelegramInboundContextPayload(params: {
 }> {
   const {
     cfg,
+    ownershipCfg,
     primaryCtx,
     msg,
     allMedia,
@@ -251,6 +254,10 @@ export async function buildTelegramInboundContextPayload(params: {
           timestamp: entry.timestamp,
         }))
       : undefined;
+  const senderOwnershipCfg = ownershipCfg ?? cfg;
+  const senderAgentId = senderId
+    ? resolveConfiguredTelegramBotAgentIdsByBotId(senderOwnershipCfg).get(senderId)
+    : undefined;
   const currentMediaForContext = stickerCacheHit ? [] : allMedia;
   const contextMedia = [...currentMediaForContext, ...replyMedia];
   const ctxPayload = sessionRuntime.finalizeInboundContext({
@@ -269,6 +276,7 @@ export async function buildTelegramInboundContextPayload(params: {
     GroupSystemPrompt: isGroup || (!isGroup && groupConfig) ? groupSystemPrompt : undefined,
     SenderName: senderName,
     SenderId: senderId || undefined,
+    SenderAgentId: senderAgentId,
     SenderUsername: senderUsername || undefined,
     Provider: "telegram",
     Surface: "telegram",

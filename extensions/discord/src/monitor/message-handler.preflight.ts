@@ -22,6 +22,7 @@ import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk/routing";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { getChildLogger } from "openclaw/plugin-sdk/runtime-env";
 import { logDebug } from "openclaw/plugin-sdk/text-runtime";
+import { resolveConfiguredDiscordBotAgentIdsByBotUserId } from "../accounts.js";
 import {
   isDiscordGroupAllowedByPolicy,
   normalizeDiscordSlug,
@@ -289,8 +290,9 @@ export async function preflightDiscordMessage(
   const pluralkitConfig = params.discordConfig?.pluralkit;
   const webhookId = resolveDiscordWebhookId(message);
   const shouldCheckPluralKit = Boolean(pluralkitConfig?.enabled) && !webhookId;
-  let pluralkitInfo: Awaited<ReturnType<typeof import("../pluralkit.js").fetchPluralKitMessageInfo>> =
-    null;
+  let pluralkitInfo: Awaited<
+    ReturnType<typeof import("../pluralkit.js").fetchPluralKitMessageInfo>
+  > = null;
   if (shouldCheckPluralKit) {
     try {
       const { fetchPluralKitMessageInfo } = await loadPluralKitRuntime();
@@ -469,6 +471,11 @@ export async function preflightDiscordMessage(
     ? params.data.rawMember.roles.map((roleId: string) => String(roleId))
     : [];
   const freshCfg = loadConfig();
+  const identityAgentIds = resolveConfiguredDiscordBotAgentIdsByBotUserId({
+    cfg: freshCfg,
+    currentAccountId: params.accountId,
+    currentBotUserId: params.botUserId,
+  });
   const conversationRuntime = await loadConversationRuntime();
   const route = resolveDiscordConversationRoute({
     cfg: freshCfg,
@@ -926,6 +933,7 @@ export async function preflightDiscordMessage(
     token: params.token,
     runtime: params.runtime,
     botUserId: params.botUserId,
+    identityAgentIds,
     abortSignal: params.abortSignal,
     guildHistories: params.guildHistories,
     historyLimit: params.historyLimit,
