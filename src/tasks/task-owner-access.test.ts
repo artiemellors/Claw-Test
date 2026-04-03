@@ -6,12 +6,14 @@ import {
   getTaskByIdForOwner,
   resolveTaskForLookupTokenForOwner,
 } from "./task-owner-access.js";
+import { resetTaskFlowRegistryForTests } from "./task-flow-registry.js";
 import { createTaskRecord, resetTaskRegistryForTests } from "./task-registry.js";
 
 const ORIGINAL_STATE_DIR = process.env.OPENCLAW_STATE_DIR;
 
 afterEach(() => {
   resetTaskRegistryForTests({ persist: false });
+  resetTaskFlowRegistryForTests();
   if (ORIGINAL_STATE_DIR == null) {
     delete process.env.OPENCLAW_STATE_DIR;
   } else {
@@ -24,10 +26,12 @@ async function withTaskRegistryTempDir<T>(run: () => Promise<T> | T): Promise<T>
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     process.env.OPENCLAW_STATE_DIR = root;
     resetTaskRegistryForTests({ persist: false });
+    resetTaskFlowRegistryForTests();
     try {
       return await run();
     } finally {
       resetTaskRegistryForTests({ persist: false });
+      resetTaskFlowRegistryForTests();
       if (previousStateDir == null) {
         delete process.env.OPENCLAW_STATE_DIR;
       } else {
