@@ -358,20 +358,30 @@ export function createSessionsSendTool(opts?: {
       } catch (err) {
         const messageText =
           err instanceof Error ? err.message : typeof err === "string" ? err : "error";
+        if (messageText.includes("gateway timeout")) {
+          startA2AFlow(undefined, runId);
+          return jsonResult({
+            runId,
+            status: "accepted",
+            sessionKey: displayKey,
+            delivery,
+          });
+        }
         return jsonResult({
           runId,
-          status: messageText.includes("gateway timeout") ? "timeout" : "error",
+          status: "error",
           error: messageText,
           sessionKey: displayKey,
         });
       }
 
       if (waitStatus === "timeout") {
+        startA2AFlow(undefined, runId);
         return jsonResult({
           runId,
-          status: "timeout",
-          error: waitError,
+          status: "accepted",
           sessionKey: displayKey,
+          delivery,
         });
       }
       if (waitStatus === "error") {
