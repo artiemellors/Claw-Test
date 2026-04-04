@@ -89,6 +89,7 @@
   "collection-runtime",
   "compat",
   "direct-dm",
+  "bailian",
   "deepseek",
   "device-bootstrap",
   "diagnostic-runtime",

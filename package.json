@@ -399,6 +399,10 @@
       "types": "./dist/plugin-sdk/direct-dm.d.ts",
       "default": "./dist/plugin-sdk/direct-dm.js"
     },
+    "./plugin-sdk/bailian": {
+      "types": "./dist/plugin-sdk/bailian.d.ts",
+      "default": "./dist/plugin-sdk/bailian.js"
+    },
     "./plugin-sdk/deepseek": {
       "types": "./dist/plugin-sdk/deepseek.d.ts",
       "default": "./dist/plugin-sdk/deepseek.js"

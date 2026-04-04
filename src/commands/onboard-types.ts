@@ -9,6 +9,7 @@ export type BuiltInAuthChoice =
   | "setup-token"
   | "token"
   | "chutes"
+  | "bailian-api-key"
   | "deepseek-api-key"
   | "openai-codex"
   | "openai-api-key"
@@ -58,6 +59,7 @@ export type BuiltInAuthChoiceGroupId =
   | "openai"
   | "anthropic"
   | "chutes"
+  | "bailian"
   | "deepseek"
   | "google"
   | "copilot"
@@ -115,6 +117,7 @@ export type OnboardOptions = {
   /** API key persistence mode for setup flows (default: plaintext). */
   secretInputMode?: SecretInputMode;
   anthropicApiKey?: string;
+  bailianApiKey?: string;
   deepseekApiKey?: string;
   openaiApiKey?: string;
   mistralApiKey?: string;

@@ -4,6 +4,7 @@ export const providerExtensionIds = [
   "amazon-bedrock",
   "anthropic",
   "anthropic-vertex",
+  "bailian",
   "byteplus",
   "chutes",
   "deepseek",

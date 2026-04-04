@@ -270,6 +270,8 @@ importers:
 
   extensions/anthropic-vertex: {}
 
+  extensions/bailian: {}
+
   extensions/bluebubbles:
     devDependencies:
       openclaw:

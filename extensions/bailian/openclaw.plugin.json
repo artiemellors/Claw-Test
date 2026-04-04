@@ -1,0 +1,28 @@
+{
+  "id": "bailian",
+  "enabledByDefault": true,
+  "providers": ["bailian"],
+  "providerAuthEnvVars": {
+    "bailian": ["BAILIAN_API_KEY"]
+  },
+  "providerAuthChoices": [
+    {
+      "provider": "bailian",
+      "method": "api-key",
+      "choiceId": "bailian-api-key",
+      "choiceLabel": "Bailian API key",
+      "groupId": "bailian",
+      "groupLabel": "Bailian (DashScope)",
+      "groupHint": "API key",
+      "optionKey": "bailianApiKey",
+      "cliFlag": "--bailian-api-key",
+      "cliOption": "--bailian-api-key <key>",
+      "cliDescription": "Bailian (DashScope) API key"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
