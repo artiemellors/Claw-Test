@@ -22,6 +22,16 @@ import { hasPollCreationParams } from "../../poll-params.js";
 import { resolvePollMaxSelections } from "../../polls.js";
 import { buildChannelAccountBindings } from "../../routing/bindings.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
+/** Minimal inline JID normalizer for same-chat comparison.
+ * TODO: Move WhatsApp-specific logic out of core (see PR #57413 review notes). */
+function toWhatsappJid(input: string): string {
+  const stripped = input.replace(/^whatsapp:/i, "").trim();
+  if (stripped.includes("@")) {
+    return stripped;
+  }
+  const digits = stripped.replace(/\D/g, "");
+  return `${digits}@s.whatsapp.net`;
+}
 import { type GatewayClientMode, type GatewayClientName } from "../../utils/message-channel.js";
 import { throwIfAborted } from "./abort.js";
 import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
@@ -267,6 +277,34 @@ async function resolveActionTarget(params: {
   return resolvedTarget;
 }
 
+function resolveSendReplyToParticipant(params: {
+  actionParams: Record<string, unknown>;
+  channel: ChannelId;
+  replyToId?: string;
+  to: string;
+  toolContext?: ChannelThreadingToolContext;
+  requesterSenderId?: string | null;
+}): string | undefined {
+  const explicitParticipant = readStringParam(params.actionParams, "participant");
+  if (explicitParticipant) {
+    return explicitParticipant;
+  }
+  if (params.channel !== "whatsapp" || !params.replyToId) {
+    return undefined;
+  }
+  if (params.toolContext?.currentChannelProvider !== "whatsapp") {
+    return undefined;
+  }
+  const currentChannelId = params.toolContext.currentChannelId?.trim();
+  const requesterSenderId = params.requesterSenderId?.trim();
+  if (!currentChannelId || !requesterSenderId) {
+    return undefined;
+  }
+  return toWhatsappJid(currentChannelId) === toWhatsappJid(params.to)
+    ? requesterSenderId
+    : undefined;
+}
+
 type ResolvedActionContext = {
   cfg: OpenClawConfig;
   params: Record<string, unknown>;
@@ -494,6 +532,14 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
   const silent = readBooleanParam(params, "silent");
 
   const replyToId = readStringParam(params, "replyTo");
+  const replyToParticipant = resolveSendReplyToParticipant({
+    actionParams: params,
+    channel,
+    replyToId: replyToId ?? undefined,
+    to,
+    toolContext: input.toolContext,
+    requesterSenderId: input.requesterSenderId ?? undefined,
+  });
   const { resolvedThreadId, outboundRoute } = await prepareOutboundMirrorRoute({
     cfg,
     channel,
@@ -543,6 +589,7 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     forceDocument,
     bestEffort: bestEffort ?? undefined,
     replyToId: replyToId ?? undefined,
+    replyToParticipant,
     threadId: resolvedThreadId ?? undefined,
   });
 

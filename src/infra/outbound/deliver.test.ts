@@ -10,6 +10,7 @@ import {
   setActivePluginRegistry,
 } from "../../plugins/runtime.js";
 import type { PluginHookRegistration } from "../../plugins/types.js";
+import { loadBundledPluginTestApiSync } from "../../test-utils/bundled-plugin-public-surface.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { createInternalHookEventPayload } from "../../test-utils/internal-hook-event-payload.js";
 import { resolvePreferredOpenClawTmpDir } from "../tmp-openclaw-dir.js";
@@ -100,6 +101,9 @@ const expectedPreferredTmpRoot = resolvePreferredOpenClawTmpDir();
 
 type DeliverOutboundArgs = Parameters<DeliverModule["deliverOutboundPayloads"]>[0];
 type DeliverOutboundPayload = DeliverOutboundArgs["payloads"][number];
+const { whatsappPlugin } = loadBundledPluginTestApiSync<{
+  whatsappPlugin: { id: string; outbound: NonNullable<typeof whatsappOutbound> };
+}>("whatsapp");
 
 async function deliverWhatsAppPayload(params: {
   sendWhatsApp: NonNullable<
@@ -265,6 +269,60 @@ describe("deliverOutboundPayloads", () => {
       );
     }
     expect(results.map((entry) => entry.messageId)).toEqual(["ab", "cd"]);
+  });
+
+  it("quotes only the first outbound whatsapp media item when replyToMode is first", async () => {
+    const sendWhatsApp = vi.fn(
+      async (_to: string, _text: string, _options: { quotedMessageKey?: unknown }) => ({
+        messageId: "w1",
+        toJid: "jid",
+      }),
+    );
+    const cfg: OpenClawConfig = {
+      channels: { whatsapp: { replyToMode: "first" } },
+    };
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "whatsapp",
+          plugin: whatsappPlugin,
+          source: "test://whatsapp-plugin",
+        },
+      ]),
+    );
+
+    await deliverOutboundPayloads({
+      cfg,
+      channel: "whatsapp",
+      to: "+1555",
+      payloads: [
+        {
+          text: "caption",
+          mediaUrls: ["https://example.com/1.jpg", "https://example.com/2.jpg"],
+          replyToId: "quoted-1",
+        },
+      ],
+      deps: { sendWhatsApp },
+    });
+
+    expect(sendWhatsApp).toHaveBeenCalledTimes(2);
+    expect(sendWhatsApp).toHaveBeenNthCalledWith(
+      1,
+      "+1555",
+      "caption",
+      expect.objectContaining({
+        mediaUrl: "https://example.com/1.jpg",
+        quotedMessageKey: expect.objectContaining({ id: "quoted-1" }),
+      }),
+    );
+    expect(sendWhatsApp).toHaveBeenNthCalledWith(
+      2,
+      "+1555",
+      "",
+      expect.not.objectContaining({
+        quotedMessageKey: expect.anything(),
+      }),
+    );
   });
 
   it("uses adapter-provided formatted senders and scoped media roots when available", async () => {
