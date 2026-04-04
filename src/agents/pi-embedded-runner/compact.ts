@@ -295,9 +295,9 @@ export async function compactEmbeddedPiSessionDirect(
     defaultProvider: DEFAULT_PROVIDER,
     defaultModel: DEFAULT_MODEL,
   });
-  const provider = resolvedCompactionTarget.provider ?? DEFAULT_PROVIDER;
-  const modelId = resolvedCompactionTarget.model ?? DEFAULT_MODEL;
-  const authProfileId = resolvedCompactionTarget.authProfileId;
+  let provider = resolvedCompactionTarget.provider ?? DEFAULT_PROVIDER;
+  let modelId = resolvedCompactionTarget.model ?? DEFAULT_MODEL;
+  let authProfileId = resolvedCompactionTarget.authProfileId;
   const fail = (reason: string): EmbeddedPiCompactResult => {
     log.warn(
       `[compaction-diag] end runId=${runId} sessionKey=${params.sessionKey ?? params.sessionId} ` +
@@ -471,6 +471,7 @@ export async function compactEmbeddedPiSessionDirect(
   };
 
   let apiKeyInfo: KeyInfo | null = null;
+  let hasRuntimeAuthExchange = false;
   try {
     ({ authModel: runtimeModel, keyInfo: apiKeyInfo } = await tryAuthForModel(
       runtimeModel,
