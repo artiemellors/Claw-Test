@@ -4,6 +4,7 @@ import type { BrowserProfileConfig, OpenClawConfig } from "../config/config.js";
 import { loadConfig, writeConfigFile } from "../config/config.js";
 import { deriveDefaultBrowserCdpPortRange } from "../config/port-defaults.js";
 import { resolveUserPath } from "../utils.js";
+import { assertCdpEndpointAllowed } from "./cdp.helpers.js";
 import { resolveOpenClawUserDataDir } from "./chrome.js";
 import { parseHttpUrl, resolveProfile } from "./config.js";
 import {
@@ -121,16 +122,17 @@ export function createBrowserProfilesService(ctx: BrowserRouteContext) {
     }
 
     if (rawCdpUrl) {
-      let parsed: ReturnType<typeof parseHttpUrl>;
-      try {
-        parsed = parseHttpUrl(rawCdpUrl, "browser.profiles.cdpUrl");
-      } catch (err) {
-        throw new BrowserValidationError(String(err));
-      }
       if (driver === "existing-session") {
         throw new BrowserValidationError(
           "driver=existing-session does not accept cdpUrl; it attaches via the Chrome MCP auto-connect flow",
         );
+      }
+      let parsed: ReturnType<typeof parseHttpUrl>;
+      try {
+        parsed = parseHttpUrl(rawCdpUrl, "browser.profiles.cdpUrl");
+        await assertCdpEndpointAllowed(parsed.normalized, state.resolved.ssrfPolicy);
+      } catch (err) {
+        throw new BrowserValidationError(String(err));
       }
       profileConfig = {
         cdpUrl: parsed.normalized,
