@@ -1,5 +1,6 @@
 import type { ImageGenerationProvider } from "openclaw/plugin-sdk/image-generation";
 import type { MediaUnderstandingProvider } from "openclaw/plugin-sdk/media-understanding";
+import type { SpeechProviderPlugin } from "openclaw/plugin-sdk/speech";
 import {
   definePluginEntry,
   type OpenClawPluginApi,
@@ -22,6 +23,7 @@ import { buildGoogleGeminiCliBackend } from "./cli-backend.js";
 import { formatGoogleOauthApiKey } from "./oauth-token-shared.js";
 import { isModernGoogleModel, resolveGoogle31ForwardCompatModel } from "./provider-models.js";
 import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
+import { buildGeminiSpeechProvider } from "./speech-provider.js";
 
 const GOOGLE_GEMINI_CLI_PROVIDER_ID = "google-gemini-cli";
 const GOOGLE_GEMINI_CLI_PROVIDER_LABEL = "Gemini CLI OAuth";
@@ -202,6 +204,30 @@ function createLazyGoogleMediaUnderstandingProvider(): MediaUnderstandingProvide
   };
 }
 
+
+function createLazyGoogleSpeechProvider(): SpeechProviderPlugin {
+  let cached: SpeechProviderPlugin | undefined;
+  const getProvider = () => {
+    if (!cached) {
+      cached = buildGeminiSpeechProvider();
+    }
+    return cached;
+  };
+  return {
+    id: "gemini",
+    label: "Google Gemini TTS",
+    aliases: ["google-tts"],
+    autoSelectOrder: 25,
+    models: ["gemini-2.5-flash-preview-tts"],
+    resolveConfig: (ctx) => getProvider().resolveConfig?.(ctx) ?? {},
+    resolveTalkConfig: (ctx) => getProvider().resolveTalkConfig?.(ctx) ?? {},
+    resolveTalkOverrides: (ctx) => getProvider().resolveTalkOverrides?.(ctx) ?? {},
+    listVoices: (req) => getProvider().listVoices?.(req) ?? Promise.resolve([]),
+    isConfigured: (req) => getProvider().isConfigured?.(req) ?? false,
+    synthesize: (req) => getProvider().synthesize(req),
+  };
+}
+
 export default definePluginEntry({
   id: "google",
   name: "Google Plugin",
@@ -253,6 +279,7 @@ export default definePluginEntry({
     api.registerProvider(createLazyGoogleGeminiCliProvider());
     api.registerImageGenerationProvider(createLazyGoogleImageGenerationProvider());
     api.registerMediaUnderstandingProvider(createLazyGoogleMediaUnderstandingProvider());
+    api.registerSpeechProvider(createLazyGoogleSpeechProvider());
     api.registerWebSearchProvider(createGeminiWebSearchProvider());
   },
 });
