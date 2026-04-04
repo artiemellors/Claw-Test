@@ -29,7 +29,7 @@ const OPENAI_CODEX_XHIGH_MODEL_IDS = [
   "gpt-5.2-codex",
   "gpt-5.1-codex",
 ] as const;
-const GITHUB_COPILOT_XHIGH_MODEL_IDS = ["gpt-5.2", "gpt-5.2-codex"] as const;
+const GITHUB_COPILOT_XHIGH_MODEL_IDS = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.2", "gpt-5.2-codex"] as const;
 
 export function normalizeProviderId(provider?: string | null): string {
   if (!provider) {
