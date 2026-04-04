@@ -103,6 +103,7 @@ function resolveToolErrorWarningPolicy(params: {
 
 export function buildEmbeddedRunPayloads(params: {
   assistantTexts: string[];
+  assistantTextBaseline?: number;
   toolMetas: ToolMetaEntry[];
   lastAssistant: AssistantMessage | undefined;
   lastToolError?: ToolErrorSummary;
@@ -264,10 +265,46 @@ export function buildEmbeddedRunPayloads(params: {
     }
     return isRawApiErrorPayload(trimmed);
   };
+  // When reasoning is on and assistantTexts contains earlier block-reply content,
+  // the final answer may not be represented. Append fallbackAnswerText when it
+  // is not already covered — either as a single matching entry or as the
+  // concatenation of all chunked entries.
+  //
+  // Only compare entries from the current assistant message (baseline onward)
+  // to avoid false negatives when assistantTexts accumulates across messages.
+  const rawAnswerSources = params.assistantTexts;
+  const currentMessageSources = params.assistantTextBaseline
+    ? rawAnswerSources.slice(params.assistantTextBaseline)
+    : rawAnswerSources;
+  const normalizedFallback = fallbackAnswerText
+    ? normalizeTextForComparison(fallbackAnswerText)
+    : "";
+  const fallbackAlreadyCovered = Boolean(
+    normalizedFallback &&
+    currentMessageSources.length > 0 &&
+    // Check per-element exact match first (single chunk covers the full answer) ...
+    (currentMessageSources.some((t) => normalizeTextForComparison(t) === normalizedFallback) ||
+      // ... then check whether concatenating all chunks reproduces the fallback,
+      // which handles multi-chunk block replies that split a single answer.
+      // EmbeddedBlockChunker may strip whitespace at split boundaries, so we
+      // check both no-separator (hard splits) and single-space (soft splits).
+      // normalizeTextForComparison collapses all whitespace to single spaces,
+      // so join(" ") matches when original had whitespace that chunker ate.
+      normalizeTextForComparison(currentMessageSources.join("")) === normalizedFallback ||
+      normalizeTextForComparison(currentMessageSources.join(" ")) === normalizedFallback),
+  );
+  const needsFallbackAppend =
+    !suppressAssistantArtifacts &&
+    rawAnswerSources.length > 0 &&
+    params.reasoningLevel === "on" &&
+    Boolean(normalizedFallback) &&
+    !fallbackAlreadyCovered;
   const answerTexts = suppressAssistantArtifacts
     ? []
-    : (params.assistantTexts.length
-        ? params.assistantTexts
+    : (rawAnswerSources.length
+        ? needsFallbackAppend
+          ? [...rawAnswerSources, fallbackAnswerText]
+          : rawAnswerSources
         : fallbackAnswerText
           ? [fallbackAnswerText]
           : []

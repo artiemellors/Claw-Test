@@ -237,7 +237,11 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
       pushAssistantText(text);
     }
 
-    state.assistantTextBaseline = assistantTexts.length;
+    // NOTE: We intentionally do NOT update assistantTextBaseline here.
+    // The baseline must remain pointing to the start of the current assistant
+    // message so that buildEmbeddedRunPayloads can correctly scope its fallback
+    // deduplication to entries from this message only. The baseline will be
+    // updated by resetAssistantMessageState when the next assistant message starts.
   };
 
   // ── Messaging tool duplicate detection ──────────────────────────────────────
@@ -744,6 +748,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     getMessagingToolSentMediaUrls: () => messagingToolSentMediaUrls.slice(),
     getMessagingToolSentTargets: () => messagingToolSentTargets.slice(),
     getSuccessfulCronAdds: () => state.successfulCronAdds,
+    getAssistantTextBaseline: () => state.assistantTextBaseline,
     // Returns true if any messaging tool successfully sent a message.
     // Used to suppress agent's confirmation text (e.g., "Respondi no Telegram!")
     // which is generated AFTER the tool sends the actual answer.
