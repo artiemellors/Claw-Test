@@ -1,6 +1,17 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { computeBackoff, sleepWithAbort, type BackoffPolicy } from "./backoff.ts";
+
+const MAX_RETRIES = 5;
+const IS_WINDOWS = process.platform === "win32";
+
+const EPERM_BACKOFF: BackoffPolicy = {
+  initialMs: 100,
+  maxMs: 1_600,
+  factor: 2,
+  jitter: 0.25,
+};
 
 export async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
@@ -36,40 +47,58 @@ export async function writeTextAtomic(
   if (typeof options?.ensureDirMode === "number") {
     mkdirOptions.mode = options.ensureDirMode;
   }
-  await fs.mkdir(path.dirname(filePath), mkdirOptions);
   const parentDir = path.dirname(filePath);
-  const tmp = `${filePath}.${randomUUID()}.tmp`;
-  try {
-    const tmpHandle = await fs.open(tmp, "w", mode);
+  await fs.mkdir(parentDir, mkdirOptions);
+  for (let attempt = 0; attempt < MAX_RETRIES + 1; attempt++) {
+    const tmp = `${filePath}.${randomUUID()}.tmp`;
     try {
-      await tmpHandle.writeFile(payload, { encoding: "utf8" });
-      await tmpHandle.sync();
-    } finally {
-      await tmpHandle.close().catch(() => undefined);
-    }
-    try {
-      await fs.chmod(tmp, mode);
-    } catch {
-      // best-effort; ignore on platforms without chmod
-    }
-    await fs.rename(tmp, filePath);
-    try {
-      const dirHandle = await fs.open(parentDir, "r");
+      const tmpHandle = await fs.open(tmp, "w", mode);
       try {
-        await dirHandle.sync();
+        await tmpHandle.writeFile(payload, { encoding: "utf8" });
+        await tmpHandle.sync();
       } finally {
-        await dirHandle.close().catch(() => undefined);
+        await tmpHandle.close().catch(() => undefined);
       }
-    } catch {
-      // best-effort; some platforms/filesystems do not support syncing directories.
+      try {
+        await fs.chmod(tmp, mode);
+      } catch {
+        // best-effort; ignore on platforms without chmod
+      }
+      await fs.rename(tmp, filePath);
+      try {
+        const dirHandle = await fs.open(parentDir, "r");
+        try {
+          await dirHandle.sync();
+        } finally {
+          await dirHandle.close().catch(() => undefined);
+        }
+      } catch {
+        // best-effort; some platforms/filesystems do not support syncing directories.
+      }
+      try {
+        await fs.chmod(filePath, mode);
+      } catch {
+        // best-effort; ignore on platforms without chmod
+      }
+      return;
+    } catch (err) {
+      // Only retry on Windows; other platforms should fail fast
+      if (
+        IS_WINDOWS &&
+        err &&
+        typeof err === "object" &&
+        "code" in err &&
+        err.code === "EPERM" &&
+        attempt < MAX_RETRIES
+      ) {
+        const delay = computeBackoff(EPERM_BACKOFF, attempt + 1);
+        await sleepWithAbort(delay);
+        continue;
+      }
+      throw err;
+    } finally {
+      await fs.rm(tmp, { force: true }).catch(() => undefined);
     }
-    try {
-      await fs.chmod(filePath, mode);
-    } catch {
-      // best-effort; ignore on platforms without chmod
-    }
-  } finally {
-    await fs.rm(tmp, { force: true }).catch(() => undefined);
   }
 }
 
