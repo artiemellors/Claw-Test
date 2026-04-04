@@ -1,9 +1,11 @@
-import { getEnvApiKey } from "@mariozechner/pi-ai";
 import { getShellEnvAppliedKeys } from "../infra/shell-env.js";
 import { hasAnthropicVertexAvailableAuth } from "../plugin-sdk/anthropic-vertex-auth-presence.js";
 import { normalizeOptionalSecretInput } from "../utils/normalize-secret-input.js";
 import { PROVIDER_ENV_API_KEY_CANDIDATES } from "./model-auth-env-vars.js";
-import { GCP_VERTEX_CREDENTIALS_MARKER } from "./model-auth-markers.js";
+import {
+  GCP_VERTEX_CREDENTIALS_MARKER,
+  GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER,
+} from "./model-auth-markers.js";
 import { normalizeProviderIdForAuth } from "./provider-id.js";
 
 export type EnvApiKeyResult = {
@@ -37,11 +39,13 @@ export function resolveEnvApiKey(
   }
 
   if (normalized === "google-vertex") {
-    const envKey = getEnvApiKey(normalized);
-    if (!envKey) {
-      return null;
+    // Google Vertex AI uses GCP credentials (ADC), not API keys.
+    // Return a sentinel so the model resolver treats this provider as available.
+    // The actual token exchange happens at request time via the provider's wrapStreamFn.
+    if (hasAnthropicVertexAvailableAuth(env)) {
+      return { apiKey: GCP_VERTEX_GOOGLE_CREDENTIALS_MARKER, source: "gcloud adc" };
     }
-    return { apiKey: envKey, source: "gcloud adc" };
+    return null;
   }
 
   if (normalized === "anthropic-vertex") {
