@@ -40,8 +40,7 @@ import {
 } from "./model-selection.js";
 import type { FailoverReason } from "./pi-embedded-helpers.js";
 import { isLikelyContextOverflowError } from "./pi-embedded-helpers.js";
-import { type ContextMode, resolveModelContextMode } from "./context-window-guard.js";
-import { resolveContextWindowInfo } from "./context-window-guard.js";
+import { type ContextMode, resolveModelContextMode, resolveContextWindowInfo } from "./context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
 
 const log = createSubsystemLogger("model-fallback");

@@ -144,7 +144,9 @@ const DEFAULT_SAFE_INSTRUCTIONS =
  * Lines starting with `#` and blank lines are skipped.
  */
 export function loadLightModeFileOrder(lightMdContent: string | null): string[] {
-  if (!lightMdContent) return [...DEFAULT_LIGHT_MODE_PRIORITY];
+  if (!lightMdContent) {
+    return [...DEFAULT_LIGHT_MODE_PRIORITY];
+  }
   const lines = lightMdContent
     .split("\n")
     .map((l) => l.trim())
@@ -194,6 +196,7 @@ export function applyContextModeFilter(params: {
     return [{ path: "SAFE.md", content: safeContent }];
   }
 
+
   // Light mode: load files in priority order up to 50% budget
   const budget = Math.floor(params.contextWindowTokens * 0.5);
   const priority = loadLightModeFileOrder(params.lightMdContent ?? null);
@@ -202,14 +205,14 @@ export function applyContextModeFilter(params: {
     return [name, f];
   }));
 
-  warnOversizedFiles(params.files, params.contextWindowTokens);
-
   const result: Array<{ path: string; content: string }> = [];
   let usedTokens = 0;
 
   for (const fileName of priority) {
     const file = fileMap.get(fileName);
-    if (!file) continue;
+    if (!file) {
+      continue;
+    }
     const estimatedTokens = Math.ceil(file.content.length / 4);
     if (usedTokens + estimatedTokens > budget) {
       // Truncate partial file at token boundary
@@ -223,6 +226,8 @@ export function applyContextModeFilter(params: {
     usedTokens += estimatedTokens;
     result.push(file);
   }
+
+  warnOversizedFiles(result, params.contextWindowTokens);
 
   return result;
 }

@@ -820,6 +820,9 @@ async function agentCommandInternal(
               sessionStore,
               storePath,
               allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
+              fallbackContextMode: runOptions?.contextMode,
+              fallbackContextWindowTokens: runOptions?.contextWindowTokens,
+              fallbackReasonCode: runOptions?.fallbackReasonCode,
               sessionHasHistory: !isNewSession || (await sessionFileHasContent(sessionFile)),
               onAgentEvent: (evt) => {
                 if (

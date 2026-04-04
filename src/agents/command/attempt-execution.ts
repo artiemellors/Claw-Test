@@ -329,6 +329,9 @@ export function runAgentAttempt(params: {
   sessionStore?: Record<string, SessionEntry>;
   storePath?: string;
   allowTransientCooldownProbe?: boolean;
+  fallbackContextMode?: "full" | "light" | "safe";
+  fallbackContextWindowTokens?: number;
+  fallbackReasonCode?: string;
   sessionHasHistory?: boolean;
 }) {
   const effectivePrompt = resolveFallbackRetryPrompt({
@@ -480,6 +483,9 @@ export function runAgentAttempt(params: {
     streamParams: params.opts.streamParams,
     agentDir: params.agentDir,
     allowTransientCooldownProbe: params.allowTransientCooldownProbe,
+    fallbackContextMode: params.fallbackContextMode,
+    fallbackContextWindowTokens: params.fallbackContextWindowTokens,
+    fallbackReasonCode: params.fallbackReasonCode,
     cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
     onAgentEvent: params.onAgentEvent,
     bootstrapPromptWarningSignaturesSeen,
