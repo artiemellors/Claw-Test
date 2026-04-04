@@ -83,8 +83,17 @@ function isHeartbeatNoiseEvent(evt: string): boolean {
   );
 }
 
+// Pre-compiled regex for exec completion matching (called on every system event).
+// Start-anchored to avoid false positives on free-form text.
+// Machine format: "Exec completed (amber-at, code 0) :: output"
+// Session IDs are word-based slugs (e.g. "amber-at") from createSessionSlug().
+const EXEC_COMPLETION_RE = /^exec (?:completed|failed|killed) \([a-z0-9][\w-]*, /;
+
 export function isExecCompletionEvent(evt: string): boolean {
-  return evt.toLowerCase().includes("exec finished");
+  const lower = evt.toLowerCase();
+  // "exec finished" — emitExecSystemEvent (gateway/node approval path)
+  // "Exec completed/failed/killed (" — maybeNotifyOnExit (backgrounded allowlisted commands)
+  return lower.startsWith("exec finished") || EXEC_COMPLETION_RE.test(lower);
 }
 
 // Returns true when a system event should be treated as real cron reminder content.
