@@ -204,6 +204,7 @@ export async function buildStatusText(params: {
       return undefined;
     }
   })();
+  const preferredUsageProfileId = sessionEntry?.authProfileOverride?.trim() || undefined;
   let usageLine: string | null = null;
   if (
     currentUsageProvider &&
@@ -220,6 +221,9 @@ export async function buildStatusText(params: {
           timeoutMs: usageSummaryTimeoutMs,
           providers: [currentUsageProvider],
           agentDir: statusAgentDir,
+          preferredProfileIds: preferredUsageProfileId
+            ? { [currentUsageProvider]: preferredUsageProfileId }
+            : undefined,
         }),
         new Promise<never>((_, reject) => {
           usageTimeout = setTimeout(
