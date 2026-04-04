@@ -2054,6 +2054,11 @@ export type OpenClawPluginApi = {
     id: string,
     factory: import("../context-engine/registry.js").ContextEngineFactory,
   ) => void;
+  /**
+   * Register a streamFn wrapper applied to every LLM API call within a turn.
+   * Wrappers are applied after provider-specific wrappers.
+   */
+  registerStreamFnWrapper: (wrapper: (streamFn: StreamFn) => StreamFn) => void;
   /** Register the system prompt section builder for this memory plugin (exclusive slot). */
   registerMemoryPromptSection: (
     builder: import("./memory-state.js").MemoryPromptSectionBuilder,

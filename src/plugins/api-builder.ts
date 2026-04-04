@@ -38,6 +38,7 @@ export type BuildPluginApiParams = {
       | "onConversationBindingResolved"
       | "registerCommand"
       | "registerContextEngine"
+      | "registerStreamFnWrapper"
       | "registerMemoryPromptSection"
       | "registerMemoryFlushPlan"
       | "registerMemoryRuntime"
@@ -72,6 +73,7 @@ const noopOnConversationBindingResolved: OpenClawPluginApi["onConversationBindin
   () => {};
 const noopRegisterCommand: OpenClawPluginApi["registerCommand"] = () => {};
 const noopRegisterContextEngine: OpenClawPluginApi["registerContextEngine"] = () => {};
+const noopRegisterStreamFnWrapper: OpenClawPluginApi["registerStreamFnWrapper"] = () => {};
 const noopRegisterMemoryPromptSection: OpenClawPluginApi["registerMemoryPromptSection"] = () => {};
 const noopRegisterMemoryFlushPlan: OpenClawPluginApi["registerMemoryFlushPlan"] = () => {};
 const noopRegisterMemoryRuntime: OpenClawPluginApi["registerMemoryRuntime"] = () => {};
@@ -119,6 +121,7 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
       handlers.onConversationBindingResolved ?? noopOnConversationBindingResolved,
     registerCommand: handlers.registerCommand ?? noopRegisterCommand,
     registerContextEngine: handlers.registerContextEngine ?? noopRegisterContextEngine,
+    registerStreamFnWrapper: handlers.registerStreamFnWrapper ?? noopRegisterStreamFnWrapper,
     registerMemoryPromptSection:
       handlers.registerMemoryPromptSection ?? noopRegisterMemoryPromptSection,
     registerMemoryFlushPlan: handlers.registerMemoryFlushPlan ?? noopRegisterMemoryFlushPlan,

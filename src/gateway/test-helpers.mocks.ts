@@ -214,6 +214,7 @@ const createStubPluginRegistry = (): PluginRegistry => ({
   commands: [],
   conversationBindingResolvedHandlers: [],
   diagnostics: [],
+  streamFnWrappers: [],
 });
 
 const GATEWAY_TEST_PLUGIN_REGISTRY_STATE_KEY = Symbol.for(

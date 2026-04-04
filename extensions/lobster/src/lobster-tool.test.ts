@@ -59,6 +59,7 @@ function fakeApi(overrides: Partial<OpenClawPluginApi> = {}): OpenClawPluginApi 
     registerHttpRoute() {},
     registerCommand() {},
     registerContextEngine() {},
+    registerStreamFnWrapper() {},
     registerMemoryPromptSection() {},
     registerMemoryFlushPlan() {},
     registerMemoryRuntime() {},

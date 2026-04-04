@@ -22,6 +22,7 @@ import {
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import { resolveToolCallArgumentsEncoding } from "../../../plugins/provider-model-compat.js";
+import { getActivePluginRegistry } from "../../../plugins/runtime.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { buildTtsSystemPromptHint } from "../../../tts/tts.js";
 import { resolveUserPath } from "../../../utils.js";
@@ -1123,6 +1124,14 @@ export async function runEmbeddedAttempt(
       activeSession.agent.streamFn = wrapStreamFnHandleSensitiveStopReason(
         activeSession.agent.streamFn,
       );
+
+      // Apply plugin-registered streamFn wrappers (e.g. per-call model routing).
+      const pluginStreamFnWrappers = getActivePluginRegistry()?.streamFnWrappers;
+      if (pluginStreamFnWrappers?.length) {
+        for (const wrapper of pluginStreamFnWrappers) {
+          activeSession.agent.streamFn = wrapper(activeSession.agent.streamFn);
+        }
+      }
 
       let idleTimeoutTrigger: ((error: Error) => void) | undefined;
 

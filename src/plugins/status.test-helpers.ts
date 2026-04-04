@@ -130,6 +130,7 @@ export function createPluginLoadResult(
     services: [],
     commands: [],
     conversationBindingResolvedHandlers: [],
+    streamFnWrappers: [],
     ...rest,
     realtimeTranscriptionProviders: realtimeTranscriptionProviders ?? [],
     realtimeVoiceProviders: realtimeVoiceProviders ?? [],
