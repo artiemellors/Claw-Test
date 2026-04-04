@@ -101,7 +101,25 @@ describe("bound delivery router", () => {
     expect(route).toEqual({
       binding: null,
       mode: "fallback",
-      reason: "ambiguous-without-requester",
+      reason: "missing-requester",
+    });
+  });
+
+  it("fails closed when requester signal is missing even with a single binding", () => {
+    registerDiscordSessionBindings(TARGET_SESSION_KEY, [
+      createDiscordBinding(TARGET_SESSION_KEY, "thread-1", 1),
+    ]);
+
+    const route = createBoundDeliveryRouter().resolveDestination({
+      eventKind: "task_completion",
+      targetSessionKey: TARGET_SESSION_KEY,
+      failClosed: true,
+    });
+
+    expect(route).toEqual({
+      binding: null,
+      mode: "fallback",
+      reason: "missing-requester",
     });
   });
 

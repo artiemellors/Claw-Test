@@ -219,7 +219,7 @@ export async function resolveSubagentCompletionOrigin(params: {
     eventKind: "task_completion",
     targetSessionKey: params.childSessionKey,
     requester: requesterConversation,
-    failClosed: false,
+    failClosed: true,
   });
   if (route.mode === "bound" && route.binding) {
     const boundTarget = resolveConversationDeliveryTarget({
@@ -455,10 +455,9 @@ async function sendSubagentAnnounceDirectly(params: {
   try {
     const completionDirectOrigin = normalizeDeliveryContext(params.completionDirectOrigin);
     const directOrigin = normalizeDeliveryContext(params.directOrigin);
-    const effectiveDirectOrigin =
-      params.expectsCompletionMessage && completionDirectOrigin
-        ? completionDirectOrigin
-        : directOrigin;
+    const effectiveDirectOrigin = params.expectsCompletionMessage
+      ? completionDirectOrigin
+      : directOrigin;
     const directChannelRaw =
       typeof effectiveDirectOrigin?.channel === "string"
         ? effectiveDirectOrigin.channel.trim()
