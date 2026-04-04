@@ -38,6 +38,22 @@ const mergeOrigin = (
   if (next?.threadId != null && next.threadId !== "") {
     merged.threadId = next.threadId;
   }
+  // Persist persistedOriginChannel and persistedOriginTo from first message.
+  // Once set, these NEVER change, ensuring replies always route back to the
+  // original channel even when dashboard is open.
+  // @see https://github.com/openclaw/openclaw/issues/54531
+  if (next?.persistedOriginChannel && !existing?.persistedOriginChannel) {
+    merged.persistedOriginChannel = next.persistedOriginChannel;
+  } else if (existing?.persistedOriginChannel) {
+    // Preserve existing persisted values (never overwrite)
+    merged.persistedOriginChannel = existing.persistedOriginChannel;
+  }
+  if (next?.persistedOriginTo && !existing?.persistedOriginTo) {
+    merged.persistedOriginTo = next.persistedOriginTo;
+  } else if (existing?.persistedOriginTo) {
+    // Preserve existing persisted values (never overwrite)
+    merged.persistedOriginTo = existing.persistedOriginTo;
+  }
   return Object.keys(merged).length > 0 ? merged : undefined;
 };
 
@@ -80,6 +96,17 @@ export function deriveSessionOrigin(ctx: MsgContext): SessionOrigin | undefined 
   }
   if (threadId != null && threadId !== "") {
     origin.threadId = threadId;
+  }
+
+  // Set persisted origin channel/to from first message.
+  // These never change after being set, ensuring replies always route back
+  // to the original channel even when dashboard is open.
+  // @see https://github.com/openclaw/openclaw/issues/54531
+  if (provider) {
+    origin.persistedOriginChannel = provider;
+  }
+  if (to) {
+    origin.persistedOriginTo = to;
   }
 
   return Object.keys(origin).length > 0 ? origin : undefined;

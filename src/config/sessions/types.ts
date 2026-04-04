@@ -20,6 +20,19 @@ export type SessionOrigin = {
   to?: string;
   accountId?: string;
   threadId?: string | number;
+  /**
+   * Persisted originating channel from first message.
+   * Never changes after being set, ensuring replies always route
+   * back to the original channel even when dashboard is open.
+   * @see https://github.com/openclaw/openclaw/issues/54531
+   */
+  persistedOriginChannel?: string;
+  /**
+   * Persisted originating destination from first message.
+   * The chat/channel/user ID where replies should be sent.
+   * @see https://github.com/openclaw/openclaw/issues/54531
+   */
+  persistedOriginTo?: string;
 };
 
 export type SessionAcpIdentitySource = "ensure" | "status" | "event";

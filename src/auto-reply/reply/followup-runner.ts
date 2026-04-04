@@ -75,10 +75,23 @@ export function createFollowupRunner(params: {
    * replies are routed directly to that provider instead of using the
    * session's current dispatcher. This ensures replies go back to
    * where the message originated.
+   *
+   * Priority: persistedOriginChannel > originatingChannel (fixes #54531).
    */
   const sendFollowupPayloads = async (payloads: ReplyPayload[], queued: FollowupRun) => {
-    // Check if we should route to originating channel.
-    const { originatingChannel, originatingTo } = queued;
+    // Resolve active session entry
+    const activeSessionEntry =
+      (sessionKey ? sessionStore?.[sessionKey] : undefined) ?? sessionEntry;
+
+    // Prefer persisted values from session.origin (never changes after first message)
+    // This ensures replies always route back to original channel even when dashboard is open.
+    // @see https://github.com/openclaw/openclaw/issues/54531
+    const persistedChannel = activeSessionEntry?.origin?.persistedOriginChannel;
+    const persistedTo = activeSessionEntry?.origin?.persistedOriginTo;
+
+    const originatingChannel = persistedChannel || queued.originatingChannel;
+    const originatingTo = persistedTo || queued.originatingTo;
+
     const shouldRouteToOriginating = isRoutableChannel(originatingChannel) && originatingTo;
 
     if (!shouldRouteToOriginating && !opts?.onBlockReply) {
