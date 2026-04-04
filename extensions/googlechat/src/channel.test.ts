@@ -272,7 +272,7 @@ describe("googlechatPlugin outbound sendMedia", () => {
   });
 
   it("preserves explicit empty mediaLocalRoots for outbound local sends", async () => {
-    const { loadWebMedia, fetchRemoteMedia } = setupRuntimeMediaMocks({
+    const { loadOutboundMediaFromUrl, fetchRemoteMedia } = setupRuntimeMediaMocks({
       loadFileName: "image.png",
       loadBytes: "image-bytes",
     });
@@ -295,7 +295,7 @@ describe("googlechatPlugin outbound sendMedia", () => {
       accountId: "default",
     });
 
-    expect(loadWebMedia).toHaveBeenCalledWith(
+    expect(loadOutboundMediaFromUrl).toHaveBeenCalledWith(
       "/tmp/workspace/image.png",
       expect.objectContaining({
         localRoots: [],
