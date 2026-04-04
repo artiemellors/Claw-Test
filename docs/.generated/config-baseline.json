@@ -466,6 +466,20 @@
       "hasChildren": false
     },
     {
+      "path": "agents.defaults.bootstrapTruncationWarnPct",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Bootstrap Truncation Warn Pct",
+      "help": "Minimum truncation percentage (0–100) for a bootstrap file to trigger a user-visible channel warning. Default: 10. Set to 0 to warn on any truncation; set above 100 to disable user-visible warnings.",
+      "hasChildren": false
+    },
+    {
       "path": "agents.defaults.cliBackends",
       "kind": "core",
       "type": "object",

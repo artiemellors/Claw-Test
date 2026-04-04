@@ -4,6 +4,7 @@ import {
   buildBootstrapInjectionStats,
   buildBootstrapPromptWarning,
   buildBootstrapTruncationReportMeta,
+  buildBootstrapTruncationUserWarnings,
   analyzeBootstrapBudget,
 } from "../bootstrap-budget.js";
 import {
@@ -17,7 +18,9 @@ import {
   resolveBootstrapMaxChars,
   resolveBootstrapPromptTruncationWarningMode,
   resolveBootstrapTotalMaxChars,
+  resolveBootstrapTruncationWarnPct,
 } from "../pi-embedded-helpers.js";
+import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { buildSystemPromptReport } from "../system-prompt-report.js";
 import { redactRunIdentifier, resolveRunWorkspaceDir } from "../workspace-run.js";
 import { prepareCliBundleMcpConfig } from "./bundle-mcp.js";
@@ -113,6 +116,16 @@ export async function prepareCliRunContext(
     seenSignatures: params.bootstrapPromptWarningSignaturesSeen,
     previousSignature: params.bootstrapPromptWarningSignature,
   });
+  // Emit user-visible channel warnings for files truncated beyond the threshold.
+  if (params.sessionKey) {
+    const truncationWarnPct = resolveBootstrapTruncationWarnPct(params.config);
+    for (const msg of buildBootstrapTruncationUserWarnings({
+      analysis: bootstrapAnalysis,
+      warnPct: truncationWarnPct,
+    })) {
+      enqueueSystemEvent(msg, { sessionKey: params.sessionKey });
+    }
+  }
   const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
     sessionKey: params.sessionKey,
     config: params.config,

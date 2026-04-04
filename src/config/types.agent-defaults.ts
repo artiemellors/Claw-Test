@@ -153,6 +153,12 @@ export type AgentDefaultsConfig = {
    * - always: inject on every run with truncation
    */
   bootstrapPromptTruncationWarning?: "off" | "once" | "always";
+  /**
+   * Minimum truncation percentage (0–100) for a file to trigger a user-visible
+   * channel warning. Set to 0 to warn on any truncation, or null/omit to use
+   * the default (10). Set to 101 to disable user-visible warnings entirely.
+   */
+  bootstrapTruncationWarnPct?: number;
   /** Optional IANA timezone for the user (used in system prompt; defaults to host timezone). */
   userTimezone?: string;
   /** Time format in system prompt: auto (OS preference), 12-hour, or 24-hour. */
