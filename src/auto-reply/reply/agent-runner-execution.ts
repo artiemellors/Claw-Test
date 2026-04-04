@@ -275,6 +275,7 @@ function buildExternalRunFailureText(message: string): string {
 
 export async function runAgentTurnWithFallback(params: {
   commandBody: string;
+  rawBody?: string;
   followupRun: FollowupRun;
   sessionCtx: TemplateContext;
   opts?: GetReplyOptions;
@@ -652,6 +653,7 @@ export async function runAgentTurnWithFallback(params: {
                 ...senderContext,
                 ...runBaseParams,
                 prompt: params.commandBody,
+                rawBody: params.rawBody ?? params.followupRun.rawBody,
                 extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
                 toolResultFormat: (() => {
                   const channel = resolveMessageChannel(
