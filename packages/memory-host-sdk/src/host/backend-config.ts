@@ -6,12 +6,16 @@ import type { OpenClawConfig } from "../../../../src/config/config.js";
 import type { SessionSendPolicyConfig } from "../../../../src/config/types.base.js";
 import type {
   MemoryBackend,
+  MemoryChainConfig,
   MemoryCitationsMode,
   MemoryQmdConfig,
   MemoryQmdIndexPath,
   MemoryQmdMcporterConfig,
   MemoryQmdSearchMode,
 } from "../../../../src/config/types.memory.js";
+
+// Re-export MemoryChainConfig for external use
+export type { MemoryChainConfig } from "../../../../src/config/types.memory.js";
 import { normalizeAgentId } from "../../../../src/routing/session-key.js";
 import { resolveUserPath } from "../../../../src/utils.js";
 import { splitShellArgs } from "../../../../src/utils/shell-argv.js";
@@ -20,6 +24,40 @@ export type ResolvedMemoryBackendConfig = {
   backend: MemoryBackend;
   citations: MemoryCitationsMode;
   qmd?: ResolvedQmdConfig;
+  chain?: ResolvedChainConfig;
+};
+
+// Chain Memory Backend 配置
+export type ResolvedChainConfig = {
+  providers: ResolvedChainProvider[];
+  global?: {
+    defaultTimeout: number;
+    enableFallback: boolean;
+    healthCheckInterval: number;
+  };
+};
+
+export type ResolvedChainProvider = {
+  name: string;
+  priority: "primary" | "secondary" | "fallback";
+  backend?: string;
+  plugin?: string;
+  enabled: boolean;
+  timeout: {
+    add: number;
+    search: number;
+    update: number;
+    delete: number;
+  };
+  retry: {
+    maxAttempts: number;
+    backoffMs: number;
+  };
+  circuitBreaker: {
+    failureThreshold: number;
+    resetTimeoutMs: number;
+  };
+  [key: string]: unknown;
 };
 
 export type ResolvedQmdCollection = {
@@ -346,7 +384,19 @@ export function resolveMemoryBackendConfig(params: {
   const normalizedAgentId = normalizeAgentId(params.agentId);
   const backend = params.cfg.memory?.backend ?? DEFAULT_BACKEND;
   const citations = params.cfg.memory?.citations ?? DEFAULT_CITATIONS;
-  if (backend !== "qmd") {
+  if (backend === "chain") {
+    const chainConfig = params.cfg.memory?.chain;
+    if (!chainConfig) {
+      throw new Error("chain backend requires memory.chain config");
+    }
+    return {
+      backend: "chain",
+      citations,
+      chain: resolveChainConfig(chainConfig),
+    };
+  }
+
+  if (backend === "builtin") {
     return { backend: "builtin", citations };
   }
 
@@ -425,5 +475,47 @@ export function resolveMemoryBackendConfig(params: {
     backend: "qmd",
     citations,
     qmd: resolved,
+  };
+}
+
+/**
+ * Resolve Chain Memory Backend configuration
+ */
+function resolveChainConfig(chainConfig: MemoryChainConfig): ResolvedChainConfig {
+  // Resolve global config first (P2 fix: use global defaultTimeout for providers)
+  const globalConfig = {
+    defaultTimeout: chainConfig.global?.defaultTimeout ?? 5000,
+    enableFallback: chainConfig.global?.enableFallback ?? true,
+    healthCheckInterval: chainConfig.global?.healthCheckInterval ?? 30000,
+  };
+
+  // Ensure providers array exists (defensive programming)
+  const providers: MemoryChainConfig["providers"] = chainConfig.providers ?? [];
+
+  const resolvedProviders: ResolvedChainProvider[] = providers.map((provider) => ({
+    name: provider.name,
+    priority: provider.priority,
+    backend: provider.backend,
+    plugin: provider.plugin,
+    enabled: provider.enabled ?? true,
+    timeout: {
+      add: provider.timeout?.add ?? globalConfig.defaultTimeout,
+      search: provider.timeout?.search ?? globalConfig.defaultTimeout,
+      update: provider.timeout?.update ?? globalConfig.defaultTimeout,
+      delete: provider.timeout?.delete ?? globalConfig.defaultTimeout,
+    },
+    retry: {
+      maxAttempts: provider.retry?.maxAttempts ?? 3,
+      backoffMs: provider.retry?.backoffMs ?? 1000,
+    },
+    circuitBreaker: {
+      failureThreshold: provider.circuitBreaker?.failureThreshold ?? 5,
+      resetTimeoutMs: provider.circuitBreaker?.resetTimeoutMs ?? 60000,
+    },
+  }));
+
+  return {
+    providers: resolvedProviders,
+    global: globalConfig,
   };
 }
