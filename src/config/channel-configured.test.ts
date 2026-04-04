@@ -6,6 +6,32 @@ describe("isChannelConfigured", () => {
     expect(isChannelConfigured({}, "telegram", { TELEGRAM_BOT_TOKEN: "token" })).toBe(true);
   });
 
+  it("detects Telegram config-file botToken through the channel plugin seam", () => {
+    expect(
+      isChannelConfigured({ channels: { telegram: { botToken: "123:ABC" } } }, "telegram", {}),
+    ).toBe(true);
+  });
+
+  it("detects Telegram config-file tokenFile through the channel plugin seam", () => {
+    expect(
+      isChannelConfigured(
+        { channels: { telegram: { tokenFile: "/etc/telegram.token" } } },
+        "telegram",
+        {},
+      ),
+    ).toBe(true);
+  });
+
+  it("detects Telegram config-file accounts through the channel plugin seam", () => {
+    expect(
+      isChannelConfigured(
+        { channels: { telegram: { accounts: { bot1: { botToken: "123:ABC" } } } } },
+        "telegram",
+        {},
+      ),
+    ).toBe(true);
+  });
+
   it("detects Discord env configuration through the channel plugin seam", () => {
     expect(isChannelConfigured({}, "discord", { DISCORD_BOT_TOKEN: "token" })).toBe(true);
   });
