@@ -3,6 +3,14 @@ export type MentionGateParams = {
   canDetectMention: boolean;
   wasMentioned: boolean;
   implicitMention?: boolean;
+  /**
+   * True when the bot has previously participated in this thread (via
+   * persistent or cached state).  Separated from implicitMention so that
+   * root-message mention gating and thread-continuation gating can be
+   * distinguished in logs and logic.  When set, it contributes to
+   * effectiveWasMentioned independently of implicitMention.
+   */
+  threadContinuation?: boolean;
   shouldBypassMention?: boolean;
 };
 
@@ -17,6 +25,7 @@ export type MentionGateWithBypassParams = {
   canDetectMention: boolean;
   wasMentioned: boolean;
   implicitMention?: boolean;
+  threadContinuation?: boolean;
   hasAnyMention?: boolean;
   allowTextCommands: boolean;
   hasControlCommand: boolean;
@@ -29,8 +38,9 @@ export type MentionGateWithBypassResult = MentionGateResult & {
 
 export function resolveMentionGating(params: MentionGateParams): MentionGateResult {
   const implicit = params.implicitMention === true;
+  const continuation = params.threadContinuation === true;
   const bypass = params.shouldBypassMention === true;
-  const effectiveWasMentioned = params.wasMentioned || implicit || bypass;
+  const effectiveWasMentioned = params.wasMentioned || implicit || continuation || bypass;
   const shouldSkip = params.requireMention && params.canDetectMention && !effectiveWasMentioned;
   return { effectiveWasMentioned, shouldSkip };
 }
@@ -52,6 +62,7 @@ export function resolveMentionGatingWithBypass(
       canDetectMention: params.canDetectMention,
       wasMentioned: params.wasMentioned,
       implicitMention: params.implicitMention,
+      threadContinuation: params.threadContinuation,
       shouldBypassMention,
     }),
     shouldBypassMention,
