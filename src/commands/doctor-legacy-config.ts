@@ -8,7 +8,6 @@ import { migrateLegacyWebFetchConfig } from "../config/legacy-web-fetch.js";
 import { migrateLegacyWebSearchConfig } from "../config/legacy-web-search.js";
 import { migrateLegacyXSearchConfig } from "../config/legacy-x-search.js";
 import { LEGACY_TALK_PROVIDER_ID, normalizeTalkSection } from "../config/talk.js";
-import { DEFAULT_GOOGLE_API_BASE_URL } from "../infra/google-api-base-url.js";
 import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 
 export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
@@ -18,6 +17,7 @@ export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
   const changes: string[] = [];
   const NANO_BANANA_SKILL_KEY = "nano-banana-pro";
   const NANO_BANANA_MODEL = "google/gemini-3-pro-image-preview";
+  const GOOGLE_PROVIDER_BASE_URL = "https://generativelanguage.googleapis.com";
   let next: OpenClawConfig = cfg;
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -332,10 +332,17 @@ export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
       isRecord(rawProviders.google) ? { ...rawProviders.google } : {}
     ) as ModelProviderEntry;
     const hasGoogleApiKey = rawGoogle.apiKey !== undefined;
+    let googleChanged = false;
     if (!hasGoogleApiKey && legacyApiKey) {
       rawGoogle.apiKey = legacyApiKey;
-      if (!rawGoogle.baseUrl) {
-        rawGoogle.baseUrl = DEFAULT_GOOGLE_API_BASE_URL;
+      googleChanged = true;
+      changes.push(
+        `Moved skills.entries.${NANO_BANANA_SKILL_KEY}.${legacyEnvApiKey ? "env.GEMINI_API_KEY" : "apiKey"} → models.providers.google.apiKey.`,
+      );
+    }
+    if (googleChanged) {
+      if (typeof rawGoogle.baseUrl !== "string" || rawGoogle.baseUrl.trim().length === 0) {
+        rawGoogle.baseUrl = GOOGLE_PROVIDER_BASE_URL;
       }
       if (!Array.isArray(rawGoogle.models)) {
         rawGoogle.models = [];
@@ -346,9 +353,6 @@ export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
         ...next,
         models: rawModels as OpenClawConfig["models"],
       };
-      changes.push(
-        `Moved skills.entries.${NANO_BANANA_SKILL_KEY}.${legacyEnvApiKey ? "env.GEMINI_API_KEY" : "apiKey"} → models.providers.google.apiKey.`,
-      );
     }
 
     const entries = { ...rawEntries };
