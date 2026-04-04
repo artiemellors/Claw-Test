@@ -22,6 +22,16 @@ import { buildGoogleGeminiCliBackend } from "./cli-backend.js";
 import { formatGoogleOauthApiKey } from "./oauth-token-shared.js";
 import { isModernGoogleModel, resolveGoogle31ForwardCompatModel } from "./provider-models.js";
 import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
+import {
+  buildGoogleVertexProvider,
+  mergeImplicitGoogleVertexProvider,
+} from "./vertex-provider-catalog.js";
+import {
+  hasGoogleVertexAvailableAuth,
+  resolveGoogleVertexBaseUrl,
+  resolveGoogleVertexConfigApiKey,
+  resolveGoogleVertexRegion,
+} from "./vertex-region.js";
 
 const GOOGLE_GEMINI_CLI_PROVIDER_ID = "google-gemini-cli";
 const GOOGLE_GEMINI_CLI_PROVIDER_LABEL = "Gemini CLI OAuth";
@@ -211,7 +221,7 @@ export default definePluginEntry({
       id: "google",
       label: "Google AI Studio",
       docsPath: "/providers/models",
-      hookAliases: ["google-antigravity", "google-vertex"],
+      hookAliases: ["google-antigravity"],
       envVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
       auth: [
         createProviderApiKeyAuthMethod({
@@ -254,5 +264,42 @@ export default definePluginEntry({
     api.registerImageGenerationProvider(createLazyGoogleImageGenerationProvider());
     api.registerMediaUnderstandingProvider(createLazyGoogleMediaUnderstandingProvider());
     api.registerWebSearchProvider(createGeminiWebSearchProvider());
+    api.registerProvider({
+      id: "google-vertex",
+      label: "Google Vertex AI",
+      docsPath: "/providers/models",
+      auth: [],
+      catalog: {
+        order: "simple",
+        run: async (ctx) => {
+          if (!hasGoogleVertexAvailableAuth(ctx.env)) {
+            return null;
+          }
+          const implicit = buildGoogleVertexProvider({ env: ctx.env });
+          return {
+            provider: mergeImplicitGoogleVertexProvider({
+              existing: ctx.config.models?.providers?.["google-vertex"],
+              implicit,
+            }),
+          };
+        },
+      },
+      resolveConfigApiKey: ({ env }) => resolveGoogleVertexConfigApiKey(env),
+      normalizeModelId: ({ modelId }) => normalizeGoogleModelId(modelId),
+      resolveDynamicModel: (ctx) =>
+        resolveGoogle31ForwardCompatModel({ providerId: "google-vertex", ctx }),
+      ...GOOGLE_GEMINI_PROVIDER_HOOKS_WITH_TOOL_COMPAT,
+      isModernModelRef: ({ modelId }) => isModernGoogleModel(modelId),
+      normalizeTransport: ({ baseUrl }) => {
+        if (baseUrl && /aiplatform\.googleapis\.com/.test(baseUrl)) {
+          return { api: "google-generative-ai" as const, baseUrl };
+        }
+        const region = resolveGoogleVertexRegion();
+        return {
+          api: "google-generative-ai" as const,
+          baseUrl: resolveGoogleVertexBaseUrl(region),
+        };
+      },
+    });
   },
 });
