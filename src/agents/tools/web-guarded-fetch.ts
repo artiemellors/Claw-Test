@@ -1,3 +1,4 @@
+import type { SsrFPolicy } from "../../infra/net/ssrf.js";
 import {
   fetchWithSsrFGuard,
   type GuardedFetchOptions,
@@ -5,7 +6,7 @@ import {
   withStrictGuardedFetchMode,
   withTrustedEnvProxyGuardedFetchMode,
 } from "../../infra/net/fetch-guard.js";
-import type { SsrFPolicy } from "../../infra/net/ssrf.js";
+import { hasProxyEnvConfigured } from "../../infra/net/proxy-env.js";
 
 const WEB_TOOLS_TRUSTED_NETWORK_SSRF_POLICY: SsrFPolicy = {
   dangerouslyAllowPrivateNetwork: true,
@@ -38,8 +39,18 @@ export async function fetchWithWebToolsNetworkGuard(
   params: WebToolGuardedFetchOptions,
 ): Promise<GuardedFetchResult> {
   const { timeoutSeconds, useEnvProxy, ...rest } = params;
+
+  // Auto-detect proxy environment: if the caller already set assumeProxyEnvironment
+  // on the policy, or if HTTP_PROXY/HTTPS_PROXY env vars are present, propagate
+  // the flag so SSRF IP range checks are skipped (hostname blocklist still enforced).
+  const assumeProxy = rest.policy?.assumeProxyEnvironment === true || hasProxyEnvConfigured();
+  const policy: SsrFPolicy | undefined = assumeProxy
+    ? { ...rest.policy, assumeProxyEnvironment: true }
+    : rest.policy;
+
   const resolved = {
     ...rest,
+    policy,
     timeoutMs: resolveTimeoutMs({ timeoutMs: rest.timeoutMs, timeoutSeconds }),
   };
   return fetchWithSsrFGuard(

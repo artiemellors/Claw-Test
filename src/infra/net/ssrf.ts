@@ -1,6 +1,6 @@
+import type { Dispatcher } from "undici";
 import { lookup as dnsLookupCb, type LookupAddress } from "node:dns";
 import { lookup as dnsLookup } from "node:dns/promises";
-import type { Dispatcher } from "undici";
 import {
   extractEmbeddedIpv4FromIpv6,
   isBlockedSpecialUseIpv4Address,
@@ -36,6 +36,13 @@ export type SsrFPolicy = {
   allowRfc2544BenchmarkRange?: boolean;
   allowedHostnames?: string[];
   hostnameAllowlist?: string[];
+  /**
+   * When true, skip IP range checks after DNS resolution while keeping
+   * hostname blocklist protection.  Useful for transparent proxies with
+   * fake-ip mode (Surge, Clash) where DNS returns synthetic addresses
+   * such as 198.18.x.x (RFC 2544).
+   */
+  assumeProxyEnvironment?: boolean;
 };
 
 const BLOCKED_HOSTNAMES = new Set([
@@ -181,11 +188,18 @@ export function isBlockedHostnameOrIp(hostname: string, policy?: SsrFPolicy): bo
 
 const BLOCKED_HOST_OR_IP_MESSAGE = "Blocked hostname or private/internal/special-use IP address";
 const BLOCKED_RESOLVED_IP_MESSAGE = "Blocked: resolves to private/internal/special-use IP address";
+const BLOCKED_RESOLVED_IP_PROXY_HINT =
+  "Hint: If you use a proxy with fake-ip mode (Surge, Clash, etc.), set network.assumeProxyEnvironment: true in your OpenClaw config.";
 
 function assertAllowedHostOrIpOrThrow(hostnameOrIp: string, policy?: SsrFPolicy): void {
   if (isBlockedHostnameOrIp(hostnameOrIp, policy)) {
     throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
   }
+}
+
+function isRfc2544Address(address: string): boolean {
+  const trimmed = address.trim();
+  return trimmed.startsWith("198.18.") || trimmed.startsWith("198.19.");
 }
 
 function assertAllowedResolvedAddressesOrThrow(
@@ -195,7 +209,8 @@ function assertAllowedResolvedAddressesOrThrow(
   for (const entry of results) {
     // Reuse the exact same host/IP classifier as the pre-DNS check to avoid drift.
     if (isBlockedHostnameOrIp(entry.address, policy)) {
-      throw new SsrFBlockedError(BLOCKED_RESOLVED_IP_MESSAGE);
+      const hint = isRfc2544Address(entry.address) ? ` ${BLOCKED_RESOLVED_IP_PROXY_HINT}` : "";
+      throw new SsrFBlockedError(`${BLOCKED_RESOLVED_IP_MESSAGE}${hint}`);
     }
   }
 }
@@ -320,12 +335,18 @@ export async function resolvePinnedHostnameWithPolicy(
 
   const hostnameAllowlist = normalizeHostnameAllowlist(params.policy?.hostnameAllowlist);
   const skipPrivateNetworkChecks = shouldSkipPrivateNetworkChecks(normalized, params.policy);
+  const skipIpRangeChecks = params.policy?.assumeProxyEnvironment === true;
 
   if (!matchesHostnameAllowlist(normalized, hostnameAllowlist)) {
     throw new SsrFBlockedError(`Blocked hostname (not in allowlist): ${hostname}`);
   }
 
-  if (!skipPrivateNetworkChecks) {
+  // Hostname blocklist is ALWAYS enforced, even in proxy environments.
+  if (isBlockedHostnameNormalized(normalized)) {
+    throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
+  }
+
+  if (!skipPrivateNetworkChecks && !skipIpRangeChecks) {
     // Phase 1: fail fast for literal hosts/IPs before any DNS lookup side-effects.
     assertAllowedHostOrIpOrThrow(normalized, params.policy);
   }
@@ -336,7 +357,7 @@ export async function resolvePinnedHostnameWithPolicy(
     throw new Error(`Unable to resolve hostname: ${hostname}`);
   }
 
-  if (!skipPrivateNetworkChecks) {
+  if (!skipPrivateNetworkChecks && !skipIpRangeChecks) {
     // Phase 2: re-check DNS answers so public hostnames cannot pivot to private targets.
     assertAllowedResolvedAddressesOrThrow(results, params.policy);
   }

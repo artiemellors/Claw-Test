@@ -122,6 +122,17 @@ export type OpenClawConfig = {
   gateway?: GatewayConfig;
   memory?: MemoryConfig;
   mcp?: McpConfig;
+  network?: {
+    /**
+     * Assume a transparent proxy with fake-ip mode (Surge, Clash, etc.) is
+     * active.  When true, SSRF IP range checks are skipped for web_fetch
+     * while hostname blocklist protection remains enforced.
+     *
+     * Also auto-detected when HTTP_PROXY/HTTPS_PROXY env vars are set.
+     * Default: false.
+     */
+    assumeProxyEnvironment?: boolean;
+  };
 };
 
 declare const openClawConfigStateBrand: unique symbol;
