@@ -20,12 +20,24 @@ type DiscordInboundWorkerParams = {
 export type DiscordInboundWorker = {
   enqueue: (job: DiscordInboundJob) => void;
   deactivate: () => void;
+  waitForIdle: () => Promise<void>;
 };
 
 export type DiscordInboundWorkerTestingHooks = {
   processDiscordMessage?: typeof processDiscordMessage;
   deliverDiscordReply?: typeof deliverDiscordReply;
 };
+
+function createPendingRunSignal(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve = () => {};
+  const promise = new Promise<void>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
 
 function formatDiscordRunContextSuffix(job: DiscordInboundJob): string {
   const channelId = job.payload.messageChannelId?.trim();
@@ -46,6 +58,7 @@ async function processDiscordInboundJob(params: {
   lifecycleSignal?: AbortSignal;
   runTimeoutMs?: number;
   testing?: DiscordInboundWorkerTestingHooks;
+  onRunSettledAfterTimeout?: (settledRun: Promise<void>) => void;
 }) {
   const timeoutMs = normalizeDiscordInboundWorkerTimeoutMs(params.runTimeoutMs);
   const contextSuffix = formatDiscordRunContextSuffix(params.job);
@@ -96,6 +109,7 @@ async function processDiscordInboundJob(params: {
         danger(`discord inbound worker failed after timeout: ${String(error)}${contextSuffix}`),
       );
     },
+    onRunSettledAfterTimeout: params.onRunSettledAfterTimeout,
   });
 }
 
@@ -158,38 +172,73 @@ export function createDiscordInboundWorker(
   params: DiscordInboundWorkerParams,
 ): DiscordInboundWorker {
   const runQueue = new KeyedAsyncQueue();
+  const pendingRuns = new Set<Promise<void>>();
+  let pendingTimedOutRunCount = 0;
+  let pendingTimedOutRunSignal = createPendingRunSignal();
   const runState = createRunStateMachine({
     setStatus: params.setStatus,
     abortSignal: params.abortSignal,
   });
 
+  const notifyPendingTimedOutRunChange = () => {
+    pendingTimedOutRunSignal.resolve();
+    pendingTimedOutRunSignal = createPendingRunSignal();
+  };
+
   return {
     enqueue(job) {
-      void runQueue
-        .enqueue(job.queueKey, async () => {
+      const runPromise = runQueue.enqueue(job.queueKey, async () => {
+        if (!runState.isActive()) {
+          return;
+        }
+        runState.onRunStart();
+        try {
           if (!runState.isActive()) {
             return;
           }
-          runState.onRunStart();
-          try {
-            if (!runState.isActive()) {
-              return;
-            }
-            await processDiscordInboundJob({
-              job,
-              runtime: params.runtime,
-              lifecycleSignal: params.abortSignal,
-              runTimeoutMs: params.runTimeoutMs,
-              testing: params.__testing,
-            });
-          } finally {
-            runState.onRunEnd();
-          }
-        })
-        .catch((error) => {
-          params.runtime.error?.(danger(`discord inbound worker failed: ${String(error)}`));
-        });
+          await processDiscordInboundJob({
+            job,
+            runtime: params.runtime,
+            lifecycleSignal: params.abortSignal,
+            runTimeoutMs: params.runTimeoutMs,
+            testing: params.__testing,
+            onRunSettledAfterTimeout: (settledRun) => {
+              pendingTimedOutRunCount += 1;
+              void settledRun.finally(() => {
+                pendingTimedOutRunCount = Math.max(0, pendingTimedOutRunCount - 1);
+                notifyPendingTimedOutRunChange();
+              });
+            },
+          });
+        } finally {
+          runState.onRunEnd();
+        }
+      });
+      const trackedRun = runPromise.then(
+        () => undefined,
+        () => undefined,
+      );
+      pendingRuns.add(trackedRun);
+      void trackedRun.finally(() => {
+        pendingRuns.delete(trackedRun);
+      });
+      void runPromise.catch((error) => {
+        params.runtime.error?.(danger(`discord inbound worker failed: ${String(error)}`));
+      });
     },
     deactivate: runState.deactivate,
+    waitForIdle: async () => {
+      while (pendingRuns.size > 0 || pendingTimedOutRunCount > 0) {
+        if (pendingRuns.size > 0) {
+          await Promise.allSettled([...pendingRuns]);
+          continue;
+        }
+        const waitForTimedOutRunSignal = pendingTimedOutRunSignal.promise;
+        if (pendingTimedOutRunCount === 0) {
+          continue;
+        }
+        await waitForTimedOutRunSignal;
+      }
+    },
   };
 }

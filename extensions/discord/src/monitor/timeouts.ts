@@ -74,6 +74,7 @@ export async function runDiscordTaskWithTimeout(params: {
   onTimeout: (timeoutMs: number) => void | Promise<void>;
   onAbortAfterTimeout?: () => void;
   onErrorAfterTimeout?: (error: unknown) => void;
+  onRunSettledAfterTimeout?: (settledRun: Promise<void>) => void;
 }): Promise<boolean> {
   const timeoutAbortController = params.timeoutMs ? new AbortController() : undefined;
   const mergedAbortSignal = mergeAbortSignals([
@@ -93,6 +94,10 @@ export async function runDiscordTaskWithTimeout(params: {
     }
     params.onErrorAfterTimeout?.(error);
   });
+  const settledRun = runPromise.then(
+    () => undefined,
+    () => undefined,
+  );
 
   try {
     if (!params.timeoutMs) {
@@ -110,6 +115,7 @@ export async function runDiscordTaskWithTimeout(params: {
     if (result === "timeout") {
       timedOut = true;
       timeoutAbortController?.abort();
+      params.onRunSettledAfterTimeout?.(settledRun);
       await params.onTimeout(params.timeoutMs);
       return true;
     }

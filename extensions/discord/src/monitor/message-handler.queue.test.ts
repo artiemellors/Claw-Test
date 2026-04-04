@@ -321,6 +321,104 @@ describe("createDiscordMessageHandler queue behavior", () => {
     }
   });
 
+  it("keeps waitForIdle pending until timed-out runs actually settle", async () => {
+    vi.useFakeTimers();
+    try {
+      preflightDiscordMessageMock.mockReset();
+      processDiscordMessageMock.mockReset();
+      deliverDiscordReplyMock.mockClear();
+
+      const lingeringRun = createDeferred();
+      processDiscordMessageMock
+        .mockImplementationOnce(async () => {
+          await lingeringRun.promise;
+        })
+        .mockImplementationOnce(async () => undefined);
+      installDefaultDiscordPreflight();
+
+      const handler = createDiscordMessageHandler(
+        createDiscordHandlerParams({ workerRunTimeoutMs: 50 }),
+      );
+
+      await expect(
+        handler(createMessageData("m-1") as never, {} as never),
+      ).resolves.toBeUndefined();
+      await expect(
+        handler(createMessageData("m-2") as never, {} as never),
+      ).resolves.toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.waitFor(() => {
+        expect(processDiscordMessageMock).toHaveBeenCalledTimes(2);
+      });
+      await vi.waitFor(() => {
+        expect(deliverDiscordReplyMock).toHaveBeenCalledTimes(1);
+      });
+
+      handler.deactivate();
+      const idlePromise = handler.waitForIdle();
+      const onIdle = vi.fn();
+      void idlePromise.then(onIdle);
+
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      expect(onIdle).not.toHaveBeenCalled();
+
+      lingeringRun.resolve();
+      await lingeringRun.promise;
+      await expect(idlePromise).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for runs enqueued after idle draining begins", async () => {
+    preflightDiscordMessageMock.mockReset();
+    processDiscordMessageMock.mockReset();
+
+    const firstRun = createDeferred();
+    const secondRun = createDeferred();
+    let secondStarted = false;
+    processDiscordMessageMock
+      .mockImplementationOnce(async () => {
+        await firstRun.promise;
+      })
+      .mockImplementationOnce(async () => {
+        secondStarted = true;
+        await secondRun.promise;
+      });
+
+    const handler = createHandlerWithDefaultPreflight();
+
+    await expect(handler(createMessageData("m-1") as never, {} as never)).resolves.toBeUndefined();
+    await vi.waitFor(() => {
+      expect(processDiscordMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    const idlePromise = handler.waitForIdle();
+
+    await expect(handler(createMessageData("m-2") as never, {} as never)).resolves.toBeUndefined();
+
+    firstRun.resolve();
+    await firstRun.promise;
+
+    await vi.waitFor(() => {
+      expect(secondStarted).toBe(true);
+    });
+
+    let idleResolved = false;
+    void idlePromise.then(() => {
+      idleResolved = true;
+    });
+    await Promise.resolve();
+    expect(idleResolved).toBe(false);
+
+    secondRun.resolve();
+    await secondRun.promise;
+    await idlePromise;
+    expect(idleResolved).toBe(true);
+  });
+
   it("does not send the timeout fallback when a final reply already went out", async () => {
     vi.useFakeTimers();
     try {
