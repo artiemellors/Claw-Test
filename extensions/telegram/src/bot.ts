@@ -28,6 +28,8 @@ import { registerTelegramNativeCommands } from "./bot-native-commands.js";
 import {
   buildTelegramUpdateKey,
   createTelegramUpdateDedupe,
+  noteTelegramReplayUpdateCompleted,
+  observeTelegramReplayCandidate,
   resolveTelegramUpdateId,
   type TelegramUpdateKeyContext,
 } from "./bot-updates.js";
@@ -278,6 +280,9 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
   });
 
   const recentUpdates = createTelegramUpdateDedupe();
+  const replayGuardKey = account.accountId;
+  const onUpdateId = opts.updateOffset?.onUpdateId;
+  const replayGuardEnabled = typeof onUpdateId === "function";
   const initialUpdateId =
     typeof opts.updateOffset?.lastUpdateId === "number" ? opts.updateOffset.lastUpdateId : null;
 
@@ -289,7 +294,7 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
   let highestCompletedUpdateId: number | null = initialUpdateId;
   let highestPersistedUpdateId: number | null = initialUpdateId;
   const maybePersistSafeWatermark = () => {
-    if (typeof opts.updateOffset?.onUpdateId !== "function") {
+    if (!replayGuardEnabled) {
       return;
     }
     if (highestCompletedUpdateId === null) {
@@ -311,7 +316,7 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
       return;
     }
     highestPersistedUpdateId = safe;
-    void opts.updateOffset.onUpdateId(safe);
+    void onUpdateId(safe);
   };
 
   const shouldSkipUpdate = (ctx: TelegramUpdateKeyContext) => {
@@ -330,16 +335,43 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
 
   bot.use(async (ctx, next) => {
     const updateId = resolveTelegramUpdateId(ctx);
-    if (typeof updateId === "number") {
+    if (replayGuardEnabled && typeof updateId === "number") {
+      const replayDecision = observeTelegramReplayCandidate({
+        accountKey: replayGuardKey,
+        updateId,
+      });
+      if (replayDecision.skip) {
+        // This intentionally sacrifices one repeatedly failing polling update so offset-based
+        // getUpdates sessions can recover. Webhook mode does not use the replay guard.
+        const hasPendingReplay = pendingUpdateIds.has(updateId);
+        runtime.error?.(
+          hasPendingReplay
+            ? `[telegram][diag] skipping repeatedly replayed update_id=${updateId} after ${replayDecision.count} consecutive deliveries; not advancing offset because an earlier delivery is still pending`
+            : `[telegram][diag] skipping repeatedly replayed update_id=${updateId} after ${replayDecision.count} consecutive deliveries; advancing offset to break loop`,
+        );
+        if (highestCompletedUpdateId === null || updateId > highestCompletedUpdateId) {
+          highestCompletedUpdateId = updateId;
+        }
+        maybePersistSafeWatermark();
+        return;
+      }
       pendingUpdateIds.add(updateId);
     }
+    let completedSuccessfully = false;
     try {
       await next();
+      completedSuccessfully = true;
     } finally {
-      if (typeof updateId === "number") {
+      if (replayGuardEnabled && typeof updateId === "number") {
         pendingUpdateIds.delete(updateId);
         if (highestCompletedUpdateId === null || updateId > highestCompletedUpdateId) {
           highestCompletedUpdateId = updateId;
+        }
+        if (completedSuccessfully) {
+          noteTelegramReplayUpdateCompleted({
+            accountKey: replayGuardKey,
+            updateId,
+          });
         }
         maybePersistSafeWatermark();
       }
