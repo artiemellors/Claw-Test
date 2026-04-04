@@ -232,7 +232,44 @@ export function normalizeToolParams(params: unknown): Record<string, unknown> | 
   }
   const record = params as Record<string, unknown>;
   const normalized = { ...record };
+
+  // Normalize aliases first so top-level old_string/new_string are resolved
+  // to canonical oldText/newText before the edits[] hoist runs. This ensures
+  // top-level aliases take precedence over nested edits[0] values.
   normalizeClaudeParamAliases(normalized);
+
+  // Some models/schemas wrap edit params inside an edits[] array.
+  // Hoist oldText/newText from edits[0] to the top level so downstream
+  // validation and normalization find them.
+  if (
+    Array.isArray(normalized.edits) &&
+    normalized.edits.length > 0 &&
+    typeof normalized.edits[0] === "object" &&
+    normalized.edits[0] !== null
+  ) {
+    const first = normalized.edits[0] as Record<string, unknown>;
+    for (const key of [
+      "oldText",
+      "old_string",
+      "old_text",
+      "oldString",
+      "newText",
+      "new_string",
+      "new_text",
+      "newString",
+    ]) {
+      if (key in first && !(key in normalized)) {
+        normalized[key] = first[key];
+      }
+    }
+    // Remove the edits array after hoisting so normalizeEditReplacements
+    // does not produce a duplicate entry from both edits[0] and the
+    // newly-hoisted top-level keys.
+    delete normalized.edits;
+    // Re-run alias normalization so hoisted alias keys (e.g. old_string
+    // from edits[0]) are converted to canonical keys (oldText/newText).
+    normalizeClaudeParamAliases(normalized);
+  }
   // Some providers/models emit text payloads as structured blocks instead of raw strings.
   // Normalize these for write/edit so content matching and writes stay deterministic.
   normalizeTextLikeParam(normalized, "content");
