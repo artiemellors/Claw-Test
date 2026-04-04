@@ -9,6 +9,7 @@ import {
   type ResolvedBrowserConfig,
 } from "../../../extensions/browser/runtime-api.js";
 import { deriveDefaultBrowserCdpPortRange } from "../../config/port-defaults.js";
+import type { SsrFPolicy } from "../../infra/net/ssrf.js";
 import { defaultRuntime } from "../../runtime.js";
 import { BROWSER_BRIDGES } from "./browser-bridges.js";
 import { computeSandboxBrowserConfigHash } from "./config-hash.js";
@@ -68,6 +69,7 @@ function buildSandboxBrowserResolvedConfig(params: {
   cdpPort: number;
   headless: boolean;
   evaluateEnabled: boolean;
+  ssrfPolicy?: SsrFPolicy;
 }): ResolvedBrowserConfig {
   const cdpHost = "127.0.0.1";
   const cdpPortRange = deriveDefaultBrowserCdpPortRange(params.controlPort);
@@ -95,6 +97,7 @@ function buildSandboxBrowserResolvedConfig(params: {
         color: DEFAULT_OPENCLAW_BROWSER_COLOR,
       },
     },
+    ssrfPolicy: params.ssrfPolicy,
   };
 }
 
@@ -135,6 +138,7 @@ export async function ensureSandboxBrowser(params: {
   cfg: SandboxConfig;
   evaluateEnabled?: boolean;
   bridgeAuth?: { token?: string; password?: string };
+  ssrfPolicy?: SsrFPolicy;
 }): Promise<SandboxBrowserContext | null> {
   if (!params.cfg.browser.enabled) {
     return null;
@@ -356,6 +360,7 @@ export async function ensureSandboxBrowser(params: {
         cdpPort: mappedCdp,
         headless: params.cfg.browser.headless,
         evaluateEnabled: params.evaluateEnabled ?? DEFAULT_BROWSER_EVALUATE_ENABLED,
+        ssrfPolicy: params.ssrfPolicy,
       }),
       authToken: desiredAuthToken,
       authPassword: desiredAuthPassword,

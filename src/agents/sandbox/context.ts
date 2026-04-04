@@ -192,6 +192,7 @@ export async function resolveSandboxContext(params: {
           cfg: resolvedCfg,
           evaluateEnabled,
           bridgeAuth,
+          ssrfPolicy: params.config?.browser?.ssrfPolicy,
         })
       : null;
 
