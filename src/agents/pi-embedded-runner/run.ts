@@ -536,6 +536,30 @@ export async function runEmbeddedPiAgent(
         let authRetryPending = false;
         // Hoisted so the retry-limit error path can use the most recent API total.
         let lastTurnTotal: number | undefined;
+
+        // Inject degraded-mode notice when running in a fallback context mode
+        const fallbackContextMode = params.fallbackContextMode;
+        const resolvedExtraSystemPrompt = (() => {
+          if (!fallbackContextMode || fallbackContextMode === "full") return params.extraSystemPrompt;
+          const reasonCode = params.fallbackReasonCode ?? "unknown";
+          const reasonLabels: Record<string, string> = {
+            rate_limit: "Cloud rate-limited (429)",
+            rate_limited: "Cloud rate-limited (429)",
+            overloaded: "Cloud overloaded",
+            timeout: "Cloud timeout",
+            auth: "Cloud auth failed",
+            auth_permanent: "Cloud auth failed",
+            billing: "Cloud billing issue",
+            unknown: "Cloud unavailable",
+          };
+          const reasonLabel = reasonLabels[reasonCode] ?? reasonLabels.unknown;
+          const notice = fallbackContextMode === "safe"
+            ? `⚠️ ${reasonLabel}, safe mode active. I can run scripts and check status.`
+            : `⚠️ Running on local model (${reasonLabel}), some context trimmed.`;
+          const base = params.extraSystemPrompt ?? "";
+          return base ? `${notice}\n\n${base}` : notice;
+        })();
+
         while (true) {
           if (runLoopIterations >= MAX_RUN_LOOP_ITERATIONS) {
             const message =
@@ -669,7 +693,7 @@ export async function runEmbeddedPiAgent(
             onReasoningEnd: params.onReasoningEnd,
             onToolResult: params.onToolResult,
             onAgentEvent: params.onAgentEvent,
-            extraSystemPrompt: params.extraSystemPrompt,
+            extraSystemPrompt: resolvedExtraSystemPrompt,
             inputProvenance: params.inputProvenance,
             streamParams: params.streamParams,
             ownerNumbers: params.ownerNumbers,

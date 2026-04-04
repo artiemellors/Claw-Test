@@ -40,6 +40,9 @@ import {
 } from "./model-selection.js";
 import type { FailoverReason } from "./pi-embedded-helpers.js";
 import { isLikelyContextOverflowError } from "./pi-embedded-helpers.js";
+import { type ContextMode, resolveModelContextMode } from "./context-window-guard.js";
+import { resolveContextWindowInfo } from "./context-window-guard.js";
+import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
 
 const log = createSubsystemLogger("model-fallback");
 
@@ -71,6 +74,12 @@ export function isFallbackSummaryError(err: unknown): err is FallbackSummaryErro
 
 export type ModelFallbackRunOptions = {
   allowTransientCooldownProbe?: boolean;
+  /** Resolved context mode for the fallback candidate. */
+  contextMode?: ContextMode;
+  /** Context window size (tokens) of the fallback candidate model. */
+  contextWindowTokens?: number;
+  /** Human-readable reason code for the fallback (e.g. "rate_limited"). */
+  fallbackReasonCode?: string;
 };
 
 type ModelFallbackRunFn<T> = (
@@ -771,6 +780,27 @@ export async function runWithModelFallback<T>(params: {
           profileCount: profileIds.length,
         });
       }
+    }
+
+    // Resolve context mode for fallback candidates
+    const candidateContextMode = resolveModelContextMode({
+      cfg: params.cfg,
+      provider: candidate.provider,
+      modelId: candidate.model,
+    });
+    if (candidateContextMode !== "full") {
+      if (!runOptions) runOptions = {};
+      runOptions.contextMode = candidateContextMode;
+      const ctxInfo = resolveContextWindowInfo({
+        cfg: params.cfg,
+        provider: candidate.provider,
+        modelId: candidate.model,
+        defaultTokens: DEFAULT_CONTEXT_TOKENS,
+      });
+      runOptions.contextWindowTokens = ctxInfo.tokens;
+      // Derive reason code from last failed attempt
+      const lastAttempt = attempts[attempts.length - 1];
+      runOptions.fallbackReasonCode = lastAttempt?.reason ?? "unknown";
     }
 
     const attemptRun = await runFallbackAttempt({

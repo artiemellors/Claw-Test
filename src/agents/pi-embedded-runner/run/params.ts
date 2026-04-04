@@ -141,6 +141,16 @@ export type RunEmbeddedPiAgentParams = {
    */
   allowTransientCooldownProbe?: boolean;
   /**
+   * Fallback context mode resolved from model config.
+   * When set to "light" or "safe", the runner should inject a degraded-mode
+   * notice and apply context window restrictions.
+   */
+  fallbackContextMode?: "full" | "light" | "safe";
+  /** Context window tokens of the fallback model (used for light/safe budget). */
+  fallbackContextWindowTokens?: number;
+  /** Human-readable reason code for the fallback (e.g. "rate_limited"). */
+  fallbackReasonCode?: string;
+  /**
    * Dispose bundled MCP runtimes when the overall run ends instead of preserving
    * the session-scoped cache. Intended for one-shot local CLI runs that must
    * exit promptly after emitting the final JSON result.
