@@ -112,7 +112,7 @@ export type ChannelSetupInput = {
 export type ChannelStatusIssue = {
   channel: ChannelId;
   accountId: string;
-  kind: "intent" | "permissions" | "config" | "auth" | "runtime";
+  kind: "intent" | "permissions" | "config" | "auth" | "runtime" | "degraded";
   message: string;
   fix?: string;
 };
@@ -172,6 +172,8 @@ export type ChannelAccountSnapshot = {
   running?: boolean;
   connected?: boolean;
   restartPending?: boolean;
+  degraded?: boolean;
+  degradedReason?: string;
   reconnectAttempts?: number;
   lastConnectedAt?: number | null;
   lastDisconnect?:
