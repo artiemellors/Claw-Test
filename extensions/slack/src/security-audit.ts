@@ -1,8 +1,8 @@
+import { readChannelAllowFromStore } from "openclaw/plugin-sdk/channel-pairing";
 import {
   resolveNativeCommandsEnabled,
   resolveNativeSkillsEnabled,
 } from "openclaw/plugin-sdk/config-runtime";
-import { readChannelAllowFromStore } from "openclaw/plugin-sdk/conversation-runtime";
 import type { ResolvedSlackAccount } from "./accounts.js";
 import type { OpenClawConfig } from "./runtime-api.js";
 
