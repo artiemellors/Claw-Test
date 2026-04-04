@@ -89,6 +89,7 @@ const {
   setXaiApiKey,
   setMistralApiKey,
   setKilocodeApiKey,
+  setZenmuxApiKey,
 } = createProviderApiKeySetters({
   setAnthropicApiKey: { provider: "anthropic" },
   setOpenaiApiKey: { provider: "openai" },
@@ -114,6 +115,7 @@ const {
   setXaiApiKey: { provider: "xai" },
   setMistralApiKey: { provider: "mistral" },
   setKilocodeApiKey: { provider: "kilocode" },
+  setZenmuxApiKey: { provider: "zenmux" },
 });
 
 export {
@@ -138,7 +140,10 @@ export {
   setXaiApiKey,
   setMistralApiKey,
   setKilocodeApiKey,
+  setZenmuxApiKey,
 };
+
+export const ZENMUX_DEFAULT_MODEL_REF = "zenmux/openai/gpt-5.2";
 
 export async function setMinimaxApiKey(
   key: SecretInput,
