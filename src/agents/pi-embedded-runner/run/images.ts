@@ -345,6 +345,7 @@ export async function loadImageFromRef(
     maxBytes?: number;
     workspaceOnly?: boolean;
     sandbox?: { root: string; bridge: SandboxFsBridge };
+    allowedExternalDirs?: string[];
   },
 ): Promise<ImageContent | null> {
   // Handle Gateway claim-check URIs (media://inbound/<id>).
@@ -410,12 +411,20 @@ export async function loadImageFromRef(
       targetPath = path.resolve(workspaceDir, targetPath);
     }
     if (options?.workspaceOnly && !options?.sandbox) {
-      const root = options?.sandbox?.root ?? workspaceDir;
-      await assertSandboxPath({
-        filePath: targetPath,
-        cwd: root,
-        root,
+      const resolvedTarget = path.resolve(targetPath);
+      const allowedDirs = options?.allowedExternalDirs ?? [];
+      const isAllowedExternal = allowedDirs.some((dir) => {
+        const resolvedDir = path.resolve(dir) + path.sep;
+        return resolvedTarget.startsWith(resolvedDir);
       });
+      if (!isAllowedExternal) {
+        const root = workspaceDir;
+        await assertSandboxPath({
+          filePath: targetPath,
+          cwd: root,
+          root,
+        });
+      }
     }
 
     // loadWebMedia handles local file paths (including file:// URLs)
@@ -477,6 +486,7 @@ export async function detectAndLoadPromptImages(params: {
   maxDimensionPx?: number;
   workspaceOnly?: boolean;
   sandbox?: { root: string; bridge: SandboxFsBridge };
+  allowedExternalDirs?: string[];
 }): Promise<{
   /** Images for the current prompt (existingImages + detected in current prompt) */
   images: ImageContent[];
@@ -523,6 +533,7 @@ export async function detectAndLoadPromptImages(params: {
       maxBytes: params.maxBytes,
       workspaceOnly: params.workspaceOnly,
       sandbox: params.sandbox,
+      allowedExternalDirs: params.allowedExternalDirs,
     });
     if (image) {
       promptRefImages.push(image);
