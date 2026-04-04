@@ -1,11 +1,13 @@
 import { defineChannelPluginEntry } from "openclaw/plugin-sdk/core";
 import { registerFeishuBitableTools } from "./src/bitable.js";
+import { registerFeishuBoardTools } from "./src/board.js";
 import { feishuPlugin } from "./src/channel.js";
 import { registerFeishuChatTools } from "./src/chat.js";
 import { registerFeishuDocTools } from "./src/docx.js";
 import { registerFeishuDriveTools } from "./src/drive.js";
 import { registerFeishuPermTools } from "./src/perm.js";
 import { setFeishuRuntime } from "./src/runtime.js";
+import { registerFeishuSheetsTools } from "./src/sheets.js";
 import { registerFeishuWikiTools } from "./src/wiki.js";
 
 export { feishuPlugin } from "./src/channel.js";
@@ -92,5 +94,7 @@ export default defineChannelPluginEntry({
     registerFeishuDriveTools(api);
     registerFeishuPermTools(api);
     registerFeishuBitableTools(api);
+    registerFeishuSheetsTools(api);
+    registerFeishuBoardTools(api);
   },
 });
