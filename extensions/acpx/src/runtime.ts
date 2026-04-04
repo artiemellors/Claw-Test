@@ -960,9 +960,15 @@ export class AcpxRuntime implements AcpRuntime {
     }
 
     this.healthy = true;
+    const computerUseNote =
+      this.config.computerUse && process.platform !== "darwin"
+        ? " [warning: computerUse is enabled but requires macOS — current platform: " +
+          process.platform +
+          "]"
+        : "";
     return {
       ok: true,
-      message: `acpx command available (${this.config.command}, version ${result.versionCheck.version}${this.config.expectedVersion ? `, expected ${this.config.expectedVersion}` : ""})`,
+      message: `acpx command available (${this.config.command}, version ${result.versionCheck.version}${this.config.expectedVersion ? `, expected ${this.config.expectedVersion}` : ""})${computerUseNote}`,
     };
   }
 
@@ -1018,17 +1024,29 @@ export class AcpxRuntime implements AcpRuntime {
     };
   }
 
+  /**
+   * Build the common CLI prefix shared by all acpx sub-commands.
+   * Includes `--format json --json-strict --cwd <cwd>` and, when
+   * computer-use is enabled, the `--settings` flag that registers the
+   * built-in computer-use MCP server.  Centralising this ensures the
+   * flag is forwarded to session-creation paths (sessions new / ensure)
+   * as well as per-turn prompt commands.
+   */
+  private buildBasePrefix(cwd: string): string[] {
+    const prefix = ["--format", "json", "--json-strict", "--cwd", cwd];
+    if (this.config.computerUse) {
+      prefix.push("--settings", JSON.stringify({ enableBuiltinMcpServers: ["computer-use"] }));
+    }
+    return prefix;
+  }
+
   private async buildPromptArgs(params: {
     agent: string;
     sessionName: string;
     cwd: string;
   }): Promise<string[]> {
     const prefix = [
-      "--format",
-      "json",
-      "--json-strict",
-      "--cwd",
-      params.cwd,
+      ...this.buildBasePrefix(params.cwd),
       ...buildPermissionArgs(this.config.permissionMode),
       "--non-interactive-permissions",
       this.config.nonInteractivePermissions,
@@ -1051,7 +1069,7 @@ export class AcpxRuntime implements AcpRuntime {
     command: string[];
     prefix?: string[];
   }): Promise<string[]> {
-    const prefix = params.prefix ?? ["--format", "json", "--json-strict", "--cwd", params.cwd];
+    const prefix = params.prefix ?? this.buildBasePrefix(params.cwd);
     const agentCommand = await this.resolveRawAgentCommand({
       agent: params.agent,
       cwd: params.cwd,
