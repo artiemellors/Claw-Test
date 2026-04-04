@@ -572,6 +572,8 @@ importers:
 
   extensions/qianfan: {}
 
+  extensions/qnaigc-api: {}
+  
   extensions/qqbot:
     dependencies:
       mpg123-decoder:
