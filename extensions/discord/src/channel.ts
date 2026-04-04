@@ -75,7 +75,7 @@ import { normalizeExplicitDiscordSessionKey } from "./session-key-normalization.
 import { discordSetupAdapter } from "./setup-core.js";
 import { createDiscordPluginBase, discordConfigAdapter } from "./shared.js";
 import { collectDiscordStatusIssues } from "./status-issues.js";
-import { parseDiscordTarget } from "./targets.js";
+import { parseDiscordTarget, resolveDiscordTargetForMessaging } from "./targets.js";
 import { DiscordUiContainer } from "./ui.js";
 
 type DiscordSendFn = typeof sendMessageDiscord;
@@ -440,6 +440,7 @@ export const discordPlugin: ChannelPlugin<ResolvedDiscordAccount, DiscordProbe> 
         targetResolver: {
           looksLikeId: looksLikeDiscordTargetId,
           hint: "<channelId|user:ID|channel:ID>",
+          resolveTarget: resolveDiscordTargetForMessaging,
         },
       },
       approvalCapability: getDiscordApprovalCapability(),
