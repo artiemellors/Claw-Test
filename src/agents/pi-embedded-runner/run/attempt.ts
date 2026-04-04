@@ -36,6 +36,8 @@ import { createAnthropicVertexStreamFnForModel } from "../../anthropic-vertex-st
 import {
   analyzeBootstrapBudget,
   buildBootstrapPromptWarning,
+  buildBootstrapTruncationSignature,
+  buildBootstrapTruncationUserWarnings,
   buildBootstrapTruncationReportMeta,
   buildBootstrapInjectionStats,
   buildBootstrapTruncationUserWarnings,
@@ -420,6 +422,24 @@ export async function runEmbeddedAttempt(
         warnPct: truncationWarnPct,
       })) {
         enqueueSystemEvent(msg, { sessionKey: params.sessionKey });
+      }
+    }
+    // Emit user-visible channel warnings for files truncated beyond the threshold.
+    // Deduplicate across runs: reuse bootstrapPromptWarningSignaturesSeen so identical
+    // truncation state only fires once per session, not on every turn.
+    if (params.sessionKey) {
+      const truncationSig = buildBootstrapTruncationSignature(bootstrapAnalysis);
+      const alreadyWarned =
+        truncationSig != null &&
+        (params.bootstrapPromptWarningSignaturesSeen ?? []).includes(truncationSig);
+      if (!alreadyWarned) {
+        const truncationWarnPct = resolveBootstrapTruncationWarnPct(params.config);
+        for (const msg of buildBootstrapTruncationUserWarnings({
+          analysis: bootstrapAnalysis,
+          warnPct: truncationWarnPct,
+        })) {
+          enqueueSystemEvent(msg, { sessionKey: params.sessionKey });
+        }
       }
     }
     const workspaceNotes = hookAdjustedBootstrapFiles.some(

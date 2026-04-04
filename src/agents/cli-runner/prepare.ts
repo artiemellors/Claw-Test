@@ -4,6 +4,8 @@ import {
   buildBootstrapInjectionStats,
   buildBootstrapPromptWarning,
   buildBootstrapTruncationReportMeta,
+  buildBootstrapTruncationSignature,
+  buildBootstrapTruncationUserWarnings,
   buildBootstrapTruncationUserWarnings,
   analyzeBootstrapBudget,
 } from "../bootstrap-budget.js";
@@ -124,6 +126,23 @@ export async function prepareCliRunContext(
       warnPct: truncationWarnPct,
     })) {
       enqueueSystemEvent(msg, { sessionKey: params.sessionKey });
+    }
+  }
+  // Emit user-visible channel warnings for files truncated beyond the threshold.
+  // Deduplicate: only fire once per unique truncation state per session.
+  if (params.sessionKey) {
+    const truncationSig = buildBootstrapTruncationSignature(bootstrapAnalysis);
+    const alreadyWarned =
+      truncationSig != null &&
+      (params.bootstrapPromptWarningSignaturesSeen ?? []).includes(truncationSig);
+    if (!alreadyWarned) {
+      const truncationWarnPct = resolveBootstrapTruncationWarnPct(params.config);
+      for (const msg of buildBootstrapTruncationUserWarnings({
+        analysis: bootstrapAnalysis,
+        warnPct: truncationWarnPct,
+      })) {
+        enqueueSystemEvent(msg, { sessionKey: params.sessionKey });
+      }
     }
   }
   const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
