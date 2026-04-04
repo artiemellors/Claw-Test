@@ -14,7 +14,6 @@ import {
 import { resolveControlCommandGate } from "openclaw/plugin-sdk/command-auth";
 import { hasControlCommand } from "openclaw/plugin-sdk/command-auth";
 import { shouldHandleTextCommands } from "openclaw/plugin-sdk/command-auth";
-import { enqueueSystemEvent } from "openclaw/plugin-sdk/infra-runtime";
 import {
   buildPendingHistoryContextFromMap,
   recordPendingHistoryEntryIfEnabled,
@@ -24,6 +23,7 @@ import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
+import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-events";
 import { resolveSlackReplyToMode, type ResolvedSlackAccount } from "../../accounts.js";
 import { reactSlackMessage } from "../../actions.js";
 import { hasSlackThreadParticipation } from "../../sent-thread-cache.js";
@@ -44,7 +44,7 @@ import {
   resolveStorePath,
 } from "../config.runtime.js";
 import { normalizeSlackChannelType, type SlackMonitorContext } from "../context.js";
-import { recordInboundSession, resolveConversationLabel } from "../conversation.runtime.js";
+import { recordInboundSession, resolveConversationLabel } from "../conversation-session.runtime.js";
 import { authorizeSlackDirectMessage } from "../dm-auth.js";
 import { resolveSlackThreadStarter } from "../media.js";
 import { finalizeInboundContext } from "../reply.runtime.js";
