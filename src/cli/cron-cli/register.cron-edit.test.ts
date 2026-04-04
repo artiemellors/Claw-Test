@@ -73,11 +73,12 @@ describe("cron edit diff preview — stagger synthesis", () => {
     });
 
     hoisted.listMock.mockResolvedValue([existingJob]);
-    hoisted.updateMock.mockResolvedValue(undefined);
+    // updateMock intentionally rejects — we only care about the diff preview
+    // printed before the update call, not the update result itself.
+    hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
 
     // Capture stderr output (where the diff preview is printed)
     const stderrLines: string[] = [];
-    const originalStderr = process.stderr.write.bind(process.stderr);
     const stderrSpy = vi
       .spyOn(process.stderr, "write")
       .mockImplementation((chunk: unknown) => {
@@ -86,6 +87,7 @@ describe("cron edit diff preview — stagger synthesis", () => {
         return true;
       });
 
+    let caughtError: unknown;
     try {
       const { registerCronEdit } = await import("./register.cron-edit.js");
       const { defaultRuntime } = await import("../../runtime.js");
@@ -94,10 +96,23 @@ describe("cron edit diff preview — stagger synthesis", () => {
         ["cron", "edit", "job-1", "--cron", "0 10 * * *"],
         defaultRuntime,
       );
-    } catch {
-      // may throw if update mock rejects — we only care about the stderr output
+    } catch (err) {
+      caughtError = err;
     } finally {
       stderrSpy.mockRestore();
+    }
+
+    // Verify the code path actually executed: listMock must have been called.
+    // If registerCronEdit threw before reaching the list call (e.g. import error),
+    // the test would be a false positive without this assertion.
+    expect(hoisted.listMock).toHaveBeenCalled();
+
+    // Only swallow the expected update-mock rejection; re-throw anything else.
+    if (
+      caughtError !== undefined &&
+      !(caughtError instanceof Error && caughtError.message === "update-rejected-in-test")
+    ) {
+      throw caughtError;
     }
 
     const diffOutput = stderrLines.join("\n");
@@ -113,7 +128,9 @@ describe("cron edit diff preview — stagger synthesis", () => {
     });
 
     hoisted.listMock.mockResolvedValue([existingJob]);
-    hoisted.updateMock.mockResolvedValue(undefined);
+    // updateMock intentionally rejects — we only care about the diff preview
+    // printed before the update call, not the update result itself.
+    hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
 
     const stderrLines: string[] = [];
     const stderrSpy = vi
@@ -124,6 +141,7 @@ describe("cron edit diff preview — stagger synthesis", () => {
         return true;
       });
 
+    let caughtError: unknown;
     try {
       const { registerCronEdit } = await import("./register.cron-edit.js");
       const { defaultRuntime } = await import("../../runtime.js");
@@ -132,10 +150,21 @@ describe("cron edit diff preview — stagger synthesis", () => {
         ["cron", "edit", "job-1", "--cron", "0 10 * * *"],
         defaultRuntime,
       );
-    } catch {
-      // ignore
+    } catch (err) {
+      caughtError = err;
     } finally {
       stderrSpy.mockRestore();
+    }
+
+    // Verify the code path actually executed: listMock must have been called.
+    expect(hoisted.listMock).toHaveBeenCalled();
+
+    // Only swallow the expected update-mock rejection; re-throw anything else.
+    if (
+      caughtError !== undefined &&
+      !(caughtError instanceof Error && caughtError.message === "update-rejected-in-test")
+    ) {
+      throw caughtError;
     }
 
     // The existing staggerMs (120_000 ms = 2m) should be reflected in the

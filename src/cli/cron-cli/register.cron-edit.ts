@@ -150,7 +150,14 @@ function computeDisplayAfter(
     return typeof patchVal === "string" ? normalizeRequiredName(patchVal) : patchVal;
   }
   if (key === "description") {
-    return typeof patchVal === "string" ? normalizeOptionalText(patchVal) : patchVal;
+    if (typeof patchVal === "string") {
+      const normalized = normalizeOptionalText(patchVal);
+      // normalizeOptionalText returns undefined when the value is blank/whitespace-only,
+      // which means the real update will clear the field. Return null here so
+      // formatPatchValue renders "(cleared)" instead of the misleading "(unchanged)".
+      return normalized === undefined ? null : normalized;
+    }
+    return patchVal;
   }
   // Default: shallow-merge objects, pass-through primitives/arrays
   if (

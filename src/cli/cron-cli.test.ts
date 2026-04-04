@@ -884,4 +884,33 @@ describe("cron cli", () => {
     expect(errorOutput).toContain("spaced");
     expect(errorOutput).not.toContain("  spaced  ");
   });
+
+  it("shows (cleared) in diff preview when --description is set to whitespace-only", async () => {
+    // Regression test for: https://github.com/openclaw/openclaw/pull/59597
+    // chatgpt-codex-connector comment 3031807027
+    //
+    // Before fix: normalizeOptionalText("   ") returned undefined, which
+    // formatPatchValue rendered as "(unchanged)" — misleading because the
+    // real update would clear the description field.
+    //
+    // After fix: computeDisplayAfter returns null for this case, causing
+    // formatPatchValue to render "(cleared)" which accurately reflects what
+    // the real update will do.
+    resetGatewayMock();
+    mockCronEditJobLookup({ kind: "cron", expr: "* * * * *" });
+
+    const program = buildProgram();
+    await program.parseAsync(
+      ["cron", "edit", "job-1", "--description", "   "],
+      { from: "user" },
+    );
+
+    const errorOutput = defaultRuntime.error.mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("\n");
+
+    // The preview must show "(cleared)" (or similar), not "(unchanged)".
+    expect(errorOutput).toContain("cleared");
+    expect(errorOutput).not.toContain("unchanged");
+  });
 });
