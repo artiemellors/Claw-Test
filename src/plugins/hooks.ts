@@ -61,6 +61,8 @@ import type {
   PluginHookBeforeInstallContext,
   PluginHookBeforeInstallEvent,
   PluginHookBeforeInstallResult,
+  PluginHookTransformContextEvent,
+  PluginHookTransformContextResult,
 } from "./types.js";
 
 // Re-export types for consumers
@@ -100,6 +102,8 @@ export type {
   PluginHookToolResultPersistResult,
   PluginHookBeforeMessageWriteEvent,
   PluginHookBeforeMessageWriteResult,
+  PluginHookTransformContextEvent,
+  PluginHookTransformContextResult,
   PluginHookSessionContext,
   PluginHookSessionStartEvent,
   PluginHookSessionEndEvent,
@@ -572,6 +576,27 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
    */
   async function runLlmOutput(event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext) {
     return runVoidHook("llm_output", event, ctx);
+  }
+
+  /**
+   * Run transform_context hook.
+   * Allows plugins to modify the full messages array before each LLM call.
+   * Runs sequentially; the last handler that returns { messages } wins.
+   */
+  async function runTransformContext(
+    event: PluginHookTransformContextEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<PluginHookTransformContextResult | undefined> {
+    return runModifyingHook<"transform_context", PluginHookTransformContextResult>(
+      "transform_context",
+      event,
+      ctx,
+      {
+        mergeResults: (acc, next) => ({
+          messages: lastDefined(acc?.messages, next.messages),
+        }),
+      },
+    );
   }
 
   /**
@@ -1076,6 +1101,7 @@ export function createHookRunner(registry: PluginRegistry, options: HookRunnerOp
     runBeforeAgentReply,
     runLlmInput,
     runLlmOutput,
+    runTransformContext,
     runAgentEnd,
     runBeforeCompaction,
     runAfterCompaction,

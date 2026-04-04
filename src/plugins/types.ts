@@ -2099,6 +2099,7 @@ export type PluginHookName =
   | "before_agent_reply"
   | "llm_input"
   | "llm_output"
+  | "transform_context"
   | "agent_end"
   | "before_compaction"
   | "after_compaction"
@@ -2129,6 +2130,7 @@ export const PLUGIN_HOOK_NAMES = [
   "before_agent_reply",
   "llm_input",
   "llm_output",
+  "transform_context",
   "agent_end",
   "before_compaction",
   "after_compaction",
@@ -2300,6 +2302,23 @@ export type PluginHookLlmInputEvent = {
   prompt: string;
   historyMessages: unknown[];
   imagesCount: number;
+};
+
+// transform_context hook
+// Fires before every LLM call in the agentic loop (via Agent.transformContext).
+// Plugins can inspect and modify the full messages array before it is sent to the LLM.
+// This is the primary hook for context compression, summarization, or message rewriting.
+export type PluginHookTransformContextEvent = {
+  /** The complete messages array about to be sent to the LLM. */
+  messages: unknown[];
+};
+
+export type PluginHookTransformContextResult = {
+  /**
+   * If provided, replaces the messages array sent to the LLM.
+   * Return only the modified messages — the caller will use this in place of the original.
+   */
+  messages?: unknown[];
 };
 
 // llm_output hook
@@ -2826,6 +2845,10 @@ export type PluginHookHandlerMap = {
     event: PluginHookLlmOutputEvent,
     ctx: PluginHookAgentContext,
   ) => Promise<void> | void;
+  transform_context: (
+    event: PluginHookTransformContextEvent,
+    ctx: PluginHookAgentContext,
+  ) => Promise<PluginHookTransformContextResult | void> | PluginHookTransformContextResult | void;
   agent_end: (event: PluginHookAgentEndEvent, ctx: PluginHookAgentContext) => Promise<void> | void;
   before_compaction: (
     event: PluginHookBeforeCompactionEvent,
