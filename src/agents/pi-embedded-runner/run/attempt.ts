@@ -1338,6 +1338,7 @@ export async function runEmbeddedAttempt(
         getMessagingToolSentTexts,
         getMessagingToolSentMediaUrls,
         getMessagingToolSentTargets,
+        getPendingToolMediaReply,
         getSuccessfulCronAdds,
         didSendViaMessagingTool,
         getLastToolError,
@@ -2012,6 +2013,7 @@ export async function runEmbeddedAttempt(
         messagingToolSentTexts: getMessagingToolSentTexts(),
         messagingToolSentMediaUrls: getMessagingToolSentMediaUrls(),
         messagingToolSentTargets: getMessagingToolSentTargets(),
+        pendingToolMediaReply: getPendingToolMediaReply(),
         successfulCronAdds: getSuccessfulCronAdds(),
         cloudCodeAssistFormatError: Boolean(
           lastAssistant?.errorMessage && isCloudCodeAssistFormatError(lastAssistant.errorMessage),
