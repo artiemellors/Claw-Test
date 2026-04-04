@@ -172,7 +172,7 @@ describe("generateThreadTitle", () => {
     ).toContain("Channel description: Deploy updates and incident notes");
     expect(completeWithPreparedSimpleCompletionModelMock.mock.calls[0]?.[0]?.options).toEqual(
       expect.objectContaining({
-        maxTokens: 24,
+        maxTokens: 512,
         temperature: 0.2,
       }),
     );
@@ -191,4 +191,17 @@ describe("generateThreadTitle", () => {
 
     expect(result).toBeNull();
   });
+
+  it("returns null when extractAssistantText returns an empty string (thinking-model reasoning-only response)", async () => {
+    extractAssistantTextMock.mockReturnValueOnce("");
+
+    const result = await generateThreadTitle({
+      cfg: {} as OpenClawConfig,
+      agentId: "main",
+      messageText: "Need a title.",
+    });
+
+    expect(result).toBeNull();
+  });
 });
+
