@@ -379,6 +379,15 @@ export async function runEmbeddedAttempt(
       agentId: sessionAgentId,
     });
 
+    log.debug(
+      `[attempt:skills] loaded: freshScan=${shouldLoadSkillEntries} entries=${skillEntries?.length ?? 0} promptChars=${skillsPrompt?.length ?? 0} sessionId=${params.sessionId}`,
+    );
+    if (skillsPrompt) {
+      log.debug(
+        `[attempt:skills] skillsPrompt content:\n${"─".repeat(60)}\n${skillsPrompt}\n${"─".repeat(60)}`,
+      );
+    }
+
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const { bootstrapFiles: hookAdjustedBootstrapFiles, contextFiles } =
       await resolveBootstrapContextForRun({
@@ -412,6 +421,22 @@ export async function runEmbeddedAttempt(
     )
       ? ["Reminder: commit your changes in this workspace after edits."]
       : undefined;
+
+    log.debug(
+      `[attempt:bootstrap] files: bootstrapCount=${hookAdjustedBootstrapFiles.length} contextCount=${contextFiles.length} sessionId=${params.sessionId}`,
+    );
+    if (log.isEnabled("debug")) {
+      for (const f of hookAdjustedBootstrapFiles) {
+        const chars = typeof f.content === "string" ? f.content.length : 0;
+        log.debug(
+          `[attempt:bootstrap] bootstrapFile: name=${f.name} missing=${f.missing ?? false} chars=${chars}`,
+        );
+      }
+      for (const f of contextFiles) {
+        const chars = typeof f.content === "string" ? f.content.length : 0;
+        log.debug(`[attempt:bootstrap] contextFile: path=${f.path} chars=${chars}`);
+      }
+    }
 
     const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
 
@@ -560,6 +585,10 @@ export async function runEmbeddedAttempt(
       modelApi: params.model.api,
       model: params.model,
     });
+
+    log.debug(
+      `[attempt:tools] assembled: count=${tools.length} names=[${tools.map((t) => t.name).join(", ")}] provider=${params.provider} sessionId=${params.sessionId}`,
+    );
 
     const machineName = await getMachineDisplayName();
     const runtimeChannel = normalizeMessageChannel(params.messageChannel ?? params.messageProvider);
@@ -736,6 +765,15 @@ export async function runEmbeddedAttempt(
     });
     const systemPromptOverride = createSystemPromptOverride(appendPrompt);
     let systemPromptText = systemPromptOverride();
+
+    log.debug(
+      `[attempt:system-prompt] built: chars=${systemPromptText.length} promptMode=${resolvePromptModeForSession(params.sessionKey)} sessionId=${params.sessionId}`,
+    );
+    if (log.isEnabled("debug")) {
+      log.debug(
+        `[attempt:system-prompt] full content:\n${"═".repeat(80)}\n${systemPromptText}\n${"═".repeat(80)}`,
+      );
+    }
 
     const sessionLock = await acquireSessionWriteLock({
       sessionFile: params.sessionFile,
