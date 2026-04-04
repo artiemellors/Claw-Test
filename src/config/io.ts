@@ -1714,9 +1714,13 @@ export function createConfigIO(overrides: ConfigIoDeps = {}) {
       const legacyResolution = resolveLegacyConfigForRead(resolvedConfig, effectiveParsed);
       const effectiveConfigRaw = legacyResolution.effectiveConfigRaw;
       for (const w of readResolution.envWarnings) {
-        deps.logger.warn(
-          `Config (${configPath}): missing env var "${w.varName}" at ${w.configPath} - feature using this value will be unavailable`,
-        );
+        const dedupeKey = `${w.varName}:${w.configPath}`;
+        if (!emittedEnvVarWarnings.has(dedupeKey)) {
+          emittedEnvVarWarnings.add(dedupeKey);
+          deps.logger.warn(
+            `Config (${configPath}): missing env var "${w.varName}" at ${w.configPath} - feature using this value will be unavailable`,
+          );
+        }
       }
       warnOnConfigMiskeys(effectiveConfigRaw, deps.logger);
       if (typeof effectiveConfigRaw !== "object" || effectiveConfigRaw === null) {
@@ -2375,6 +2379,7 @@ let runtimeConfigSnapshot: OpenClawConfig | null = null;
 let runtimeConfigSourceSnapshot: OpenClawConfig | null = null;
 let runtimeConfigSnapshotRefreshHandler: RuntimeConfigSnapshotRefreshHandler | null = null;
 const configWriteListeners = new Set<(event: ConfigWriteNotification) => void>();
+const emittedEnvVarWarnings = new Set<string>();
 
 function notifyConfigWriteListeners(event: ConfigWriteNotification): void {
   for (const listener of configWriteListeners) {
@@ -2413,6 +2418,7 @@ export function resetConfigRuntimeState(): void {
 }
 
 export function clearRuntimeConfigSnapshot(): void {
+  emittedEnvVarWarnings.clear();
   resetConfigRuntimeState();
 }
 
