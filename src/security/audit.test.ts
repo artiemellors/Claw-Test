@@ -1994,6 +1994,72 @@ describe("security audit", () => {
     }
   });
 
+  it("flags voice-call skipSignatureVerification as a dangerous flag", async () => {
+    const cfg: OpenClawConfig = {
+      plugins: {
+        entries: {
+          "voice-call": {
+            config: { skipSignatureVerification: true },
+          },
+        },
+      },
+    };
+
+    const res = await audit(cfg);
+    const finding = res.findings.find((f) => f.checkId === "config.insecure_or_dangerous_flags");
+
+    expect(finding).toBeTruthy();
+    expect(finding?.severity).toBe("warn");
+    expect(finding?.detail).toContain(
+      "plugins.entries.voice-call.config.skipSignatureVerification=true",
+    );
+  });
+
+  it.each([
+    {
+      name: "does not flag voice-call skipSignatureVerification when false",
+      cfg: {
+        plugins: {
+          entries: {
+            "voice-call": {
+              config: { skipSignatureVerification: false },
+            },
+          },
+        },
+      },
+    },
+    {
+      name: "does not flag voice-call skipSignatureVerification when the plugin is disabled",
+      cfg: {
+        plugins: {
+          entries: {
+            "voice-call": {
+              enabled: false,
+              config: { skipSignatureVerification: true },
+            },
+          },
+        },
+      },
+    },
+    {
+      name: "does not flag voice-call skipSignatureVerification when plugins are globally disabled",
+      cfg: {
+        plugins: {
+          enabled: false,
+          entries: {
+            "voice-call": {
+              config: { skipSignatureVerification: true },
+            },
+          },
+        },
+      },
+    },
+  ])("$name", async ({ cfg }) => {
+    const res = await audit(cfg);
+    const finding = res.findings.find((f) => f.checkId === "config.insecure_or_dangerous_flags");
+    expect(finding).toBeUndefined();
+  });
+
   it("flags dangerous host-header origin fallback and suppresses missing allowed-origins finding", async () => {
     const cfg: OpenClawConfig = {
       gateway: {
