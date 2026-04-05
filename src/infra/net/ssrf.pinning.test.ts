@@ -298,7 +298,7 @@ describe("ssrf pinning", () => {
       resolvePinnedHostnameWithPolicy("example.com", {
         lookupFn: lookup,
       }),
-    ).rejects.toThrow(/assumeProxyEnvironment/i);
+    ).rejects.toThrow(/fake-ip compatibility/i);
   });
 
   it("does not add a fake-ip proxy hint for non-RFC2544 private IP blocks", async () => {

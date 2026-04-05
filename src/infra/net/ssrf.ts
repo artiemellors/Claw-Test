@@ -189,7 +189,7 @@ export function isBlockedHostnameOrIp(hostname: string, policy?: SsrFPolicy): bo
 const BLOCKED_HOST_OR_IP_MESSAGE = "Blocked hostname or private/internal/special-use IP address";
 const BLOCKED_RESOLVED_IP_MESSAGE = "Blocked: resolves to private/internal/special-use IP address";
 const BLOCKED_RESOLVED_IP_PROXY_HINT =
-  "Hint: If you use a proxy with fake-ip mode (Surge, Clash, etc.), set tools.web.fetch.ssrfPolicy.assumeProxyEnvironment: true in your OpenClaw config.";
+  "Hint: If you use a proxy with fake-ip mode (Surge, Clash, etc.), enable fake-ip compatibility on the specific caller or runtime that is performing this fetch.";
 
 function assertAllowedHostOrIpOrThrow(hostnameOrIp: string, policy?: SsrFPolicy): void {
   if (isBlockedHostnameOrIp(hostnameOrIp, policy)) {
