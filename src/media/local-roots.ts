@@ -65,10 +65,7 @@ function getAgentScopedMediaLocalRootsInternal(
 ): readonly string[] {
   const fsConfig = resolveToolFsConfig({ cfg, agentId });
   if (!options?.ignoreConfiguredRoots && fsConfig.roots !== undefined) {
-    return fsConfig.roots.map((root) => ({
-      ...root,
-      path: path.resolve(root.path),
-    })) as unknown as string[];
+    return fsConfig.roots.map((root) => path.resolve(root.path));
   }
   const roots = buildMediaLocalRoots(resolveStateDir(), resolveConfigDir());
   const normalizedAgentId = normalizeOptionalString(agentId);
@@ -149,7 +146,7 @@ export function getAgentScopedMediaLocalRootsForSources(params: {
   if (fsConfig.roots !== undefined && !params.ignoreConfiguredRoots) {
     return roots;
   }
-  const fallbackRoots = roots.filter((root): root is string => typeof root === "string");
+  const fallbackRoots = [...roots];
   if (fsConfig.workspaceOnly) {
     return fallbackRoots;
   }

@@ -2,7 +2,6 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LocalMediaRoot } from "./local-media-access.js";
 import {
   appendLocalMediaParentRoots,
   buildMediaLocalRoots,
@@ -15,14 +14,6 @@ function normalizeHostPath(value: string): string {
   return path.normalize(path.resolve(value));
 }
 
-function normalizeMediaRootPath(root: LocalMediaRoot): string {
-  return normalizeHostPath(typeof root === "string" ? root : root.path);
-}
-
-function asMediaRoots(roots: readonly string[]): readonly LocalMediaRoot[] {
-  return roots as unknown as readonly LocalMediaRoot[];
-}
-
 describe("local media roots", () => {
   function withStateDir<T>(stateDir: string, run: () => T): T {
     vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
@@ -30,31 +21,31 @@ describe("local media roots", () => {
   }
 
   function expectNormalizedRootsContain(
-    roots: readonly LocalMediaRoot[],
+    roots: readonly string[],
     expectedRoots: readonly string[],
   ) {
-    const normalizedRoots = roots.map(normalizeMediaRootPath);
+    const normalizedRoots = roots.map(normalizeHostPath);
     expectedRoots.forEach((expectedRoot) => {
       expect(normalizedRoots).toContain(normalizeHostPath(expectedRoot));
     });
   }
 
   function expectNormalizedRootsExclude(
-    roots: readonly LocalMediaRoot[],
+    roots: readonly string[],
     excludedRoots: readonly string[],
   ) {
-    const normalizedRoots = roots.map(normalizeMediaRootPath);
+    const normalizedRoots = roots.map(normalizeHostPath);
     excludedRoots.forEach((excludedRoot) => {
       expect(normalizedRoots).not.toContain(normalizeHostPath(excludedRoot));
     });
   }
 
   function expectPicturesRootPresence(params: {
-    roots: readonly LocalMediaRoot[];
+    roots: readonly string[];
     shouldContainPictures: boolean;
     picturesRoot?: string;
   }) {
-    const normalizedRoots = params.roots.map(normalizeMediaRootPath);
+    const normalizedRoots = params.roots.map(normalizeHostPath);
     const picturesRoot = normalizeHostPath(params.picturesRoot ?? "/Users/peter/Pictures");
     if (params.shouldContainPictures) {
       expect(normalizedRoots).toContain(picturesRoot);
@@ -65,7 +56,7 @@ describe("local media roots", () => {
 
   function expectAgentMediaRootsCase(params: {
     stateDir: string;
-    getRoots: () => readonly LocalMediaRoot[];
+    getRoots: () => readonly string[];
     expectedContained?: readonly string[];
     expectedExcluded?: readonly string[];
     minLength?: number;
@@ -123,13 +114,7 @@ describe("local media roots", () => {
       "ops",
     );
 
-    expect(asMediaRoots(roots)).toEqual([
-      {
-        path: normalizeHostPath("/packs/shared/manual.pdf"),
-        kind: "file",
-        access: "ro",
-      },
-    ]);
+    expect(roots).toEqual([normalizeHostPath("/packs/shared/manual.pdf")]);
   });
 
   it("preserves empty configured fs roots as direct deny-all media roots", () => {
@@ -274,7 +259,7 @@ describe("local media roots", () => {
       mediaSources: ["/Users/peter/Pictures/photo.png"],
     });
 
-    expect(asMediaRoots(strictRoots).map(normalizeMediaRootPath)).not.toContain(
+    expect(strictRoots.map(normalizeHostPath)).not.toContain(
       normalizeHostPath("/Users/peter/Pictures"),
     );
   });
@@ -292,16 +277,8 @@ describe("local media roots", () => {
       mediaSources: ["/Users/peter/Pictures/photo.png"],
     });
 
-    expect(asMediaRoots(roots)).toEqual([
-      {
-        path: normalizeHostPath("/packs/shared/file.txt"),
-        kind: "file",
-        access: "ro",
-      },
-    ]);
-    expect(asMediaRoots(roots).map(normalizeMediaRootPath)).not.toContain(
-      normalizeHostPath("/Users/peter/Pictures"),
-    );
+    expect(roots).toEqual([normalizeHostPath("/packs/shared/file.txt")]);
+    expect(roots.map(normalizeHostPath)).not.toContain(normalizeHostPath("/Users/peter/Pictures"));
   });
 
   it("preserves empty fs roots as deny-all for outbound media sources", () => {
@@ -338,8 +315,6 @@ describe("local media roots", () => {
     });
 
     expectNormalizedRootsContain(roots, [path.join(stateDir, "sandboxes")]);
-    expect(asMediaRoots(roots).map(normalizeMediaRootPath)).not.toContain(
-      normalizeHostPath("/packs/shared/file.txt"),
-    );
+    expect(roots.map(normalizeHostPath)).not.toContain(normalizeHostPath("/packs/shared/file.txt"));
   });
 });
