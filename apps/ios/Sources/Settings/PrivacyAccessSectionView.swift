@@ -10,12 +10,30 @@ struct PrivacyAccessSectionView: View {
 
     @Environment(\.scenePhase) private var scenePhase
 
+    private enum PermissionStatusKind {
+        case allowed
+        case notSet
+        case limited
+        case disallowed
+        case unknown
+
+        var color: Color {
+            switch self {
+            case .allowed: return .green
+            case .notSet: return .orange
+            case .limited: return .yellow
+            case .disallowed, .unknown: return .red
+            }
+        }
+    }
+
     var body: some View {
         DisclosureGroup("Privacy & Access") {
             permissionRow(
                 title: "Contacts",
                 icon: "person.crop.circle",
                 status: statusText(for: contactsStatus),
+                statusKind: permissionStatusKind(for: contactsStatus),
                 detail: "Search and add contacts from the assistant.",
                 actionTitle: actionTitle(for: contactsStatus),
                 action: handleContactsAction
@@ -25,6 +43,7 @@ struct PrivacyAccessSectionView: View {
                 title: "Calendar (Add Events)",
                 icon: "calendar.badge.plus",
                 status: calendarWriteStatusText,
+                statusKind: calendarWriteStatusKind,
                 detail: "Add events with least privilege.",
                 actionTitle: calendarWriteActionTitle,
                 action: handleCalendarWriteAction
@@ -34,6 +53,7 @@ struct PrivacyAccessSectionView: View {
                 title: "Calendar (View Events)",
                 icon: "calendar",
                 status: calendarReadStatusText,
+                statusKind: calendarReadStatusKind,
                 detail: "List and read calendar events.",
                 actionTitle: calendarReadActionTitle,
                 action: handleCalendarReadAction
@@ -43,6 +63,7 @@ struct PrivacyAccessSectionView: View {
                 title: "Reminders",
                 icon: "checklist",
                 status: remindersStatusText,
+                statusKind: remindersStatusKind,
                 detail: "List, add, and complete reminders.",
                 actionTitle: remindersActionTitle,
                 action: handleRemindersAction
@@ -61,6 +82,7 @@ struct PrivacyAccessSectionView: View {
         title: String,
         icon: String,
         status: String,
+        statusKind: PermissionStatusKind,
         detail: String,
         actionTitle: String?,
         action: (() -> Void)?
@@ -71,7 +93,7 @@ struct PrivacyAccessSectionView: View {
                 Spacer()
                 Text(status)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(statusColor(for: status))
+                    .foregroundStyle(statusKind.color)
             }
             Text(detail)
                 .font(.footnote)
@@ -85,15 +107,6 @@ struct PrivacyAccessSectionView: View {
         .padding(.vertical, 2)
     }
 
-    private func statusColor(for status: String) -> Color {
-        switch status {
-        case "Allowed": return .green
-        case "Not Set": return .orange
-        case "Add-Only": return .yellow
-        default: return .red
-        }
-    }
-
     // MARK: - Contacts
 
     private func statusText(for cnStatus: CNAuthorizationStatus) -> String {
@@ -102,6 +115,15 @@ struct PrivacyAccessSectionView: View {
         case .notDetermined: return "Not Set"
         case .denied, .restricted: return "Not Allowed"
         @unknown default: return "Unknown"
+        }
+    }
+
+    private func permissionStatusKind(for cnStatus: CNAuthorizationStatus) -> PermissionStatusKind {
+        switch cnStatus {
+        case .authorized, .limited: return .allowed
+        case .notDetermined: return .notSet
+        case .denied, .restricted: return .disallowed
+        @unknown default: return .unknown
         }
     }
 
@@ -143,6 +165,15 @@ struct PrivacyAccessSectionView: View {
         }
     }
 
+    private var calendarWriteStatusKind: PermissionStatusKind {
+        switch calendarStatus {
+        case .authorized, .fullAccess, .writeOnly: return .allowed
+        case .notDetermined: return .notSet
+        case .denied, .restricted: return .disallowed
+        @unknown default: return .unknown
+        }
+    }
+
     private var calendarWriteActionTitle: String? {
         switch calendarStatus {
         case .notDetermined: return "Request Access"
@@ -155,7 +186,7 @@ struct PrivacyAccessSectionView: View {
         switch calendarStatus {
         case .notDetermined:
             Task {
-                _ = await requestCalendarWriteOnly()
+                _ = await requestCalendarFull()
                 await MainActor.run { refreshAll() }
             }
         case .denied, .restricted:
@@ -174,6 +205,16 @@ struct PrivacyAccessSectionView: View {
         case .notDetermined: return "Not Set"
         case .denied, .restricted: return "Not Allowed"
         @unknown default: return "Unknown"
+        }
+    }
+
+    private var calendarReadStatusKind: PermissionStatusKind {
+        switch calendarStatus {
+        case .authorized, .fullAccess: return .allowed
+        case .writeOnly: return .limited
+        case .notDetermined: return .notSet
+        case .denied, .restricted: return .disallowed
+        @unknown default: return .unknown
         }
     }
 
@@ -212,6 +253,16 @@ struct PrivacyAccessSectionView: View {
         }
     }
 
+    private var remindersStatusKind: PermissionStatusKind {
+        switch remindersStatus {
+        case .authorized, .fullAccess: return .allowed
+        case .writeOnly: return .limited
+        case .notDetermined: return .notSet
+        case .denied, .restricted: return .disallowed
+        @unknown default: return .unknown
+        }
+    }
+
     private var remindersActionTitle: String? {
         switch remindersStatus {
         case .notDetermined: return "Request Access"
@@ -241,15 +292,6 @@ struct PrivacyAccessSectionView: View {
         contactsStatus = CNContactStore.authorizationStatus(for: .contacts)
         calendarStatus = EKEventStore.authorizationStatus(for: .event)
         remindersStatus = EKEventStore.authorizationStatus(for: .reminder)
-    }
-
-    private func requestCalendarWriteOnly() async -> Bool {
-        let store = EKEventStore()
-        return await withCheckedContinuation { cont in
-            store.requestWriteOnlyAccessToEvents { granted, _ in
-                cont.resume(returning: granted)
-            }
-        }
     }
 
     private func requestCalendarFull() async -> Bool {
