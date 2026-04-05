@@ -1,6 +1,6 @@
-import type { Dispatcher } from "undici";
 import { lookup as dnsLookupCb, type LookupAddress } from "node:dns";
 import { lookup as dnsLookup } from "node:dns/promises";
+import type { Dispatcher } from "undici";
 import {
   extractEmbeddedIpv4FromIpv6,
   isBlockedSpecialUseIpv4Address,
@@ -189,7 +189,7 @@ export function isBlockedHostnameOrIp(hostname: string, policy?: SsrFPolicy): bo
 const BLOCKED_HOST_OR_IP_MESSAGE = "Blocked hostname or private/internal/special-use IP address";
 const BLOCKED_RESOLVED_IP_MESSAGE = "Blocked: resolves to private/internal/special-use IP address";
 const BLOCKED_RESOLVED_IP_PROXY_HINT =
-  "Hint: If you use a proxy with fake-ip mode (Surge, Clash, etc.), set network.assumeProxyEnvironment: true in your OpenClaw config.";
+  "Hint: If you use a proxy with fake-ip mode (Surge, Clash, etc.), set tools.web.fetch.ssrfPolicy.assumeProxyEnvironment: true in your OpenClaw config.";
 
 function assertAllowedHostOrIpOrThrow(hostnameOrIp: string, policy?: SsrFPolicy): void {
   if (isBlockedHostnameOrIp(hostnameOrIp, policy)) {
