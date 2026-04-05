@@ -128,6 +128,7 @@ import { renderConfig } from "./views/config.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
 import { renderLoginGate } from "./views/login-gate.ts";
+import { renderNewSessionModal } from "./views/new-session-modal.ts";
 import { renderOverview } from "./views/overview.ts";
 
 // Lazy-loaded view modules – deferred so the initial bundle stays small.
@@ -2143,7 +2144,8 @@ export function renderApp(state: AppViewState) {
             )
           : nothing}
       </main>
-      ${renderExecApprovalPrompt(state)} ${renderGatewayUrlConfirmation(state)} ${nothing}
+      ${renderExecApprovalPrompt(state)} ${renderGatewayUrlConfirmation(state)}
+      ${renderNewSessionModal(state)} ${nothing}
     </div>
   `;
 }

@@ -28,6 +28,7 @@ import {
   handleFirstUpdated,
   handleUpdated,
 } from "./app-lifecycle.ts";
+import { switchChatSession } from "./app-render.helpers.ts";
 import { renderApp } from "./app-render.ts";
 import {
   exportLogs as exportLogsInternal,
@@ -205,6 +206,9 @@ export class OpenClawApp extends LitElement {
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
   pendingGatewayToken: string | null = null;
+
+  @state() newSessionModalOpen = false;
+  @state() newSessionName = "";
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -751,6 +755,38 @@ export class OpenClawApp extends LitElement {
   handleGatewayUrlCancel() {
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
+  }
+
+  handleNewSessionOpen() {
+    this.newSessionModalOpen = true;
+    this.newSessionName = "";
+  }
+
+  async handleNewSessionConfirm() {
+    const name = this.newSessionName.trim();
+    this.newSessionModalOpen = false;
+    this.newSessionName = "";
+    if (name) {
+      const agentId = this.agentsSelectedId ?? this.assistantAgentId ?? "main";
+      const sessionName = name.toLowerCase().replace(/\s+/g, "-");
+      const newKey = `${agentId}:dashboard:${sessionName}`;
+      if (this.client && this.connected) {
+        const result = (await this.client.request("sessions.create", { key: newKey })) as {
+          ok: boolean;
+          key?: string;
+        };
+        if (result?.ok && result.key) {
+          switchChatSession(this as Parameters<typeof switchChatSession>[0], result.key);
+          return;
+        }
+      }
+      switchChatSession(this as Parameters<typeof switchChatSession>[0], newKey);
+    }
+  }
+
+  handleNewSessionCancel() {
+    this.newSessionModalOpen = false;
+    this.newSessionName = "";
   }
 
   // Sidebar handlers for tool output viewing
