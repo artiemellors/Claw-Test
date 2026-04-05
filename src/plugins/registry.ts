@@ -24,7 +24,9 @@ import {
   registerMemoryEmbeddingProvider,
 } from "./memory-embedding-providers.js";
 import {
+  registerMemoryCorpusSupplement,
   registerMemoryFlushPlanResolver,
+  registerMemoryPromptSupplement,
   registerMemoryPromptSection,
   registerMemoryRuntime,
 } from "./memory-state.js";
@@ -1115,6 +1117,12 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                   return;
                 }
                 registerMemoryPromptSection(builder);
+              },
+              registerMemoryPromptSupplement: (builder) => {
+                registerMemoryPromptSupplement(record.id, builder);
+              },
+              registerMemoryCorpusSupplement: (supplement) => {
+                registerMemoryCorpusSupplement(record.id, supplement);
               },
               registerMemoryFlushPlan: (resolver) => {
                 if (!hasKind(record.kind, "memory")) {
