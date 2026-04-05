@@ -52,6 +52,12 @@ const ACPX_CAPABILITIES: AcpRuntimeCapabilities = {
   controls: ["session/set_mode", "session/set_config_option", "session/status"],
 };
 
+type AcpxSessionIdentifiers = {
+  acpxRecordId?: string;
+  backendSessionId?: string;
+  agentSessionId?: string;
+};
+
 type AcpxHealthCheckResult =
   | {
       ok: true;
@@ -73,6 +79,11 @@ type AcpxHealthCheckResult =
             error: unknown;
           };
     };
+
+type EnsureFailureRecoveryResult = {
+  events: AcpxJsonObject[];
+  skipPostEnsureReplacement: boolean;
+};
 
 function formatPermissionModeGuidance(): string {
   return "Configure plugins.entries.acpx.config.permissionMode to one of: approve-reads, approve-all, deny-all.";
@@ -129,6 +140,10 @@ function shouldRetainNamedSessionForDeadStatus(detail: AcpxJsonObject | undefine
   return summary?.includes("queue owner unavailable") ?? false;
 }
 
+function resolveResumeSessionIdFromDetail(detail: AcpxJsonObject | undefined): string | undefined {
+  return asOptionalString(detail?.acpxSessionId) ?? asOptionalString(detail?.agentSessionId);
+}
+
 function formatAcpxControlErrorMessage(params: {
   code?: string;
   message: string;
@@ -155,6 +170,111 @@ function findSessionIdentifierEvent(events: AcpxJsonObject[]): AcpxJsonObject | 
       asOptionalString(event.acpxSessionId) ||
       asOptionalString(event.acpxRecordId),
   );
+}
+
+function resolveSessionIdentifiersFromEvent(
+  event: AcpxJsonObject | undefined,
+): AcpxSessionIdentifiers {
+  if (!event) {
+    return {};
+  }
+  const acpxRecordId = asOptionalString(event.acpxRecordId);
+  const backendSessionId = asOptionalString(event.acpxSessionId);
+  const agentSessionId = asOptionalString(event.agentSessionId);
+  return {
+    ...(acpxRecordId ? { acpxRecordId } : {}),
+    ...(backendSessionId ? { backendSessionId } : {}),
+    ...(agentSessionId ? { agentSessionId } : {}),
+  };
+}
+
+function hasSessionIdentifiers(identifiers: AcpxSessionIdentifiers): boolean {
+  return Boolean(
+    identifiers.acpxRecordId || identifiers.backendSessionId || identifiers.agentSessionId,
+  );
+}
+
+function parsePromptProtocolEvent(line: string): AcpxJsonObject | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractPromptSessionIdentifiers(line: string): AcpxSessionIdentifiers {
+  const parsed = parsePromptProtocolEvent(line);
+  if (!parsed) {
+    return {};
+  }
+
+  const direct = resolveSessionIdentifiersFromEvent(parsed);
+  if (hasSessionIdentifiers(direct)) {
+    return direct;
+  }
+
+  if (isRecord(parsed.result)) {
+    // Prompt turns only emit result.sessionId from session/load and session/new responses today,
+    // so an unrestricted capture remains scoped to backend-issued session identifiers.
+    const agentSessionId = asOptionalString(parsed.result.sessionId);
+    if (agentSessionId) {
+      return { agentSessionId };
+    }
+  }
+
+  return {};
+}
+
+function mergeHandleStateWithIdentifiers(
+  state: AcpxHandleState,
+  identifiers: AcpxSessionIdentifiers,
+): AcpxHandleState {
+  const acpxRecordId = identifiers.acpxRecordId ?? state.acpxRecordId;
+  const backendSessionId = identifiers.backendSessionId ?? state.backendSessionId;
+  const agentSessionId = identifiers.agentSessionId ?? state.agentSessionId;
+  return {
+    ...state,
+    ...(acpxRecordId ? { acpxRecordId } : {}),
+    ...(backendSessionId ? { backendSessionId } : {}),
+    ...(agentSessionId ? { agentSessionId } : {}),
+  };
+}
+
+function mergeHandleStateWithFallbackIdentifiers(
+  state: AcpxHandleState,
+  identifiers: AcpxSessionIdentifiers,
+): AcpxHandleState {
+  const acpxRecordId = state.acpxRecordId ?? identifiers.acpxRecordId;
+  const backendSessionId = state.backendSessionId ?? identifiers.backendSessionId;
+  const agentSessionId = state.agentSessionId ?? identifiers.agentSessionId;
+  return {
+    ...state,
+    ...(acpxRecordId ? { acpxRecordId } : {}),
+    ...(backendSessionId ? { backendSessionId } : {}),
+    ...(agentSessionId ? { agentSessionId } : {}),
+  };
+}
+
+function writeHandleState(handle: AcpRuntimeHandle, state: AcpxHandleState): void {
+  handle.runtimeSessionName = encodeAcpxRuntimeHandleState(state);
+  if (state.acpxRecordId) {
+    handle.acpxRecordId = state.acpxRecordId;
+  }
+  if (state.backendSessionId) {
+    handle.backendSessionId = state.backendSessionId;
+  }
+  if (state.agentSessionId) {
+    handle.agentSessionId = state.agentSessionId;
+  }
+}
+
+function resolveInteractiveSessionReference(state: AcpxHandleState): string {
+  return state.agentSessionId ?? state.name;
 }
 
 export function encodeAcpxRuntimeHandleState(state: AcpxHandleState): string {
@@ -350,11 +470,54 @@ export class AcpxRuntime implements AcpRuntime {
     });
   }
 
+  private async replaceDeadNamedSession(params: {
+    detail: AcpxJsonObject | undefined;
+    sessionName: string;
+    agent: string;
+    cwd: string;
+    logContext: string;
+  }): Promise<AcpxJsonObject[]> {
+    const resumeSessionId = resolveResumeSessionIdFromDetail(params.detail);
+    if (!resumeSessionId) {
+      this.logger?.warn?.(
+        `acpx ensureSession repairing dead named session with fresh session owner: session=${params.sessionName} cwd=${params.cwd} ${params.logContext}`,
+      );
+      return await this.createNamedSession({
+        agent: params.agent,
+        cwd: params.cwd,
+        sessionName: params.sessionName,
+      });
+    }
+    this.logger?.warn?.(
+      `acpx ensureSession repairing dead named session by resuming backend session: session=${params.sessionName} cwd=${params.cwd} resumeSessionId=${resumeSessionId} ${params.logContext}`,
+    );
+    try {
+      return await this.createNamedSession({
+        agent: params.agent,
+        cwd: params.cwd,
+        sessionName: params.sessionName,
+        resumeSessionId,
+      });
+    } catch (error) {
+      if (!(error instanceof AcpRuntimeError) || error.code !== "ACP_SESSION_INIT_FAILED") {
+        throw error;
+      }
+      this.logger?.warn?.(
+        `acpx ensureSession dead-session resume repair failed; retrying with fresh session owner: session=${params.sessionName} cwd=${params.cwd} resumeSessionId=${resumeSessionId} error=${summarizeLogText(error.message) || "<empty>"} ${params.logContext}`,
+      );
+      return await this.createNamedSession({
+        agent: params.agent,
+        cwd: params.cwd,
+        sessionName: params.sessionName,
+      });
+    }
+  }
+
   private async shouldReplaceEnsuredSession(params: {
     sessionName: string;
     agent: string;
     cwd: string;
-  }): Promise<boolean> {
+  }): Promise<{ replace: boolean; replacementEvents?: AcpxJsonObject[] }> {
     const args = await this.buildVerbArgs({
       agent: params.agent,
       cwd: params.cwd,
@@ -372,7 +535,7 @@ export class AcpxRuntime implements AcpRuntime {
       this.logger?.warn?.(
         `acpx ensureSession status probe failed: session=${params.sessionName} cwd=${params.cwd} error=${summarizeLogText(error instanceof Error ? error.message : String(error)) || "<empty>"}`,
       );
-      return false;
+      return { replace: false };
     }
 
     const noSession = events.some((event) => toAcpxErrorEvent(event)?.code === "NO_SESSION");
@@ -380,7 +543,7 @@ export class AcpxRuntime implements AcpRuntime {
       this.logger?.warn?.(
         `acpx ensureSession replacing missing named session: session=${params.sessionName} cwd=${params.cwd}`,
       );
-      return true;
+      return { replace: true };
     }
 
     const detail = events.find((event) => !toAcpxErrorEvent(event));
@@ -388,18 +551,24 @@ export class AcpxRuntime implements AcpRuntime {
     if (status === "dead") {
       const summary = summarizeLogText(asOptionalString(detail?.summary) ?? "");
       if (shouldRetainNamedSessionForDeadStatus(detail)) {
-        this.logger?.warn?.(
-          `acpx ensureSession retaining dead named session with recoverable status: session=${params.sessionName} cwd=${params.cwd} status=${status} summary=${summary || "<empty>"}`,
-        );
-        return false;
+        return {
+          replace: true,
+          replacementEvents: await this.replaceDeadNamedSession({
+            detail,
+            sessionName: params.sessionName,
+            agent: params.agent,
+            cwd: params.cwd,
+            logContext: `status=${status} summary=${summary || "<empty>"}`,
+          }),
+        };
       }
       this.logger?.warn?.(
         `acpx ensureSession replacing dead named session: session=${params.sessionName} cwd=${params.cwd} status=${status} summary=${summary || "<empty>"}`,
       );
-      return true;
+      return { replace: true };
     }
 
-    return false;
+    return { replace: false };
   }
 
   private async recoverEnsureFailure(params: {
@@ -407,7 +576,7 @@ export class AcpxRuntime implements AcpRuntime {
     agent: string;
     cwd: string;
     error: unknown;
-  }): Promise<AcpxJsonObject[] | null> {
+  }): Promise<EnsureFailureRecoveryResult | null> {
     const errorMessage = summarizeLogText(
       params.error instanceof Error ? params.error.message : String(params.error),
     );
@@ -439,11 +608,14 @@ export class AcpxRuntime implements AcpRuntime {
       this.logger?.warn?.(
         `acpx ensureSession creating named session after ensure failure and missing status: session=${params.sessionName} cwd=${params.cwd}`,
       );
-      return await this.createNamedSession({
-        agent: params.agent,
-        cwd: params.cwd,
-        sessionName: params.sessionName,
-      });
+      return {
+        events: await this.createNamedSession({
+          agent: params.agent,
+          cwd: params.cwd,
+          sessionName: params.sessionName,
+        }),
+        skipPostEnsureReplacement: true,
+      };
     }
 
     const detail = events.find((event) => !toAcpxErrorEvent(event));
@@ -451,26 +623,38 @@ export class AcpxRuntime implements AcpRuntime {
     if (status === "dead") {
       const summary = summarizeLogText(asOptionalString(detail?.summary) ?? "");
       if (shouldRetainNamedSessionForDeadStatus(detail)) {
-        this.logger?.warn?.(
-          `acpx ensureSession retaining dead named session after ensure failure with recoverable status: session=${params.sessionName} cwd=${params.cwd} status=${status} summary=${summary || "<empty>"}`,
-        );
-        return events;
+        return {
+          events: await this.replaceDeadNamedSession({
+            detail,
+            sessionName: params.sessionName,
+            agent: params.agent,
+            cwd: params.cwd,
+            logContext: `status=${status} summary=${summary || "<empty>"}`,
+          }),
+          skipPostEnsureReplacement: true,
+        };
       }
       this.logger?.warn?.(
         `acpx ensureSession replacing dead named session after ensure failure: session=${params.sessionName} cwd=${params.cwd}`,
       );
-      return await this.createNamedSession({
-        agent: params.agent,
-        cwd: params.cwd,
-        sessionName: params.sessionName,
-      });
+      return {
+        events: await this.createNamedSession({
+          agent: params.agent,
+          cwd: params.cwd,
+          sessionName: params.sessionName,
+        }),
+        skipPostEnsureReplacement: true,
+      };
     }
 
     if (status === "alive" || findSessionIdentifierEvent(events)) {
       this.logger?.warn?.(
         `acpx ensureSession reusing live named session after ensure failure: session=${params.sessionName} cwd=${params.cwd} status=${status || "unknown"}`,
       );
-      return events;
+      return {
+        events,
+        skipPostEnsureReplacement: false,
+      };
     }
 
     return null;
@@ -489,6 +673,7 @@ export class AcpxRuntime implements AcpRuntime {
     const mode = input.mode;
     const resumeSessionId = asTrimmedString(input.resumeSessionId);
     let events: AcpxJsonObject[];
+    let skipPostEnsureReplacement = false;
     if (resumeSessionId) {
       events = await this.createNamedSession({
         agent,
@@ -517,7 +702,8 @@ export class AcpxRuntime implements AcpRuntime {
         if (!recovered) {
           throw error;
         }
-        events = recovered;
+        events = recovered.events;
+        skipPostEnsureReplacement = recovered.skipPostEnsureReplacement;
       }
     }
     if (events.length === 0) {
@@ -527,26 +713,27 @@ export class AcpxRuntime implements AcpRuntime {
     }
     let ensuredEvent = findSessionIdentifierEvent(events);
 
-    if (
-      ensuredEvent &&
-      !resumeSessionId &&
-      (await this.shouldReplaceEnsuredSession({
+    if (ensuredEvent && !resumeSessionId && !skipPostEnsureReplacement) {
+      const replacement = await this.shouldReplaceEnsuredSession({
         sessionName,
         agent,
         cwd,
-      }))
-    ) {
-      events = await this.createNamedSession({
-        agent,
-        cwd,
-        sessionName,
       });
-      if (events.length === 0) {
-        this.logger?.warn?.(
-          `acpx ensureSession returned no events after replacing dead session: session=${sessionName} agent=${agent} cwd=${cwd}`,
-        );
+      if (replacement.replace) {
+        events =
+          replacement.replacementEvents ??
+          (await this.createNamedSession({
+            agent,
+            cwd,
+            sessionName,
+          }));
+        if (events.length === 0) {
+          this.logger?.warn?.(
+            `acpx ensureSession returned no events after replacing dead session: session=${sessionName} agent=${agent} cwd=${cwd}`,
+          );
+        }
+        ensuredEvent = findSessionIdentifierEvent(events);
       }
-      ensuredEvent = findSessionIdentifierEvent(events);
     }
 
     if (!ensuredEvent && !resumeSessionId) {
@@ -571,11 +758,10 @@ export class AcpxRuntime implements AcpRuntime {
       );
     }
 
-    const acpxRecordId = ensuredEvent ? asOptionalString(ensuredEvent.acpxRecordId) : undefined;
-    const agentSessionId = ensuredEvent ? asOptionalString(ensuredEvent.agentSessionId) : undefined;
-    const backendSessionId = ensuredEvent
-      ? asOptionalString(ensuredEvent.acpxSessionId)
-      : undefined;
+    const identifiers = resolveSessionIdentifiersFromEvent(ensuredEvent);
+    const acpxRecordId = identifiers.acpxRecordId;
+    const agentSessionId = identifiers.agentSessionId;
+    const backendSessionId = identifiers.backendSessionId;
 
     return {
       sessionKey: input.sessionKey,
@@ -597,10 +783,10 @@ export class AcpxRuntime implements AcpRuntime {
   }
 
   async *runTurn(input: AcpRuntimeTurnInput): AsyncIterable<AcpRuntimeEvent> {
-    const state = this.resolveHandleState(input.handle);
+    let state = this.resolveHandleState(input.handle);
     const args = await this.buildPromptArgs({
       agent: state.agent,
-      sessionName: state.name,
+      sessionName: resolveInteractiveSessionReference(state),
       cwd: state.cwd,
     });
 
@@ -661,6 +847,11 @@ export class AcpxRuntime implements AcpRuntime {
     const lines = createInterface({ input: child.stdout });
     try {
       for await (const line of lines) {
+        const promptIdentifiers = extractPromptSessionIdentifiers(line);
+        if (hasSessionIdentifiers(promptIdentifiers)) {
+          state = mergeHandleStateWithIdentifiers(state, promptIdentifiers);
+          writeHandleState(input.handle, state);
+        }
         const parsed = parsePromptEventLine(line);
         if (!parsed) {
           continue;
@@ -737,7 +928,7 @@ export class AcpxRuntime implements AcpRuntime {
     const args = await this.buildVerbArgs({
       agent: state.agent,
       cwd: state.cwd,
-      command: ["status", "--session", state.name],
+      command: ["status", "--session", resolveInteractiveSessionReference(state)],
     });
     const events = await this.runControlCommand({
       args,
@@ -756,6 +947,14 @@ export class AcpxRuntime implements AcpRuntime {
     const acpxRecordId = asOptionalString(detail.acpxRecordId);
     const acpxSessionId = asOptionalString(detail.acpxSessionId);
     const agentSessionId = asOptionalString(detail.agentSessionId);
+    const refreshedIdentifiers: AcpxSessionIdentifiers = {
+      ...(acpxRecordId ? { acpxRecordId } : {}),
+      ...(acpxSessionId ? { backendSessionId: acpxSessionId } : {}),
+      ...(agentSessionId ? { agentSessionId } : {}),
+    };
+    if (hasSessionIdentifiers(refreshedIdentifiers)) {
+      writeHandleState(input.handle, mergeHandleStateWithIdentifiers(state, refreshedIdentifiers));
+    }
     const pid = typeof detail.pid === "number" && Number.isFinite(detail.pid) ? detail.pid : null;
     const summary = [
       `status=${status}`,
@@ -783,7 +982,7 @@ export class AcpxRuntime implements AcpRuntime {
     const args = await this.buildVerbArgs({
       agent: state.agent,
       cwd: state.cwd,
-      command: ["set-mode", mode, "--session", state.name],
+      command: ["set-mode", mode, "--session", resolveInteractiveSessionReference(state)],
     });
     await this.runControlCommand({
       args,
@@ -806,7 +1005,7 @@ export class AcpxRuntime implements AcpRuntime {
     const args = await this.buildVerbArgs({
       agent: state.agent,
       cwd: state.cwd,
-      command: ["set", key, value, "--session", state.name],
+      command: ["set", key, value, "--session", resolveInteractiveSessionReference(state)],
     });
     await this.runControlCommand({
       args,
@@ -895,7 +1094,7 @@ export class AcpxRuntime implements AcpRuntime {
     const args = await this.buildVerbArgs({
       agent: state.agent,
       cwd: state.cwd,
-      command: ["cancel", "--session", state.name],
+      command: ["cancel", "--session", resolveInteractiveSessionReference(state)],
     });
     await this.runControlCommand({
       args,
@@ -923,7 +1122,13 @@ export class AcpxRuntime implements AcpRuntime {
   private resolveHandleState(handle: AcpRuntimeHandle): AcpxHandleState {
     const decoded = decodeAcpxRuntimeHandleState(handle.runtimeSessionName);
     if (decoded) {
-      return decoded;
+      // Prefer the encoded runtime state over legacy handle fields so stale
+      // fallback metadata does not resurrect older session identifiers.
+      return mergeHandleStateWithFallbackIdentifiers(decoded, {
+        acpxRecordId: asOptionalString((handle as { acpxRecordId?: unknown }).acpxRecordId),
+        backendSessionId: asOptionalString(handle.backendSessionId),
+        agentSessionId: asOptionalString(handle.agentSessionId),
+      });
     }
 
     const legacyName = asTrimmedString(handle.runtimeSessionName);
@@ -939,6 +1144,17 @@ export class AcpxRuntime implements AcpRuntime {
       agent: deriveAgentFromSessionKey(handle.sessionKey, DEFAULT_AGENT_FALLBACK),
       cwd: this.config.cwd,
       mode: "persistent",
+      ...(asOptionalString((handle as { acpxRecordId?: unknown }).acpxRecordId)
+        ? {
+            acpxRecordId: asOptionalString((handle as { acpxRecordId?: unknown }).acpxRecordId),
+          }
+        : {}),
+      ...(asOptionalString(handle.backendSessionId)
+        ? { backendSessionId: asOptionalString(handle.backendSessionId) }
+        : {}),
+      ...(asOptionalString(handle.agentSessionId)
+        ? { agentSessionId: asOptionalString(handle.agentSessionId) }
+        : {}),
     };
   }
 
