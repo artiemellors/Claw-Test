@@ -71,7 +71,7 @@ export function resolveAgentScopedOutboundMediaAccess(params: {
       workspaceDir: resolvedWorkspaceDir,
     });
   return {
-    ...(localRoots?.length ? { localRoots } : {}),
+    ...(localRoots !== undefined ? { localRoots } : {}),
     ...(readFile ? { readFile } : {}),
     ...(resolvedWorkspaceDir ? { workspaceDir: resolvedWorkspaceDir } : {}),
   };
