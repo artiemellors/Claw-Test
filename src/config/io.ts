@@ -93,6 +93,10 @@ const SHELL_ENV_EXPECTED_KEYS = [
   "OPENCLAW_GATEWAY_PASSWORD",
 ];
 
+// In-process deduplication for clobbered config snapshots
+// Prevents duplicate snapshot writes when writeConfigHealthState fails silently
+const observedSuspiciousSignatures = new Set<string>();
+
 const OPEN_DM_POLICY_ALLOW_FROM_RE =
   /^(?<policyPath>[a-z0-9_.-]+)\s*=\s*"open"\s+requires\s+(?<allowPath>[a-z0-9_.-]+)(?:\s+\(or\s+[a-z0-9_.-]+\))?\s+to include "\*"$/i;
 
@@ -1299,6 +1303,13 @@ async function observeConfigSnapshot(
     return;
   }
 
+  // In-process deduplication fallback when writeConfigHealthState fails silently
+  const signatureWithPath = `${snapshot.path}:${suspiciousSignature}`;
+  if (observedSuspiciousSignatures.has(signatureWithPath)) {
+    return;
+  }
+  observedSuspiciousSignatures.add(signatureWithPath);
+
   const backup =
     (backupBaseline?.hash ? backupBaseline : null) ??
     (await readConfigFingerprintForPath(deps, `${snapshot.path}.bak`));
@@ -1368,6 +1379,10 @@ async function observeConfigSnapshot(
     lastObservedSuspiciousSignature: suspiciousSignature,
   });
   await writeConfigHealthState(deps, healthState);
+
+  // Clear in-process dedup entry if health state was successfully persisted
+  // (writeConfigHealthState has silent catch, so we can't detect failures)
+  observedSuspiciousSignatures.delete(signatureWithPath);
 }
 
 function observeConfigSnapshotSync(
@@ -1426,6 +1441,13 @@ function observeConfigSnapshotSync(
   if (entry.lastObservedSuspiciousSignature === suspiciousSignature) {
     return;
   }
+
+  // In-process deduplication fallback when writeConfigHealthState fails silently
+  const signatureWithPath = `${snapshot.path}:${suspiciousSignature}`;
+  if (observedSuspiciousSignatures.has(signatureWithPath)) {
+    return;
+  }
+  observedSuspiciousSignatures.add(signatureWithPath);
 
   const backup =
     (backupBaseline?.hash ? backupBaseline : null) ??
@@ -1496,6 +1518,10 @@ function observeConfigSnapshotSync(
     lastObservedSuspiciousSignature: suspiciousSignature,
   });
   writeConfigHealthStateSync(deps, healthState);
+
+  // Clear in-process dedup entry if health state was successfully persisted
+  // (writeConfigHealthStateSync has silent catch, so we can't detect failures)
+  observedSuspiciousSignatures.delete(signatureWithPath);
 }
 
 export type ConfigIoDeps = {
