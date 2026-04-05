@@ -1037,6 +1037,28 @@ export function getSessionDefaults(cfg: OpenClawConfig): GatewaySessionsDefaults
   };
 }
 
+function normalizeStoredSessionOverride(params: {
+  providerOverride?: string | null;
+  modelOverride?: string | null;
+}): { providerOverride?: string; modelOverride?: string } {
+  const providerOverride = params.providerOverride?.trim();
+  const modelOverride = params.modelOverride?.trim();
+  if (!providerOverride || !modelOverride) {
+    return {
+      providerOverride,
+      modelOverride,
+    };
+  }
+
+  const providerPrefix = `${providerOverride.toLowerCase()}/`;
+  return {
+    providerOverride,
+    modelOverride: modelOverride.toLowerCase().startsWith(providerPrefix)
+      ? modelOverride.slice(providerOverride.length + 1).trim() || modelOverride
+      : modelOverride,
+  };
+}
+
 export function resolveSessionModelRef(
   cfg: OpenClawConfig,
   entry?:
@@ -1052,12 +1074,17 @@ export function resolveSessionModelRef(
         defaultModel: DEFAULT_MODEL,
       });
 
+  const normalizedOverride = normalizeStoredSessionOverride({
+    providerOverride: entry?.providerOverride,
+    modelOverride: entry?.modelOverride,
+  });
+
   const persisted = resolvePersistedSelectedModelRef({
     defaultProvider: resolved.provider || DEFAULT_PROVIDER,
     runtimeProvider: entry?.modelProvider,
     runtimeModel: entry?.model,
-    overrideProvider: entry?.providerOverride,
-    overrideModel: entry?.modelOverride,
+    overrideProvider: normalizedOverride.providerOverride,
+    overrideModel: normalizedOverride.modelOverride,
   });
   if (persisted) {
     return persisted;
