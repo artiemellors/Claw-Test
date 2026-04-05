@@ -216,7 +216,10 @@ export async function runReplyAgent(params: {
     const steerSessionId =
       (sessionKey ? replyRunRegistry.resolveSessionId(sessionKey) : undefined) ??
       followupRun.run.sessionId;
-    const steered = queueEmbeddedPiMessage(steerSessionId, followupRun.prompt);
+    const steered = queueEmbeddedPiMessage(
+      steerSessionId,
+      followupRun.execution.agentPrompt,
+    );
     if (steered && !shouldFollowup) {
       await touchActiveSessionEntry();
       typing.cleanup();

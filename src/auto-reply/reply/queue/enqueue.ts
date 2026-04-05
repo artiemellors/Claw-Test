@@ -2,7 +2,13 @@ import { resolveGlobalDedupeCache } from "../../../infra/dedupe.js";
 import { applyQueueDropPolicy, shouldSkipQueueItem } from "../../../utils/queue-helpers.js";
 import { kickFollowupDrainIfIdle, rememberFollowupDrainCallback } from "./drain.js";
 import { getExistingFollowupQueue, getFollowupQueue } from "./state.js";
-import type { FollowupRun, QueueDedupeMode, QueueSettings } from "./types.js";
+import {
+  getFollowupAgentPrompt,
+  getFollowupSummaryLine,
+  type FollowupRun,
+  type QueueDedupeMode,
+  type QueueSettings,
+} from "./types.js";
 
 /**
  * Keep queued message-id dedupe shared across bundled chunks so redeliveries
@@ -51,7 +57,9 @@ function isRunAlreadyQueued(
   if (!allowPromptFallback) {
     return false;
   }
-  return items.some((item) => item.prompt === run.prompt && hasSameRouting(item));
+  return items.some(
+    (item) => getFollowupAgentPrompt(item) === getFollowupAgentPrompt(run) && hasSameRouting(item),
+  );
 }
 
 export function enqueueFollowupRun(
@@ -84,10 +92,29 @@ export function enqueueFollowupRun(
 
   const shouldEnqueue = applyQueueDropPolicy({
     queue,
-    summarize: (item) => item.summaryLine?.trim() || item.prompt.trim(),
+    summarize: (item) =>
+      getFollowupSummaryLine(item) ?? getFollowupAgentPrompt(item) ?? "[Hidden message]", 
   });
   if (!shouldEnqueue) {
     return false;
+  }
+
+  if (run.messageId?.trim()) {
+    const sameMessageTarget = queue.items.find(
+      (item) =>
+        item.messageId?.trim() === run.messageId?.trim() &&
+        item.originatingChannel === run.originatingChannel &&
+        item.originatingTo === run.originatingTo &&
+        item.originatingAccountId === run.originatingAccountId &&
+        item.originatingThreadId === run.originatingThreadId,
+    );
+    if (sameMessageTarget) {
+      sameMessageTarget.execution = run.execution;
+      sameMessageTarget.display = run.display;
+      sameMessageTarget.enqueuedAt = run.enqueuedAt;
+      sameMessageTarget.run = run.run;
+      return true;
+    }
   }
 
   queue.items.push(run);

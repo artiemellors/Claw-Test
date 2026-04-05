@@ -142,8 +142,8 @@ function createMockTypingSignaler(): TypingSignaler {
 
 function createFollowupRun(): FollowupRun {
   return {
-    prompt: "hello",
-    summaryLine: "hello",
+    execution: { visibility: "internal", agentPrompt: "hello" },
+    display: { visibility: "user-visible", summaryLine: "hello" },
     enqueuedAt: Date.now(),
     run: {
       agentId: "agent",
@@ -154,7 +154,7 @@ function createFollowupRun(): FollowupRun {
       sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       config: {},
-      skillsSnapshot: {},
+      skillsSnapshot: { prompt: "", skills: [] },
       provider: "anthropic",
       model: "claude",
       thinkLevel: "low",

@@ -8,6 +8,7 @@ import { normalizePackageTagInput } from "../../infra/package-tag.js";
 import { trimLogTail } from "../../infra/restart-sentinel.js";
 import { parseSemver } from "../../infra/runtime-guard.js";
 import { fetchNpmTagVersion } from "../../infra/update-check.js";
+import type { PackageManager } from "../../infra/update-check.js";
 import {
   canResolveRegistryVersionForPackageTarget,
   createGlobalInstallEnv,
@@ -239,6 +240,7 @@ export async function resolveGlobalManager(params: {
   root: string;
   installKind: "git" | "package" | "unknown";
   timeoutMs: number;
+  preferredManager?: PackageManager;
 }): Promise<GlobalInstallManager> {
   const runCommand = createGlobalCommandRunner();
 
@@ -251,10 +253,60 @@ export async function resolveGlobalManager(params: {
     if (detected) {
       return detected;
     }
+    if (
+      params.preferredManager === "npm" ||
+      params.preferredManager === "pnpm" ||
+      params.preferredManager === "bun"
+    ) {
+      const preferredAvailable = await isPreferredGlobalManagerAvailable(
+        runCommand,
+        params.preferredManager,
+        params.timeoutMs,
+      );
+      if (preferredAvailable) {
+        return params.preferredManager;
+      }
+    }
   }
 
   const byPresence = await detectGlobalInstallManagerByPresence(runCommand, params.timeoutMs);
   return byPresence ?? "npm";
+}
+
+async function isPreferredGlobalManagerAvailable(
+  runCommand: CommandRunner,
+  manager: GlobalInstallManager,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (manager === "bun") {
+    const bunInstallRoot = process.env.BUN_INSTALL?.trim() || path.join(os.homedir(), ".bun");
+    const installRoot = path.join(
+      bunInstallRoot,
+      "install",
+      "global",
+      "node_modules",
+      DEFAULT_PACKAGE_NAME,
+    );
+    if (!(await pathExists(installRoot))) {
+      return false;
+    }
+    try {
+      const res = await runCommand(["bun", "--version"], { timeoutMs });
+      return res.code === 0;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const res = await runCommand([manager, "root", "-g"], { timeoutMs });
+    if (res.code !== 0) {
+      return false;
+    }
+    const root = res.stdout.trim();
+    return !!root && (await pathExists(path.join(root, DEFAULT_PACKAGE_NAME)));
+  } catch {
+    return false;
+  }
 }
 
 export async function tryWriteCompletionCache(root: string, jsonMode: boolean): Promise<void> {

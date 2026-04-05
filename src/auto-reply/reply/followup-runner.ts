@@ -15,6 +15,7 @@ import { logVerbose } from "../../globals.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { defaultRuntime } from "../../runtime.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
+import { toUserFacingContent } from "../../utils/user-facing-content.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
 import type { OriginatingChannelType } from "../templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
@@ -80,6 +81,20 @@ export function createFollowupRunner(params: {
     // Check if we should route to originating channel.
     const { originatingChannel, originatingTo } = queued;
     const shouldRouteToOriginating = isRoutableChannel(originatingChannel) && originatingTo;
+    let queuedUserFacingContent;
+    try {
+      queuedUserFacingContent = queued.display
+        ? toUserFacingContent({
+            payload: queued.display,
+            source: "queued-followup-display",
+          })
+        : undefined;
+    } catch (err) {
+      defaultRuntime.error?.(
+        `followup queue: dropping malformed queued display payload before drain retry: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
 
     if (!shouldRouteToOriginating && !opts?.onBlockReply) {
       logVerbose("followup queue: no onBlockReply handler; dropping payloads");
@@ -90,6 +105,7 @@ export function createFollowupRunner(params: {
       if (!payload || !hasOutboundReplyContent(payload)) {
         continue;
       }
+      void queuedUserFacingContent;
       if (
         isSilentReplyText(payload.text, SILENT_REPLY_TOKEN) &&
         !resolveSendableOutboundReplyParts(payload).hasMedia
@@ -166,7 +182,7 @@ export function createFollowupRunner(params: {
       activeSessionEntry = await runPreflightCompactionIfNeeded({
         cfg: queued.run.config,
         followupRun: queued,
-        promptForEstimate: queued.prompt,
+        promptForEstimate: queued.execution.agentPrompt,
         defaultModel,
         agentCfgContextTokens,
         sessionEntry: activeSessionEntry,
@@ -226,7 +242,7 @@ export function createFollowupRunner(params: {
                 workspaceDir: queued.run.workspaceDir,
                 config: queued.run.config,
                 skillsSnapshot: queued.run.skillsSnapshot,
-                prompt: queued.prompt,
+                prompt: queued.execution.agentPrompt,
                 extraSystemPrompt: queued.run.extraSystemPrompt,
                 ownerNumbers: queued.run.ownerNumbers,
                 enforceFinalTag: queued.run.enforceFinalTag,

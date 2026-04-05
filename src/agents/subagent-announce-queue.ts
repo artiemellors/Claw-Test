@@ -1,5 +1,10 @@
 import { type QueueDropPolicy, type QueueMode } from "../auto-reply/reply/queue.js";
 import { defaultRuntime } from "../runtime.js";
+import { renderDeferredBatch } from "../utils/deferred-render.js";
+import {
+  type DeferredDisplayPayload,
+  type DeferredExecutionPayload,
+} from "../utils/deferred-visibility.js";
 import {
   type DeliveryContext,
   deliveryContextKey,
@@ -9,7 +14,6 @@ import {
   applyQueueRuntimeSettings,
   applyQueueDropPolicy,
   beginQueueDrain,
-  buildCollectPrompt,
   clearQueueSummaryState,
   drainCollectQueueStep,
   drainNextQueueItem,
@@ -23,8 +27,8 @@ export type AnnounceQueueItem = {
   // Stable announce identity shared by direct + queued delivery paths.
   // Optional for backward compatibility with previously queued items.
   announceId?: string;
-  prompt: string;
-  summaryLine?: string;
+  execution: DeferredExecutionPayload;
+  display: DeferredDisplayPayload;
   internalEvents?: AgentInternalEvent[];
   enqueuedAt: number;
   sessionKey: string;
@@ -52,7 +56,18 @@ type AnnounceQueueState = {
   dropPolicy: QueueDropPolicy;
   droppedCount: number;
   summaryLines: string[];
+  collectForceIndividual: boolean;
   send: (item: AnnounceQueueItem) => Promise<void>;
+  /** Safe queued announce item shape to reuse for overflow-summary delivery when items drain empty. */
+  lastSummaryTarget?: AnnounceQueueItem;
+  /** Latest dropped-item target when summarized drops still belong to one origin. */
+  summaryOverflowTarget?: AnnounceQueueItem;
+  /** Tracks whether summarize-mode origin routing has already observed a dropped item. */
+  summaryOverflowOriginInitialized?: boolean;
+  /** Origin key for summarized drops; null means mixed/ambiguous and unsafe to route. */
+  summaryOverflowOriginKey?: string | null;
+  /** Stable synthetic identity for pending collect-empty overflow summary sends. */
+  summarySyntheticEnqueuedAt?: number;
   /** Consecutive drain failures — drives exponential backoff on errors. */
   consecutiveFailures: number;
 };
@@ -95,7 +110,12 @@ function getAnnounceQueue(
     dropPolicy: settings.dropPolicy ?? "summarize",
     droppedCount: 0,
     summaryLines: [],
+    collectForceIndividual: false,
     send,
+    lastSummaryTarget: undefined,
+    summaryOverflowTarget: undefined,
+    summaryOverflowOriginInitialized: false,
+    summaryOverflowOriginKey: undefined,
     consecutiveFailures: 0,
   };
   applyQueueRuntimeSettings({
@@ -118,6 +138,87 @@ function hasAnnounceCrossChannelItems(items: AnnounceQueueItem[]): boolean {
   });
 }
 
+export function resolveAnnounceCollectEmptySummaryTarget(params: {
+  items: AnnounceQueueItem[];
+  lastSummaryTarget?: AnnounceQueueItem;
+  summaryOverflowTarget?: AnnounceQueueItem;
+  summaryOverflowOriginKey?: string | null;
+}): AnnounceQueueItem | undefined {
+  if (params.items[0]) {
+    return params.items[0];
+  }
+  if (params.summaryOverflowOriginKey === null) {
+    return undefined;
+  }
+  return params.summaryOverflowTarget ?? params.lastSummaryTarget;
+}
+
+function clearAnnounceSummaryState(
+  queue: Pick<
+    AnnounceQueueState,
+    | "dropPolicy"
+    | "droppedCount"
+    | "summaryLines"
+    | "summaryOverflowOriginInitialized"
+    | "summaryOverflowTarget"
+    | "summaryOverflowOriginKey"
+    | "summarySyntheticEnqueuedAt"
+  >,
+): void {
+  clearQueueSummaryState(queue);
+  queue.summaryOverflowTarget = undefined;
+  queue.summaryOverflowOriginInitialized = false;
+  queue.summaryOverflowOriginKey = undefined;
+  queue.summarySyntheticEnqueuedAt = undefined;
+}
+
+export async function maybeSendAnnounceCollectEmptySummary(params: {
+  queue: Pick<
+    AnnounceQueueState,
+    | "items"
+    | "dropPolicy"
+    | "droppedCount"
+    | "summaryLines"
+    | "lastSummaryTarget"
+    | "summaryOverflowOriginInitialized"
+    | "summaryOverflowTarget"
+    | "summaryOverflowOriginKey"
+    | "summarySyntheticEnqueuedAt"
+  >;
+  send: (item: AnnounceQueueItem) => Promise<void>;
+}): Promise<boolean> {
+  const summaryPrompt = previewQueueSummaryPrompt({ state: params.queue, noun: "announce" });
+  const summaryTarget = resolveAnnounceCollectEmptySummaryTarget({
+    items: params.queue.items,
+    lastSummaryTarget: params.queue.lastSummaryTarget,
+    summaryOverflowTarget: params.queue.summaryOverflowTarget,
+    summaryOverflowOriginKey: params.queue.summaryOverflowOriginKey,
+  });
+  if (!summaryPrompt) {
+    return false;
+  }
+  if (!summaryTarget) {
+    if (params.queue.summaryOverflowOriginKey === null) {
+      clearAnnounceSummaryState(params.queue);
+    }
+    return false;
+  }
+  params.queue.lastSummaryTarget = summaryTarget;
+  if (!params.queue.summarySyntheticEnqueuedAt) {
+    params.queue.summarySyntheticEnqueuedAt = Date.now();
+  }
+  await params.send({
+    ...summaryTarget,
+    announceId: undefined,
+    enqueuedAt: params.queue.summarySyntheticEnqueuedAt,
+    execution: { visibility: "internal", agentPrompt: summaryPrompt },
+    display: { visibility: "user-visible", text: summaryPrompt },
+    internalEvents: undefined,
+  });
+  clearAnnounceSummaryState(params.queue);
+  return true;
+}
+
 function scheduleAnnounceDrain(key: string) {
   const queue = beginQueueDrain(ANNOUNCE_QUEUES, key);
   if (!queue) {
@@ -125,7 +226,7 @@ function scheduleAnnounceDrain(key: string) {
   }
   void (async () => {
     try {
-      const collectState = { forceIndividualCollect: false };
+      const collectState = { forceIndividualCollect: queue.collectForceIndividual };
       for (;;) {
         if (queue.items.length === 0 && queue.droppedCount === 0) {
           break;
@@ -136,9 +237,18 @@ function scheduleAnnounceDrain(key: string) {
             collectState,
             isCrossChannel: hasAnnounceCrossChannelItems(queue.items),
             items: queue.items,
-            run: async (item) => await queue.send(item),
+            run: async (item) => {
+              queue.lastSummaryTarget = item;
+              await queue.send(item);
+            },
           });
+          if (collectState.forceIndividualCollect) {
+            queue.collectForceIndividual = true;
+          }
           if (collectDrainResult === "empty") {
+            if (await maybeSendAnnounceCollectEmptySummary({ queue, send: queue.send })) {
+              continue;
+            }
             break;
           }
           if (collectDrainResult === "drained") {
@@ -146,25 +256,50 @@ function scheduleAnnounceDrain(key: string) {
           }
           const items = queue.items.slice();
           const summary = previewQueueSummaryPrompt({ state: queue, noun: "announce" });
-          const prompt = buildCollectPrompt({
-            title: "[Queued announce messages while agent was busy]",
-            items,
-            summary,
-            renderItem: (item, idx) => `---\nQueued #${idx + 1}\n${item.prompt}`.trim(),
-          });
+          let prompt: string;
+          try {
+            prompt = renderDeferredBatch({
+              title: "[Queued announce messages while agent was busy]",
+              items: items.map((item) => item.display),
+              summary,
+            });
+          } catch (err) {
+            defaultRuntime.error?.(
+              `collect-mode announce batch render failed for ${key}; falling back to individual drain: ${String(err)}`,
+            );
+            if (summary) {
+              const summaryTarget = items[0];
+              if (!summaryTarget) {
+                break;
+              }
+              queue.lastSummaryTarget = summaryTarget;
+              await queue.send({
+                ...summaryTarget,
+                execution: { visibility: "internal", agentPrompt: summary },
+                display: { visibility: "user-visible", text: summary },
+                internalEvents: undefined,
+              });
+              clearAnnounceSummaryState(queue);
+            }
+            collectState.forceIndividualCollect = true;
+            queue.collectForceIndividual = true;
+            continue;
+          }
           const internalEvents = items.flatMap((item) => item.internalEvents ?? []);
           const last = items.at(-1);
           if (!last) {
             break;
           }
+          queue.lastSummaryTarget = last;
           await queue.send({
             ...last,
-            prompt,
+            execution: { visibility: "internal", agentPrompt: prompt },
+            display: { visibility: "user-visible", text: prompt },
             internalEvents: internalEvents.length > 0 ? internalEvents : last.internalEvents,
           });
           queue.items.splice(0, items.length);
           if (summary) {
-            clearQueueSummaryState(queue);
+            clearAnnounceSummaryState(queue);
           }
           continue;
         }
@@ -172,18 +307,27 @@ function scheduleAnnounceDrain(key: string) {
         const summaryPrompt = previewQueueSummaryPrompt({ state: queue, noun: "announce" });
         if (summaryPrompt) {
           if (
-            !(await drainNextQueueItem(
-              queue.items,
-              async (item) => await queue.send({ ...item, prompt: summaryPrompt }),
-            ))
+            !(await drainNextQueueItem(queue.items, async (item) => {
+              queue.lastSummaryTarget = item;
+              await queue.send({
+                ...item,
+                execution: { visibility: "internal", agentPrompt: summaryPrompt },
+                display: { visibility: "user-visible", text: summaryPrompt },
+              });
+            }))
           ) {
             break;
           }
-          clearQueueSummaryState(queue);
+          clearAnnounceSummaryState(queue);
           continue;
         }
 
-        if (!(await drainNextQueueItem(queue.items, async (item) => await queue.send(item)))) {
+        if (
+          !(await drainNextQueueItem(queue.items, async (item) => {
+            queue.lastSummaryTarget = item;
+            await queue.send(item);
+          }))
+        ) {
           break;
         }
       }
@@ -221,7 +365,26 @@ export function enqueueAnnounce(params: {
 
   const shouldEnqueue = applyQueueDropPolicy({
     queue,
-    summarize: (item) => item.summaryLine?.trim() || item.prompt.trim(),
+    summarize: (item) => {
+      if (queue.summaryOverflowOriginKey !== null) {
+        const itemOriginKey = item.originKey;
+        if (!queue.summaryOverflowOriginInitialized) {
+          queue.summaryOverflowOriginInitialized = true;
+          queue.summaryOverflowOriginKey = itemOriginKey;
+          queue.summaryOverflowTarget = item;
+        } else if (queue.summaryOverflowOriginKey === itemOriginKey) {
+          queue.summaryOverflowTarget = item;
+        } else {
+          queue.summaryOverflowOriginKey = null;
+          queue.summaryOverflowTarget = undefined;
+        }
+      }
+      const display = item.display;
+      if (display.visibility === "summary-only") {
+        return display.summaryLine?.trim() || "[summary unavailable]";
+      }
+      return display.summaryLine?.trim() || display.text?.trim() || "[summary unavailable]";
+    },
   });
   if (!shouldEnqueue) {
     if (queue.dropPolicy === "new") {

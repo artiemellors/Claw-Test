@@ -133,8 +133,8 @@ function createMinimalRun(params?: {
   } as unknown as QueueSettings;
   const sessionKey = params?.sessionKey ?? "main";
   const followupRun = {
-    prompt: "hello",
-    summaryLine: "hello",
+    execution: { visibility: "internal", agentPrompt: "hello" },
+    display: { visibility: "user-visible", summaryLine: "hello" },
     enqueuedAt: Date.now(),
     run: {
       sessionId: "session",
@@ -143,7 +143,7 @@ function createMinimalRun(params?: {
       sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       config: {},
-      skillsSnapshot: {},
+      skillsSnapshot: { prompt: "", skills: [] },
       provider: "anthropic",
       model: "claude",
       thinkLevel: "low",
@@ -222,8 +222,8 @@ function createBaseRun(params: {
   } as unknown as TemplateContext;
   const resolvedQueue = { mode: "interrupt" } as unknown as QueueSettings;
   const followupRun = {
-    prompt: "hello",
-    summaryLine: "hello",
+    execution: { visibility: "internal", agentPrompt: "hello" },
+    display: { visibility: "user-visible", summaryLine: "hello" },
     enqueuedAt: Date.now(),
     run: {
       agentId: "main",
@@ -234,7 +234,7 @@ function createBaseRun(params: {
       sessionFile: "/tmp/session.jsonl",
       workspaceDir: "/tmp",
       config: params.config ?? {},
-      skillsSnapshot: {},
+      skillsSnapshot: { prompt: "", skills: [] },
       provider: "anthropic",
       model: "claude",
       thinkLevel: "low",

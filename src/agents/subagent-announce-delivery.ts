@@ -1,4 +1,5 @@
 import { getChannelPlugin } from "../channels/plugins/index.js";
+import { parseExplicitTargetForChannel } from "../channels/plugins/target-parsing.js";
 import type { ConversationRef } from "../infra/outbound/session-binding-service.js";
 import { normalizeAccountId, normalizeMainKey } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
@@ -16,6 +17,7 @@ import {
   isInternalMessageChannel,
   normalizeMessageChannel,
 } from "../utils/message-channel.js";
+import { toUserFacingContent } from "../utils/user-facing-content.js";
 import { buildAnnounceIdempotencyKey, resolveQueueAnnounceId } from "./announce-idempotency.js";
 import type { AgentInternalEvent } from "./internal-events.js";
 import {
@@ -94,15 +96,38 @@ function summarizeDeliveryError(error: unknown): string {
   }
 }
 
+function parseTelegramAnnounceTarget(to: string): {
+  chatId: string;
+  chatType: "direct" | "group" | "unknown";
+} {
+  const trimmed = to.trim();
+  const parsed = parseExplicitTargetForChannel("telegram", trimmed);
+  const rawChatId = parsed?.to?.trim() || trimmed;
+  const chatId = rawChatId
+    .replace(/^telegram:(?:group:)?/i, "")
+    .replace(/^tg:/i, "")
+    .replace(/^group:/i, "")
+    .replace(/:topic:\d+$/i, "")
+    .trim();
+  const inferredGroup = /^-\d+$/.test(chatId);
+  const chatType =
+    parsed?.chatType === "direct" || parsed?.chatType === "group"
+      ? parsed.chatType
+      : inferredGroup
+        ? "group"
+        : "unknown";
+  return { chatId, chatType };
+}
+
 function normalizeTelegramAnnounceTarget(target: string | undefined): string | undefined {
   const trimmed = target?.trim();
   if (!trimmed) {
     return undefined;
   }
-  if (trimmed.startsWith("group:")) {
+  if (/^group:/i.test(trimmed)) {
     return `telegram:${trimmed.slice("group:".length)}`;
   }
-  if (!trimmed.startsWith("telegram:")) {
+  if (!/^telegram:/i.test(trimmed)) {
     return undefined;
   }
   const raw = trimmed.slice("telegram:".length);
@@ -340,6 +365,12 @@ async function sendAnnounce(item: AnnounceQueueItem) {
   const cfg = subagentAnnounceDeliveryDeps.loadConfig();
   const announceTimeoutMs = resolveSubagentAnnounceTimeoutMs(cfg);
   const requesterIsSubagent = isInternalAnnounceRequesterSession(item.sessionKey);
+  const userFacing = !requesterIsSubagent
+    ? toUserFacingContent({
+        payload: item.display,
+        source: "queued-announce-display",
+      })
+    : undefined;
   const origin = item.origin;
   const threadId =
     origin?.threadId != null && origin.threadId !== "" ? String(origin.threadId) : undefined;
@@ -354,7 +385,7 @@ async function sendAnnounce(item: AnnounceQueueItem) {
     method: "agent",
     params: {
       sessionKey: item.sessionKey,
-      message: item.prompt,
+      message: requesterIsSubagent ? item.execution.agentPrompt : userFacing?.text ?? "",
       channel: requesterIsSubagent ? undefined : origin?.channel,
       accountId: requesterIsSubagent ? undefined : origin?.accountId,
       to: requesterIsSubagent ? undefined : origin?.to,
@@ -421,6 +452,21 @@ function buildAnnounceQueueKey(sessionKey: string, origin?: DeliveryContext): st
   return `${sessionKey}:acct:${accountId}`;
 }
 
+function buildQueuedAnnounceDisplay(params: {
+  triggerMessage: string;
+  summaryLine?: string;
+}): AnnounceQueueItem["display"] {
+  const summaryLine = params.summaryLine?.trim();
+  if (!summaryLine) {
+    return { visibility: "summary-only" };
+  }
+  return {
+    visibility: "user-visible",
+    text: summaryLine,
+    summaryLine,
+  };
+}
+
 async function maybeQueueSubagentAnnounce(params: {
   requesterSessionKey: string;
   announceId?: string;
@@ -470,8 +516,11 @@ async function maybeQueueSubagentAnnounce(params: {
       key: buildAnnounceQueueKey(canonicalKey, origin),
       item: {
         announceId: params.announceId,
-        prompt: params.triggerMessage,
-        summaryLine: params.summaryLine,
+        execution: { visibility: "internal", agentPrompt: params.triggerMessage },
+        display: buildQueuedAnnounceDisplay({
+          triggerMessage: params.triggerMessage,
+          summaryLine: params.summaryLine,
+        }),
         internalEvents: params.internalEvents,
         enqueuedAt: Date.now(),
         sessionKey: canonicalKey,
@@ -676,5 +725,11 @@ export const __testing = {
           ...overrides,
         }
       : defaultSubagentAnnounceDeliveryDeps;
+  },
+  async sendAnnounceForTest(item: AnnounceQueueItem) {
+    return sendAnnounce(item);
+  },
+  buildQueuedAnnounceDisplayForTest(params: { triggerMessage: string; summaryLine?: string }) {
+    return buildQueuedAnnounceDisplay(params);
   },
 };

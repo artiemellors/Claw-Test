@@ -1,7 +1,7 @@
 import { defaultRuntime } from "../../../runtime.js";
 import { resolveGlobalMap } from "../../../shared/global-singleton.js";
+import { renderDeferredBatch } from "../../../utils/deferred-render.js";
 import {
-  buildCollectPrompt,
   beginQueueDrain,
   clearQueueSummaryState,
   drainCollectQueueStep,
@@ -12,7 +12,7 @@ import {
 } from "../../../utils/queue-helpers.js";
 import { isRoutableChannel } from "../route-reply.js";
 import { FOLLOWUP_QUEUES } from "./state.js";
-import type { FollowupRun } from "./types.js";
+import { type FollowupRun } from "./types.js";
 
 // Persists the most recent runFollowup callback per queue key so that
 // enqueueFollowupRun can restart a drain that finished and deleted the queue.
@@ -89,7 +89,7 @@ export function scheduleFollowupDrain(
   rememberFollowupDrainCallback(key, effectiveRunFollowup);
   void (async () => {
     try {
-      const collectState = { forceIndividualCollect: false };
+      const collectState = { forceIndividualCollect: queue.collectForceIndividual };
       while (queue.items.length > 0 || queue.droppedCount > 0) {
         await waitForQueueDebounce(queue);
         if (queue.mode === "collect") {
@@ -107,7 +107,24 @@ export function scheduleFollowupDrain(
             items: queue.items,
             run: effectiveRunFollowup,
           });
+          if (collectState.forceIndividualCollect) {
+            queue.collectForceIndividual = true;
+          }
           if (collectDrainResult === "empty") {
+            const summaryPrompt = previewQueueSummaryPrompt({ state: queue, noun: "message" });
+            const run = queue.lastRun;
+            const routing = resolveOriginRoutingMetadata(queue.items);
+            if (summaryPrompt && run) {
+              await effectiveRunFollowup({
+                execution: { visibility: "internal", agentPrompt: summaryPrompt },
+                display: { visibility: "user-visible", text: summaryPrompt },
+                run,
+                enqueuedAt: Date.now(),
+                ...routing,
+              });
+              clearQueueSummaryState(queue);
+              continue;
+            }
             break;
           }
           if (collectDrainResult === "drained") {
@@ -123,23 +140,98 @@ export function scheduleFollowupDrain(
 
           const routing = resolveOriginRoutingMetadata(items);
 
-          const prompt = buildCollectPrompt({
-            title: "[Queued messages while agent was busy]",
-            items,
-            summary,
-            renderItem: (item, idx) => `---\nQueued #${idx + 1}\n${item.prompt}`.trim(),
-          });
-          await effectiveRunFollowup({
-            prompt,
-            run,
-            enqueuedAt: Date.now(),
-            ...routing,
-          });
-          queue.items.splice(0, items.length);
-          if (summary) {
-            clearQueueSummaryState(queue);
+          const renderableItems = items
+            .map((item) => item.display)
+            .filter((item): item is NonNullable<typeof item> => Boolean(item));
+          const canBatchRender = renderableItems.length === items.length;
+
+          if (!canBatchRender) {
+            if (summary) {
+              const summaryTarget = items[0];
+              if (!summaryTarget) {
+                break;
+              }
+              await effectiveRunFollowup({
+                execution: { visibility: "internal", agentPrompt: summary },
+                display: { visibility: "user-visible", text: summary },
+                run,
+                enqueuedAt: Date.now(),
+                originatingChannel: summaryTarget.originatingChannel,
+                originatingTo: summaryTarget.originatingTo,
+                originatingAccountId: summaryTarget.originatingAccountId,
+                originatingThreadId: summaryTarget.originatingThreadId,
+                originatingChatType: summaryTarget.originatingChatType,
+              });
+              clearQueueSummaryState(queue);
+            }
+            collectState.forceIndividualCollect = true;
+            queue.collectForceIndividual = true;
+            let drainedAnyFallbackItem = false;
+            while (queue.items.length > 0) {
+              if (drainedAnyFallbackItem) {
+                await waitForQueueDebounce(queue);
+              }
+              if (!(await drainNextQueueItem(queue.items, effectiveRunFollowup))) {
+                break;
+              }
+              drainedAnyFallbackItem = true;
+            }
+            continue;
           }
-          continue;
+
+          let prompt: string;
+          try {
+            prompt = renderDeferredBatch({
+              title: "[Queued messages while agent was busy]",
+              items: renderableItems,
+              summary,
+            });
+          } catch (err) {
+            defaultRuntime.error?.(
+              `collect-mode deferred batch render failed for ${key}; falling back to individual drain: ${String(err)}`,
+            );
+            if (summary) {
+              const summaryTarget = items[0];
+              if (!summaryTarget) {
+                break;
+              }
+              await effectiveRunFollowup({
+                execution: { visibility: "internal", agentPrompt: summary },
+                display: { visibility: "user-visible", text: summary },
+                run,
+                enqueuedAt: Date.now(),
+                originatingChannel: summaryTarget.originatingChannel,
+                originatingTo: summaryTarget.originatingTo,
+                originatingAccountId: summaryTarget.originatingAccountId,
+                originatingThreadId: summaryTarget.originatingThreadId,
+                originatingChatType: summaryTarget.originatingChatType,
+              });
+              clearQueueSummaryState(queue);
+            }
+            collectState.forceIndividualCollect = true;
+            queue.collectForceIndividual = true;
+            continue;
+          }
+
+          try {
+            await effectiveRunFollowup({
+              execution: { visibility: "internal", agentPrompt: prompt },
+              display: { visibility: "user-visible", text: prompt },
+              run,
+              enqueuedAt: Date.now(),
+              ...routing,
+            });
+            queue.items.splice(0, items.length);
+            if (summary) {
+              clearQueueSummaryState(queue);
+            }
+            continue;
+          } catch (err) {
+            defaultRuntime.error?.(
+              `collect-mode followup execution failed for ${key}; preserving batch for retry: ${String(err)}`,
+            );
+            throw err;
+          }
         }
 
         const summaryPrompt = previewQueueSummaryPrompt({ state: queue, noun: "message" });
@@ -151,7 +243,8 @@ export function scheduleFollowupDrain(
           if (
             !(await drainNextQueueItem(queue.items, async (item) => {
               await effectiveRunFollowup({
-                prompt: summaryPrompt,
+                execution: { visibility: "internal", agentPrompt: summaryPrompt },
+                display: { visibility: "user-visible", text: summaryPrompt },
                 run,
                 enqueuedAt: Date.now(),
                 originatingChannel: item.originatingChannel,
@@ -177,6 +270,7 @@ export function scheduleFollowupDrain(
     } finally {
       queue.draining = false;
       if (queue.items.length === 0 && queue.droppedCount === 0) {
+        queue.collectForceIndividual = false;
         FOLLOWUP_QUEUES.delete(key);
         clearFollowupDrainCallback(key);
       } else {

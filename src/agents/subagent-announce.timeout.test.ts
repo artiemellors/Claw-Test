@@ -34,6 +34,18 @@ let fallbackRequesterResolution: {
 } | null = null;
 let chatHistoryMessages: Array<Record<string, unknown>> = [];
 
+async function createSessionsModuleMock() {
+  const actual =
+    await vi.importActual<typeof import("../config/sessions.js")>("../config/sessions.js");
+  return {
+    ...actual,
+    loadSessionStore: () => sessionStore,
+    resolveAgentIdFromSessionKey: () => "main",
+    resolveMainSessionKey: () => "agent:main:main",
+    resolveStorePath: () => "/tmp/sessions-main.json",
+  };
+}
+
 function createGatewayCallModuleMock() {
   return {
     callGateway: vi.fn(async (request: GatewayCall) => {
@@ -70,6 +82,10 @@ function createTimeoutHistoryWithNoReply() {
   ];
 }
 
+vi.mock("../config/config.js", () => ({
+  loadConfig: () => configOverride,
+}));
+vi.mock("../config/sessions.js", createSessionsModuleMock);
 vi.mock("../gateway/call.js", createGatewayCallModuleMock);
 vi.mock("./subagent-depth.js", createSubagentDepthModuleMock);
 vi.mock("./subagent-announce-delivery.runtime.js", () =>
@@ -392,7 +408,7 @@ describe("subagent announce timeout config", () => {
   it("regression, routes child announce to parent session instead of grandparent when parent session still exists", async () => {
     const parentSessionKey = "agent:main:subagent:parent";
     setupParentSessionFallback(parentSessionKey);
-    sessionStore[parentSessionKey] = { updatedAt: Date.now() };
+    sessionStore[parentSessionKey] = { sessionId: "parent-session-id", updatedAt: Date.now() };
 
     await runAnnounceFlowForTest("run-parent-route", {
       requesterSessionKey: parentSessionKey,
@@ -543,5 +559,17 @@ describe("subagent announce timeout config", () => {
     expect(internalEvents[0]?.result).toContain(
       "A longer partial summary that should stay silent.",
     );
+  });
+
+  it("keeps cron announcements detached from direct delivery targets", async () => {
+    await runAnnounceFlowForTest("run-cron-no-bind", {
+      announceType: "cron job",
+    });
+
+    const directAgentCall = findGatewayCall(
+      (call) => call.method === "agent" && call.expectFinal === true,
+    );
+    expect(directAgentCall?.params?.channel).toBeUndefined();
+    expect(directAgentCall?.params?.to).toBeUndefined();
   });
 });

@@ -305,11 +305,13 @@ afterEach(async () => {
   debugFollowupTest(`active requests: ${JSON.stringify(requests ?? [])}`);
 });
 
-const baseQueuedRun = (messageProvider = "whatsapp"): FollowupRun =>
-  createMockFollowupRun({ run: { messageProvider } });
+const baseQueuedRun = (messageProvider = "whatsapp"): FollowupRun => {
+  const baseRun = createMockFollowupRun();
+  return createMockFollowupRun({ run: { ...baseRun.run, messageProvider } });
+};
 
 function createQueuedRun(
-  overrides: Partial<Omit<FollowupRun, "run">> & { run?: Partial<FollowupRun["run"]> } = {},
+  overrides: Partial<FollowupRun> & { run?: Partial<FollowupRun["run"]> } = {},
 ): FollowupRun {
   return createMockFollowupRun(overrides);
 }
@@ -376,6 +378,7 @@ describe("createFollowupRunner compaction", () => {
 
     const queued = createQueuedRun({
       run: {
+        ...createMockFollowupRun().run,
         verboseLevel: "on",
       },
     });
@@ -427,6 +430,7 @@ describe("createFollowupRunner compaction", () => {
 
     const queued = createQueuedRun({
       run: {
+        ...createMockFollowupRun().run,
         verboseLevel: "on",
       },
     });
@@ -480,8 +484,9 @@ describe("createFollowupRunner compaction", () => {
     });
 
     const queuedNext = createQueuedRun({
-      prompt: "next",
+      execution: { visibility: "internal", agentPrompt: "next" },
       run: {
+        ...createMockFollowupRun().run,
         sessionId: "session",
         sessionFile: path.join(path.dirname(storePath), "session.jsonl"),
       },
@@ -491,6 +496,7 @@ describe("createFollowupRunner compaction", () => {
 
     const current = createQueuedRun({
       run: {
+        ...createMockFollowupRun().run,
         verboseLevel: "on",
         sessionId: "session",
         sessionFile: path.join(path.dirname(storePath), "session.jsonl"),
@@ -532,6 +538,7 @@ describe("createFollowupRunner compaction", () => {
 
     const queued = createQueuedRun({
       run: {
+        ...createMockFollowupRun().run,
         verboseLevel: "on",
       },
     });
@@ -636,6 +643,7 @@ describe("createFollowupRunner compaction", () => {
 
     const queued = createQueuedRun({
       run: {
+        ...createMockFollowupRun().run,
         sessionFile: transcriptPath,
         workspaceDir,
       },
@@ -785,6 +793,24 @@ describe("createFollowupRunner messaging tool dedupe", () => {
     });
 
     expect(onBlockReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops non-user-visible queued followup display payloads at outbound boundary", async () => {
+    const onBlockReply = createAsyncReplySpy();
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      meta: {},
+      payloads: [{ text: "hello world!" }],
+    });
+    const runner = createMessagingDedupeRunner(onBlockReply);
+
+    await runner(
+      createQueuedRun({
+        display: { visibility: "summary-only", summaryLine: "hidden summary" },
+      }),
+    );
+
+    expect(onBlockReply).not.toHaveBeenCalled();
+    expect(routeReplyMock).not.toHaveBeenCalled();
   });
 
   it("suppresses replies when a messaging tool sent via the same provider + target", async () => {
@@ -948,6 +974,7 @@ describe("createFollowupRunner messaging tool dedupe", () => {
       runner(
         createQueuedRun({
           run: {
+            ...createMockFollowupRun().run,
             config: cfg,
           },
         }),
@@ -1125,5 +1152,36 @@ describe("createFollowupRunner agentDir forwarding", () => {
     expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
     const call = runEmbeddedPiAgentMock.mock.calls.at(-1)?.[0] as { agentDir?: string };
     expect(call?.agentDir).toBe(agentDir);
+  });
+
+  it("drops malformed queued display payloads before they can wedge followup delivery", async () => {
+    const onBlockReply = vi.fn(async () => {});
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      meta: {},
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      defaultModel: "anthropic/claude-opus-4-5",
+    });
+
+    await runner(
+      createQueuedRun({
+        display: { visibility: "summary-only" },
+        originatingChannel: "telegram",
+        originatingTo: "telegram:123",
+        originatingAccountId: "default",
+        run: {
+          ...createMockFollowupRun().run,
+          messageProvider: "telegram",
+        },
+      }),
+    );
+
+    expect(onBlockReply).not.toHaveBeenCalled();
+    expect(routeReplyMock).not.toHaveBeenCalled();
   });
 });

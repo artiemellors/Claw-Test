@@ -1,7 +1,7 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TemplateContext } from "../templating.js";
-import type { FollowupRun, QueueSettings } from "./queue.js";
+import type { QueueSettings } from "./queue.js";
 import { createMockFollowupRun, createMockTypingController } from "./test-helpers.js";
 
 const runEmbeddedPiAgentMock = vi.fn();
@@ -104,14 +104,15 @@ describe("runReplyAgent media path normalization", () => {
     const result = await runReplyAgent({
       commandBody: "generate",
       followupRun: createMockFollowupRun({
-        prompt: "generate",
+        execution: { visibility: "internal", agentPrompt: "generate" },
         run: {
+          ...createMockFollowupRun().run,
           agentId: "main",
           agentDir: "/tmp/agent",
           messageProvider: "telegram",
           workspaceDir: "/tmp/workspace",
         },
-      }) as unknown as FollowupRun,
+      }),
       queueKey: "main",
       resolvedQueue: { mode: "interrupt" } as QueueSettings,
       shouldSteer: false,

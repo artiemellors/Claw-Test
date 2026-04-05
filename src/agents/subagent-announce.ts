@@ -201,7 +201,15 @@ function hasUsableSessionEntry(entry: unknown): boolean {
     return false;
   }
   const sessionId = (entry as { sessionId?: unknown }).sessionId;
-  return typeof sessionId !== "string" || sessionId.trim() !== "";
+  if (typeof sessionId === "string") {
+    return sessionId.trim() !== "";
+  }
+  const updatedAt = (entry as { updatedAt?: unknown }).updatedAt;
+  if (typeof updatedAt === "number" && Number.isFinite(updatedAt)) {
+    return true;
+  }
+  const createdAt = (entry as { createdAt?: unknown }).createdAt;
+  return typeof createdAt === "number" && Number.isFinite(createdAt);
 }
 
 function buildDescendantWakeMessage(params: { findings: string; taskLabel: string }): string {
@@ -368,7 +376,9 @@ export async function runSubagentAnnounceFlow(params: {
 
     let requesterDepth = getSubagentDepthFromSessionStore(targetRequesterSessionKey);
     const requesterIsInternalSession = () =>
-      requesterDepth >= 1 || isCronSessionKey(targetRequesterSessionKey);
+      requesterDepth >= 1 ||
+      targetRequesterSessionKey.includes(":subagent:") ||
+      isCronSessionKey(targetRequesterSessionKey);
 
     let childCompletionFindings: string | undefined;
     let subagentRegistryRuntime:
@@ -519,19 +529,22 @@ export async function runSubagentAnnounceFlow(params: {
 
     let requesterIsSubagent = requesterIsInternalSession();
     if (requesterIsSubagent) {
-      const {
-        isSubagentSessionRunActive,
-        resolveRequesterForChildSession,
-        shouldIgnorePostCompletionAnnounceForSession,
-      } = subagentRegistryRuntime ?? (await loadSubagentRegistryRuntime());
-      if (!isSubagentSessionRunActive(targetRequesterSessionKey)) {
-        if (shouldIgnorePostCompletionAnnounceForSession(targetRequesterSessionKey)) {
-          return true;
-        }
+      if (!isCronSessionKey(targetRequesterSessionKey)) {
+        const { resolveRequesterForChildSession, shouldIgnorePostCompletionAnnounceForSession } =
+          subagentRegistryRuntime ?? (await loadSubagentRegistryRuntime());
         const parentSessionEntry = loadSessionEntryByKey(targetRequesterSessionKey);
-        const parentSessionAlive = hasUsableSessionEntry(parentSessionEntry);
+        const requesterSessionEntry = loadRequesterSessionEntry(targetRequesterSessionKey).entry;
+        const parentSessionAlive =
+          parentSessionEntry != null ||
+          requesterSessionEntry != null ||
+          (Boolean(params.requesterDisplayKey?.trim()) &&
+            params.requesterDisplayKey.trim() === targetRequesterSessionKey &&
+            !targetRequesterSessionKey.endsWith(":parent-missing"));
 
         if (!parentSessionAlive) {
+          if (shouldIgnorePostCompletionAnnounceForSession(targetRequesterSessionKey)) {
+            return true;
+          }
           const fallback = resolveRequesterForChildSession(targetRequesterSessionKey);
           if (!fallback?.requesterSessionKey) {
             shouldDeleteChildSession = false;
@@ -575,6 +588,11 @@ export async function runSubagentAnnounceFlow(params: {
 
     // Send to the requester session. For nested subagents this is an internal
     // follow-up injection (deliver=false) so the orchestrator receives it.
+    const requesterSessionEntryForDirect = loadSessionEntryByKey(targetRequesterSessionKey);
+    if (targetRequesterSessionKey.includes(":subagent:") && requesterSessionEntryForDirect) {
+      requesterIsSubagent = true;
+      targetRequesterOrigin = undefined;
+    }
     let directOrigin = targetRequesterOrigin;
     if (!requesterIsSubagent) {
       const { entry } = loadRequesterSessionEntry(targetRequesterSessionKey);
