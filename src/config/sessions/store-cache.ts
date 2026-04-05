@@ -1,6 +1,21 @@
 import { createExpiringMapCache, isCacheEnabled, resolveCacheTtlMs } from "../cache-utils.js";
 import type { SessionEntry } from "./types.js";
 
+/**
+ * Clone a session store using JSON serialization instead of structuredClone.
+ * Session stores are pure JSON data (no Maps, Sets, Dates, or circular refs),
+ * so JSON cloning is semantically equivalent. Unlike structuredClone, JSON
+ * cloning keeps all memory within V8's managed heap, preventing the native
+ * memory leak documented in #45438.
+ *
+ * NOTE: JSON.stringify drops properties with explicit `undefined` values.
+ * Callers must ensure T contains no `undefined`-valued fields (satisfied
+ * by all current call sites since stores originate from JSON.parse).
+ */
+function cloneStore<T>(store: T): T {
+  return JSON.parse(JSON.stringify(store)) as T;
+}
+
 type SessionStoreCacheEntry = {
   store: Record<string, SessionEntry>;
   mtimeMs?: number;
@@ -65,7 +80,7 @@ export function readSessionStoreCache(params: {
     invalidateSessionStoreCache(params.storePath);
     return null;
   }
-  return structuredClone(cached.store);
+  return cloneStore(cached.store);
 }
 
 export function writeSessionStoreCache(params: {
@@ -76,7 +91,7 @@ export function writeSessionStoreCache(params: {
   serialized?: string;
 }): void {
   SESSION_STORE_CACHE.set(params.storePath, {
-    store: structuredClone(params.store),
+    store: cloneStore(params.store),
     mtimeMs: params.mtimeMs,
     sizeBytes: params.sizeBytes,
     serialized: params.serialized,
