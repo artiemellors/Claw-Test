@@ -409,6 +409,28 @@ export const es: TranslationMap = {
     id: "Bahasa Indonesia (Indonesian)",
     pl: "Polski (Polish)",
   },
+  connectCommand: {
+    copyTitle: "Copiar comando",
+    copyAriaLabel: "Copiar comando: {command}",
+  },
+  commandPalette: {
+    navOverview: "Resumen",
+    navSessions: "Sesiones",
+    navScheduled: "Programado",
+    navSkills: "Habilidades",
+    navSettings: "Configuración",
+    navAgents: "Agentes",
+    shellCommand: "Comando de shell",
+    runShell: "Ejecutar shell",
+    debugMode: "Modo de depuración",
+    toggleDebug: "Alternar depuración",
+    categorySearch: "Búsqueda",
+    categoryNavigation: "Navegación",
+    categorySkills: "Habilidades",
+    footerNavigate: "navegar",
+    footerSelect: "seleccionar",
+    footerClose: "cerrar",
+  },
   cron: {
     summary: {
       enabled: "Habilitado",
