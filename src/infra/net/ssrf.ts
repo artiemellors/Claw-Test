@@ -365,6 +365,10 @@ export async function resolvePinnedHostnameWithPolicy(
   if (!skipPrivateNetworkChecks && !skipIpRangeChecks) {
     // Phase 1: fail fast for literal hosts/IPs before any DNS lookup side-effects.
     assertAllowedHostOrIpOrThrow(normalized, params.policy);
+  } else if (!skipPrivateNetworkChecks && skipIpRangeChecks && !isRfc2544Address(normalized)) {
+    // In proxy-environment mode, allow RFC2544 fake-ip literals but continue to
+    // fail fast for all other private/special-use literal targets.
+    assertAllowedHostOrIpOrThrow(normalized, params.policy);
   }
 
   const lookupFn = params.lookupFn ?? dnsLookup;

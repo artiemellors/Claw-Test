@@ -315,7 +315,7 @@ describe("ssrf pinning", () => {
     }
   });
 
-  it("documents current behavior for private IP literals when assumeProxyEnvironment is enabled", async () => {
+  it("still blocks non-RFC2544 private IP literals when assumeProxyEnvironment is enabled", async () => {
     const lookup = createPublicLookupMock();
 
     await expect(
@@ -323,19 +323,15 @@ describe("ssrf pinning", () => {
         lookupFn: lookup,
         policy: { assumeProxyEnvironment: true },
       }),
-    ).resolves.toMatchObject({
-      hostname: "127.0.0.1",
-      addresses: ["93.184.216.34"],
-    });
+    ).rejects.toThrow(SsrFBlockedError);
 
     await expect(
       resolvePinnedHostnameWithPolicy("10.0.0.1", {
         lookupFn: lookup,
         policy: { assumeProxyEnvironment: true },
       }),
-    ).resolves.toMatchObject({
-      hostname: "10.0.0.1",
-      addresses: ["93.184.216.34"],
-    });
+    ).rejects.toThrow(SsrFBlockedError);
+
+    expect(lookup).not.toHaveBeenCalled();
   });
 });
