@@ -228,6 +228,7 @@
   "provider-web-search",
   "retry-runtime",
   "run-command",
+  "secret-input-runtime",
   "param-readers",
   "provider-zai-endpoint",
   "secret-input",
