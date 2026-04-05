@@ -1,6 +1,9 @@
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolvePathFromInput } from "../agents/path-policy.js";
-import { resolveEffectiveToolFsRootExpansionAllowed } from "../agents/tool-fs-policy.js";
+import {
+  resolveEffectiveToolFsRootExpansionAllowed,
+  resolveToolFsConfig,
+} from "../agents/tool-fs-policy.js";
 import { resolveWorkspaceRoot } from "../agents/workspace-dir.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { readLocalFileSafely } from "../infra/fs-safe.js";
@@ -12,6 +15,14 @@ export function createAgentScopedHostMediaReadFile(params: {
   agentId?: string;
   workspaceDir?: string;
 }): OutboundMediaReadFile | undefined {
+  // When tools.fs.roots is configured, do not attach an unrestricted host
+  // readFile capability — it would cause buildOutboundMediaLoadOptions to
+  // set localRoots: "any", bypassing the configured root restrictions.
+  // The media loader falls through to the localRoots-based path checking.
+  const fsConfig = resolveToolFsConfig({ cfg: params.cfg, agentId: params.agentId });
+  if (fsConfig.roots !== undefined) {
+    return undefined;
+  }
   if (
     !resolveEffectiveToolFsRootExpansionAllowed({
       cfg: params.cfg,

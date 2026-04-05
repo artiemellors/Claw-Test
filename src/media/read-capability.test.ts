@@ -1,6 +1,39 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveAgentScopedOutboundMediaAccess } from "./read-capability.js";
+import {
+  createAgentScopedHostMediaReadFile,
+  resolveAgentScopedOutboundMediaAccess,
+} from "./read-capability.js";
+
+describe("createAgentScopedHostMediaReadFile", () => {
+  it("returns undefined when tools.fs.roots is configured", () => {
+    const result = createAgentScopedHostMediaReadFile({
+      cfg: {
+        tools: {
+          fs: {
+            roots: [{ path: "/data/shared", kind: "dir", access: "ro" }],
+          },
+        },
+      } as OpenClawConfig,
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when tools.fs.roots is empty (deny-all)", () => {
+    const result = createAgentScopedHostMediaReadFile({
+      cfg: {
+        tools: {
+          fs: {
+            roots: [],
+          },
+        },
+      } as OpenClawConfig,
+    });
+
+    expect(result).toBeUndefined();
+  });
+});
 
 describe("resolveAgentScopedOutboundMediaAccess", () => {
   it("preserves caller-provided workspaceDir from mediaAccess", () => {
