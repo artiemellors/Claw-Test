@@ -2,7 +2,10 @@ import crypto from "node:crypto";
 import { callGateway } from "../../gateway/call.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
-import type { GatewayMessageChannel } from "../../utils/message-channel.js";
+import {
+  type GatewayMessageChannel,
+  resolveGatewayMessageChannel,
+} from "../../utils/message-channel.js";
 import { AGENT_LANE_NESTED } from "../lanes.js";
 import { readLatestAssistantReply, waitForAgentRun } from "../run-wait.js";
 import { runAgentStep } from "./agent-step.js";
@@ -63,6 +66,8 @@ export async function runSessionsSendA2AFlow(params: {
       displayKey: params.displayKey,
     });
     const targetChannel = announceTarget?.channel ?? "unknown";
+    const requesterTurnChannel = resolveGatewayMessageChannel(params.requesterChannel);
+    const targetTurnChannel = resolveGatewayMessageChannel(announceTarget?.channel);
 
     if (
       params.maxPingPongTurns > 0 &&
@@ -89,6 +94,10 @@ export async function runSessionsSendA2AFlow(params: {
           message: incomingMessage,
           extraSystemPrompt: replyPrompt,
           timeoutMs: params.announceTimeoutMs,
+          channel:
+            currentSessionKey === params.requesterSessionKey
+              ? requesterTurnChannel
+              : targetTurnChannel,
           lane: AGENT_LANE_NESTED,
           sourceSessionKey: nextSessionKey,
           sourceChannel:
@@ -120,6 +129,7 @@ export async function runSessionsSendA2AFlow(params: {
       message: "Agent-to-agent announce step.",
       extraSystemPrompt: announcePrompt,
       timeoutMs: params.announceTimeoutMs,
+      channel: targetTurnChannel,
       lane: AGENT_LANE_NESTED,
       sourceSessionKey: params.requesterSessionKey,
       sourceChannel: params.requesterChannel,
