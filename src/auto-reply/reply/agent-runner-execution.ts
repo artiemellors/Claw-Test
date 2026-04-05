@@ -245,15 +245,71 @@ function buildRateLimitCooldownMessage(err: unknown): string {
   return "⚠️ All models are temporarily rate-limited. Please try again in a few minutes.";
 }
 
+function isTransientFallbackRateLimitReason(reason: string | undefined): boolean {
+  return reason === "rate_limit" || reason === "overloaded";
+}
+
 function isPureTransientRateLimitSummary(err: unknown): boolean {
   return (
     isFallbackSummaryError(err) &&
     err.attempts.length > 0 &&
     err.attempts.every((attempt) => {
-      const reason = attempt.reason;
-      return reason === "rate_limit" || reason === "overloaded";
+      return isTransientFallbackRateLimitReason(attempt.reason);
     })
   );
+}
+
+const NODE_UNAVAILABLE_USER_MESSAGE =
+  "⚠️ A paired node appears unavailable. Open the OpenClaw app on that device (or reconnect/unpair it), then try again.";
+
+function isNodeInvokeUnavailableErrorMessage(raw: string): boolean {
+  if (!raw) {
+    return false;
+  }
+  if (/\bnode (?:not connected|disconnected)\b/i.test(raw)) {
+    return true;
+  }
+  if (/failed to send invoke to node/i.test(raw)) {
+    return true;
+  }
+  return (
+    /\bnode(?:\.|\s+)invoke\b.*\b(?:timed out|timeout|not connected|unavailable)\b/i.test(raw) ||
+    /\b(?:timed out|timeout)\b.*\bnode(?:\.|\s+)invoke\b/i.test(raw)
+  );
+}
+
+function isNodeInvokeUnavailableAttempt(attempt: {
+  error: string;
+  reason?: string;
+  code?: string;
+}): boolean {
+  if (!isNodeInvokeUnavailableErrorMessage(attempt.error)) {
+    return false;
+  }
+  if (attempt.reason && attempt.reason !== "timeout" && attempt.reason !== "unknown") {
+    return false;
+  }
+  if (!attempt.code) {
+    return true;
+  }
+  return /\b(?:UNAVAILABLE|TIMEOUT)\b/i.test(attempt.code);
+}
+
+function isNodeInvokeUnavailableSummary(err: unknown): boolean {
+  if (!isFallbackSummaryError(err) || err.attempts.length === 0) {
+    return false;
+  }
+  let sawNodeAttempt = false;
+  for (const attempt of err.attempts) {
+    if (isNodeInvokeUnavailableAttempt(attempt)) {
+      sawNodeAttempt = true;
+      continue;
+    }
+    if (!isTransientFallbackRateLimitReason(attempt.reason)) {
+      return false;
+    }
+  }
+  return sawNodeAttempt;
 }
 
 function isToolResultTurnMismatchError(message: string): boolean {
@@ -272,7 +328,6 @@ function buildExternalRunFailureText(message: string): string {
   }
   return "⚠️ Something went wrong while processing your request. Please try again, or use /new to start a fresh session.";
 }
-
 export async function runAgentTurnWithFallback(params: {
   commandBody: string;
   followupRun: FollowupRun;
@@ -1020,10 +1075,11 @@ export async function runAgentTurnWithFallback(params: {
       }
 
       defaultRuntime.error(`Embedded agent failed before reply: ${message}`);
-      // Only classify as rate-limit when we have concrete evidence from the
-      // underlying error. FallbackSummaryError messages embed per-attempt
-      // reason labels like `(rate_limit)`, so string-matching the summary text
-      // would misclassify mixed-cause exhaustion as a pure transient cooldown.
+      // For FallbackSummaryError, prefer structured attempt metadata over the
+      // rendered summary string to avoid brittle message parsing.
+      const isNodeInvokeUnavailable = isFallbackSummaryError(err)
+        ? isNodeInvokeUnavailableSummary(err)
+        : isNodeInvokeUnavailableErrorMessage(message);
       const isRateLimit = isFallbackSummaryError(err)
         ? isPureTransientRateLimitSummary(err)
         : isRateLimitErrorMessage(message);
@@ -1033,6 +1089,8 @@ export async function runAgentTurnWithFallback(params: {
       const trimmedMessage = safeMessage.replace(/\.\s*$/, "");
       const fallbackText = isBilling
         ? BILLING_ERROR_USER_MESSAGE
+        : isNodeInvokeUnavailable
+          ? NODE_UNAVAILABLE_USER_MESSAGE
         : isRateLimit
           ? buildRateLimitCooldownMessage(err)
           : isContextOverflow
@@ -1095,7 +1153,14 @@ export async function runAgentTurnWithFallback(params: {
         runResult.payloads?.find((p) => p.isError && p.text?.trim() && !p.text.startsWith("⚠️"))
           ?.text ?? "";
       const errorCandidate = metaErrorMsg || rawErrorPayloadText;
-      if (
+      if (errorCandidate && isNodeInvokeUnavailableErrorMessage(errorCandidate)) {
+        runResult.payloads = [
+          {
+            text: NODE_UNAVAILABLE_USER_MESSAGE,
+            isError: true,
+          },
+        ];
+      } else if (
         errorCandidate &&
         (isRateLimitErrorMessage(errorCandidate) || isOverloadedErrorMessage(errorCandidate))
       ) {
