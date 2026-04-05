@@ -36,7 +36,6 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
-- WhatsApp/self-messages: filter out messages where sender == recipient (self-chat) to prevent infinite auto-reply loops caused by WhatsApp echoing self-messages back as inbound. (#61033)
 - Synology Chat/security: route webhook token comparison through the shared constant-time secret helper for consistency with other bundled plugins.
 - Models/MiniMax: honor `MINIMAX_API_HOST` for implicit bundled MiniMax provider catalogs so China-hosted API-key setups pick `api.minimaxi.com/anthropic` without manual provider config. (#34524) Thanks @caiqinghua.
 - Usage/MiniMax: invert remaining-style `usage_percent` fields when MiniMax reports only remaining percentage data, so usage bars stop showing nearly-full remaining quota as nearly-exhausted usage. (#60254) Thanks @jwchmodx.
@@ -121,6 +120,7 @@ Docs: https://docs.openclaw.ai
 - Agents/skills: skip `.git` and `node_modules` when mirroring skills into sandbox workspaces so read-only sandboxes do not copy repo history or dependency trees. (#61090) Thanks @joelnishanth.
 - Android/Talk Mode: cancel in-flight `talk.speak` playback when speech is explicitly stopped, so stale replies stop starting after barge-in or manual stop. (#61164) Thanks @obviyus.
 - Plugins/onboarding: write dotted plugin uiHint paths like Brave `webSearch.mode` as nested plugin config so `llm-context` setup stops failing validation. (#61159) Thanks @obviyus.
+- WhatsApp/self-messages: filter out messages where sender == recipient (self-chat) to prevent infinite auto-reply loops caused by WhatsApp echoing self-messages back as inbound, while preserving selfChatMode for deliberate self-number control flows. (#61033)
 
 ## 2026.4.2
 
