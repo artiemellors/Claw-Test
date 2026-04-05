@@ -253,6 +253,17 @@ describe("ssrf pinning", () => {
     });
   });
 
+  it("still blocks non-RFC2544 private DNS results when assumeProxyEnvironment is enabled", async () => {
+    const lookup = vi.fn(async () => [{ address: "127.0.0.1", family: 4 }]) as unknown as LookupFn;
+
+    await expect(
+      resolvePinnedHostnameWithPolicy("api.telegram.org", {
+        lookupFn: lookup,
+        policy: { assumeProxyEnvironment: true },
+      }),
+    ).rejects.toThrow(/private|internal/i);
+  });
+
   it("allows literal RFC2544 fake-ip addresses when assumeProxyEnvironment is enabled", async () => {
     const lookup = createPublicLookupMock();
 

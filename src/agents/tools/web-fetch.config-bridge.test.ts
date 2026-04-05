@@ -112,4 +112,39 @@ describe("web_fetch config bridge", () => {
     const call = mocks.fetchWithWebToolsNetworkGuardMock.mock.calls[0]?.[0];
     expect(call?.policy).toBeUndefined();
   });
+
+  it("passes dangerouslyAllowPrivateNetwork from tools.web.fetch.ssrfPolicy to guarded fetch", async () => {
+    mocks.fetchWithWebToolsNetworkGuardMock.mockResolvedValue({
+      response: new Response("ok", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+      finalUrl: "https://example.com",
+      release: async () => {},
+    });
+
+    const tool = createWebFetchTool({
+      config: {
+        tools: {
+          web: {
+            fetch: {
+              cacheTtlMinutes: 0,
+              ssrfPolicy: {
+                dangerouslyAllowPrivateNetwork: true,
+              },
+            },
+          },
+        },
+      },
+      sandboxed: false,
+    });
+
+    await tool?.execute?.("call", { url: "https://example.com" });
+
+    expect(mocks.fetchWithWebToolsNetworkGuardMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        policy: expect.objectContaining({ dangerouslyAllowPrivateNetwork: true }),
+      }),
+    );
+  });
 });

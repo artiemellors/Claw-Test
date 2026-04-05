@@ -215,6 +215,22 @@ function assertAllowedResolvedAddressesOrThrow(
   }
 }
 
+function assertResolvedAddressesAllowedForProxyEnvironmentOrThrow(
+  results: readonly LookupAddress[],
+): void {
+  for (const entry of results) {
+    if (isBlockedHostname(entry.address)) {
+      throw new SsrFBlockedError(BLOCKED_RESOLVED_IP_MESSAGE);
+    }
+    if (isRfc2544Address(entry.address)) {
+      continue;
+    }
+    if (isPrivateIpAddress(entry.address)) {
+      throw new SsrFBlockedError(BLOCKED_RESOLVED_IP_MESSAGE);
+    }
+  }
+}
+
 export function createPinnedLookup(params: {
   hostname: string;
   addresses: string[];
@@ -360,6 +376,10 @@ export async function resolvePinnedHostnameWithPolicy(
   if (!skipPrivateNetworkChecks && !skipIpRangeChecks) {
     // Phase 2: re-check DNS answers so public hostnames cannot pivot to private targets.
     assertAllowedResolvedAddressesOrThrow(results, params.policy);
+  } else if (!skipPrivateNetworkChecks && skipIpRangeChecks) {
+    // Proxy-environment mode is intentionally narrow: allow RFC2544 fake-ip answers
+    // while continuing to block other private/special-use destinations.
+    assertResolvedAddressesAllowedForProxyEnvironmentOrThrow(results);
   }
 
   // Prefer addresses returned as IPv4 by DNS family metadata before other
