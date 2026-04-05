@@ -22,7 +22,7 @@ import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { createNonExitingRuntime, type RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { resolveTelegramAccount } from "./accounts.js";
 import { defaultTelegramBotDeps, type TelegramBotDeps } from "./bot-deps.js";
-import { registerTelegramHandlers } from "./bot-handlers.js";
+import { buildChatSessionCacheKey, registerTelegramHandlers } from "./bot-handlers.js";
 import { createTelegramMessageProcessor } from "./bot-message.js";
 import { registerTelegramNativeCommands } from "./bot-native-commands.js";
 import {
@@ -346,7 +346,26 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
     }
   });
 
-  bot.use(botRuntime.sequentialize(getTelegramSequentialKey));
+  // Cache chatId:threadId → {sessionKey, isSteerMode} so the sequential key
+  // middleware can check whether an embedded Pi run is active and whether the
+  // session uses steer queue mode — without heavy session resolution per update.
+  // Populated by bot-handlers when sessions are resolved for each message.
+  const chatSessionCache = new Map<string, { sessionKey: string; isSteerMode: boolean }>();
+
+  bot.use(
+    botRuntime.sequentialize((ctx) =>
+      getTelegramSequentialKey(ctx, {
+        isRunActiveForChat: telegramDeps.isRunActiveForSessionKey
+          ? (chatId, threadId, senderId) => {
+              const cacheKey = buildChatSessionCacheKey(chatId, threadId, senderId);
+              const cached = chatSessionCache.get(cacheKey);
+              if (!cached?.isSteerMode) return false;
+              return telegramDeps.isRunActiveForSessionKey!(cached.sessionKey);
+            }
+          : undefined,
+      }),
+    ),
+  );
 
   const rawUpdateLogger = createSubsystemLogger("gateway/channels/telegram/raw-update");
   const MAX_RAW_UPDATE_CHARS = 8000;
@@ -578,6 +597,7 @@ export function createTelegramBot(opts: TelegramBotOptions): TelegramBotInstance
     processMessage,
     logger,
     telegramDeps,
+    chatSessionCache,
   });
 
   const originalStop = bot.stop.bind(bot);

@@ -19,7 +19,14 @@ export type TelegramSequentialKeyContext = {
   };
 };
 
-export function getTelegramSequentialKey(ctx: TelegramSequentialKeyContext): string {
+export type TelegramSequentialKeyOptions = {
+  isRunActiveForChat?: (chatId: number, threadId?: number, senderId?: number) => boolean;
+};
+
+export function getTelegramSequentialKey(
+  ctx: TelegramSequentialKeyContext,
+  opts?: TelegramSequentialKeyOptions,
+): string {
   const reaction = ctx.update?.message_reaction;
   if (reaction?.chat?.id) {
     return `telegram:${reaction.chat.id}`;
@@ -58,8 +65,17 @@ export function getTelegramSequentialKey(ctx: TelegramSequentialKeyContext): str
   const threadId = isGroup
     ? resolveTelegramForumThreadId({ isForum, messageThreadId })
     : messageThreadId;
+  // Use per-message keys only when a run is already active for this chat so
+  // that steer-mode messages are not blocked behind the in-progress run.
+  // When no run is active, fall back to per-chat keys to preserve FIFO
+  // ordering.  Run-level serialization is handled by the session lane queue
+  // (enqueueCommandInLane, maxConcurrent=1).
+  const messageId = msg?.message_id;
+  const senderId = msg?.from?.id;
+  const runActive = typeof chatId === "number" && opts?.isRunActiveForChat?.(chatId, threadId ?? undefined, senderId);
   if (typeof chatId === "number") {
-    return threadId != null ? `telegram:${chatId}:topic:${threadId}` : `telegram:${chatId}`;
+    const base = threadId != null ? `telegram:${chatId}:topic:${threadId}` : `telegram:${chatId}`;
+    return runActive && typeof messageId === "number" ? `${base}:${messageId}` : base;
   }
   return "telegram:unknown";
 }

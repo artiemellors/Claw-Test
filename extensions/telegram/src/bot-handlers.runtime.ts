@@ -104,6 +104,26 @@ import {
 } from "./model-buttons.js";
 import { buildInlineKeyboard } from "./send.js";
 
+/** Build a consistent cache key for the chatId:threadId:senderId → sessionKey map. */
+export function buildChatSessionCacheKey(
+  chatId: number | string,
+  threadId?: number,
+  senderId?: string | number | null,
+  isGroup?: boolean,
+): string {
+  let key = `${chatId}`;
+  if (threadId != null) key += `:${threadId}`;
+  // Only include senderId for DMs — group sessions are topic-scoped, not sender-scoped.
+  if (senderId != null && !isGroup) key += `:${senderId}`;
+  return key;
+}
+
+export type ChatSessionCacheEntry = {
+  sessionKey: string;
+  /** Whether the resolved session uses a steer-capable queue mode. */
+  isSteerMode: boolean;
+};
+
 export const registerTelegramHandlers = ({
   cfg,
   accountId,
@@ -121,6 +141,7 @@ export const registerTelegramHandlers = ({
   processMessage,
   logger,
   telegramDeps = defaultTelegramBotDeps,
+  chatSessionCache,
 }: RegisterTelegramHandlerParams) => {
   const mediaRuntimeOptions = resolveTelegramMediaRuntimeOptions({
     cfg,
@@ -347,6 +368,23 @@ export const registerTelegramHandlers = ({
     });
     const store = loadSessionStore(storePath);
     const entry = resolveSessionStoreEntry({ store, sessionKey }).existing;
+    // Keep the chatId:threadId → sessionKey cache current so the sequential
+    // key middleware can check whether an embedded run is active.
+    if (chatSessionCache && typeof params.chatId === "number") {
+      const resolvedThread = resolvedThreadId ?? dmThreadId;
+      const cacheKey = buildChatSessionCacheKey(
+        params.chatId, resolvedThread, params.senderId, params.isGroup,
+      );
+      // Check session-level override first, then fall back to channel/global config.
+      const queueCfg = runtimeCfg.messages?.queue;
+      const channelMode =
+        (queueCfg?.byChannel as Record<string, string | undefined> | undefined)?.telegram ??
+        queueCfg?.mode;
+      const effectiveMode = entry?.queueMode ?? channelMode;
+      const isSteer = effectiveMode === "steer" || effectiveMode === "steer-backlog"
+        || effectiveMode === "steer+backlog";
+      chatSessionCache.set(cacheKey, { sessionKey, isSteerMode: isSteer });
+    }
     const storedOverride = resolveStoredModelOverride({
       sessionEntry: entry,
       sessionStore: store,
@@ -1769,6 +1807,19 @@ export const registerTelegramHandlers = ({
         if (!dmAuthorized) {
           return;
         }
+      }
+
+      // Populate the chatId → sessionKey cache so the sequential key
+      // middleware can detect active runs on the normal inbound path.
+      if (chatSessionCache) {
+        resolveTelegramSessionState({
+          chatId: event.chatId,
+          isGroup: event.isGroup,
+          isForum: !!event.isForum,
+          messageThreadId: event.msg.message_thread_id,
+          resolvedThreadId,
+          senderId: event.msg.from?.id,
+        });
       }
 
       await processInboundMessage({
