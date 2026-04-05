@@ -357,8 +357,8 @@ export async function resolvePinnedHostnameWithPolicy(
     throw new SsrFBlockedError(`Blocked hostname (not in allowlist): ${hostname}`);
   }
 
-  // Hostname blocklist is ALWAYS enforced, even in proxy environments.
-  if (isBlockedHostnameNormalized(normalized)) {
+  // Preserve explicit private-network overrides for trusted callers.
+  if (!skipPrivateNetworkChecks && isBlockedHostnameNormalized(normalized)) {
     throw new SsrFBlockedError(BLOCKED_HOST_OR_IP_MESSAGE);
   }
 

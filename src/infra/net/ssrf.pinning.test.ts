@@ -223,6 +223,39 @@ describe("ssrf pinning", () => {
     expect(lookup).toHaveBeenCalledTimes(1);
   });
 
+  it("honors allowPrivateNetwork for blocked hostname literals", async () => {
+    const lookup = createPublicLookupMock();
+
+    await expect(
+      resolvePinnedHostnameWithPolicy("localhost", {
+        lookupFn: lookup,
+        policy: { allowPrivateNetwork: true },
+      }),
+    ).resolves.toMatchObject({
+      hostname: "localhost",
+      addresses: ["93.184.216.34"],
+    });
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors hostnameAllowlist for blocked hostnames when private network is explicitly enabled", async () => {
+    const lookup = createPublicLookupMock();
+
+    await expect(
+      resolvePinnedHostnameWithPolicy("localhost", {
+        lookupFn: lookup,
+        policy: {
+          allowPrivateNetwork: true,
+          hostnameAllowlist: ["localhost"],
+        },
+      }),
+    ).resolves.toMatchObject({
+      hostname: "localhost",
+      addresses: ["93.184.216.34"],
+    });
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
   it("allows RFC2544 fake-ip results when assumeProxyEnvironment is enabled", async () => {
     const lookup = vi.fn(async () => [
       { address: "198.18.0.153", family: 4 },
