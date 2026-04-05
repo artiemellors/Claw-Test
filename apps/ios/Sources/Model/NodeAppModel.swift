@@ -138,6 +138,7 @@ final class NodeAppModel {
     private var operatorGatewayTask: Task<Void, Never>?
     private var voiceWakeSyncTask: Task<Void, Never>?
     @ObservationIgnored private var cameraHUDDismissTask: Task<Void, Never>?
+    @ObservationIgnored private var cameraHUDDismissToken = 0
     @ObservationIgnored private lazy var capabilityRouter: NodeCapabilityRouter = self.buildCapabilityRouter()
     private let gatewayHealthMonitor = GatewayHealthMonitor()
     private var gatewayHealthMonitorDisabled = false
@@ -595,6 +596,9 @@ final class NodeAppModel {
             let res = try await self.operatorGateway.request(method: "agents.list", paramsJSON: "{}", timeoutSeconds: 8)
             let decoded = try JSONDecoder().decode(AgentsListResult.self, from: res)
             await MainActor.run {
+                let previousAgentName = self.activeAgentName
+                let previousMainSessionKey = self.mainSessionKey
+
                 self.gatewayDefaultAgentId = decoded.defaultid
                 self.gatewayAgents = decoded.agents
                 self.applyMainSessionKey(decoded.mainkey)
@@ -605,6 +609,14 @@ final class NodeAppModel {
                 }
                 self.talkMode.updateMainSessionKey(self.mainSessionKey)
                 self.homeCanvasRevision &+= 1
+
+                if LiveActivityManager.shared.isActive,
+                   (self.activeAgentName != previousAgentName || self.mainSessionKey != previousMainSessionKey)
+                {
+                    LiveActivityManager.shared.refreshIdentity(
+                        agentName: self.activeAgentName,
+                        sessionKey: self.mainSessionKey)
+                }
             }
         } catch {
             // Best-effort only.
@@ -1675,6 +1687,8 @@ private extension NodeAppModel {
 
     func showCameraHUD(text: String, kind: CameraHUDKind, autoHideSeconds: Double? = nil) {
         self.cameraHUDDismissTask?.cancel()
+        self.cameraHUDDismissToken &+= 1
+        let dismissToken = self.cameraHUDDismissToken
 
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             self.cameraHUDText = text
@@ -1695,6 +1709,7 @@ private extension NodeAppModel {
                 return
             }
             guard !Task.isCancelled else { return }
+            guard dismissToken == self.cameraHUDDismissToken else { return }
             withAnimation(.easeOut(duration: 0.25)) {
                 self.cameraHUDText = nil
                 self.cameraHUDKind = nil
