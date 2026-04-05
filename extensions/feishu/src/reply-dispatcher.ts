@@ -287,6 +287,21 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
     })();
   };
 
+  const resetStreamingBuffers = () => {
+    streamText = "";
+    lastPartial = "";
+    reasoningText = "";
+  };
+
+  const clearStreamingProgress = async () => {
+    if (streamingStartPromise) {
+      await streamingStartPromise;
+    }
+    await partialUpdateQueue;
+    await streaming?.clearText();
+    resetStreamingBuffers();
+  };
+
   const closeStreaming = async () => {
     if (streamingStartPromise) {
       await streamingStartPromise;
@@ -302,9 +317,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
     }
     streaming = null;
     streamingStartPromise = null;
-    streamText = "";
-    lastPartial = "";
-    reasoningText = "";
+    resetStreamingBuffers();
   };
 
   const sendChunkedTextReply = async (params: {
@@ -465,6 +478,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         // Keep the active streaming session open here so upstream failover or
         // retry logic can continue updating the same card instead of closing a
         // partial card and emitting a second visible final reply later.
+        await clearStreamingProgress();
         typingCallbacks?.onIdle?.();
       },
       onIdle: async () => {

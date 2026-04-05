@@ -4,6 +4,7 @@ type StreamingSessionStub = {
   active: boolean;
   start: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  clearText: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   isActive: ReturnType<typeof vi.fn>;
 };
@@ -48,6 +49,7 @@ vi.mock("./streaming-card.js", async () => {
         this.active = true;
       });
       update = vi.fn(async () => {});
+      clearText = vi.fn(async () => {});
       close = vi.fn(async () => {
         this.active = false;
       });
@@ -339,7 +341,7 @@ describe("createFeishuReplyDispatcher streaming behavior", () => {
     expect(sendMarkdownCardFeishuMock).not.toHaveBeenCalled();
   });
 
-  it("keeps the same streaming card open across transient reply errors", async () => {
+  it("clears stale streaming text and reuses the same card across transient reply errors", async () => {
     resolveFeishuAccountMock.mockReturnValue({
       accountId: "main",
       appId: "app_id",
@@ -356,18 +358,19 @@ describe("createFeishuReplyDispatcher streaming behavior", () => {
     });
 
     await options.onReplyStart?.();
-    result.replyOptions.onPartialReply?.({ text: "hello" });
+    result.replyOptions.onPartialReply?.({ text: "Let me explain" });
 
     await options.onError?.(new Error("terminated"), { kind: "final" });
 
     expect(streamingInstances).toHaveLength(1);
+    expect(streamingInstances[0].clearText).toHaveBeenCalledTimes(1);
     expect(streamingInstances[0].close).not.toHaveBeenCalled();
 
-    await options.deliver({ text: "hello world" }, { kind: "final" });
+    await options.deliver({ text: "Here's the answer:" }, { kind: "final" });
 
     expect(streamingInstances).toHaveLength(1);
     expect(streamingInstances[0].close).toHaveBeenCalledTimes(1);
-    expect(streamingInstances[0].close).toHaveBeenCalledWith("hello world", {
+    expect(streamingInstances[0].close).toHaveBeenCalledWith("Here's the answer:", {
       note: "Agent: agent",
     });
     expect(sendMessageFeishuMock).not.toHaveBeenCalled();
