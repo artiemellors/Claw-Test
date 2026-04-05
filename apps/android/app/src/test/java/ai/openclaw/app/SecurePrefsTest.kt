@@ -2,6 +2,8 @@ package ai.openclaw.app
 
 import android.content.Context
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -34,5 +36,32 @@ class SecurePrefsTest {
     assertEquals("shared-token", prefs.loadGatewayToken())
     assertEquals("bootstrap-token", prefs.loadGatewayBootstrapToken())
     assertEquals("bootstrap-token", prefs.gatewayBootstrapToken.value)
+  }
+
+  @Test
+  fun reconcilePendingAlwaysLocationUpgrade_restoresPreviousModeWhenBackgroundPermissionMissing() {
+    val context = RuntimeEnvironment.getApplication()
+    val plainPrefs = context.getSharedPreferences("openclaw.node", Context.MODE_PRIVATE)
+    plainPrefs.edit().clear().putString("location.enabledMode", "whileUsing").commit()
+    val prefs = SecurePrefs(context)
+    prefs.beginPendingAlwaysLocationUpgrade(LocationMode.Off)
+
+    val reconciled = prefs.reconcilePendingAlwaysLocationUpgrade()
+
+    assertEquals(LocationMode.Off, reconciled)
+    assertEquals(LocationMode.Off, prefs.locationMode.value)
+    assertFalse(prefs.hasPendingAlwaysLocationUpgrade())
+  }
+
+  @Test
+  fun beginPendingAlwaysLocationUpgrade_persistsPendingState() {
+    val context = RuntimeEnvironment.getApplication()
+    val plainPrefs = context.getSharedPreferences("openclaw.node", Context.MODE_PRIVATE)
+    plainPrefs.edit().clear().putString("location.enabledMode", "whileUsing").commit()
+    val prefs = SecurePrefs(context)
+    prefs.beginPendingAlwaysLocationUpgrade(LocationMode.Off)
+
+    assertEquals(LocationMode.WhileUsing, prefs.effectiveLocationMode())
+    assertTrue(prefs.hasPendingAlwaysLocationUpgrade())
   }
 }
