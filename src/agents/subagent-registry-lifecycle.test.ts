@@ -292,6 +292,7 @@ describe("subagent registry lifecycle hardening", () => {
   it("does not re-run announce flow after completion was already delivered", async () => {
     const entry = createRunEntry({
       completionAnnouncedAt: 3_500,
+      endedAt: 4_000,
     });
     const persist = vi.fn();
     const runSubagentAnnounceFlow = vi.fn(async () => true);
@@ -325,13 +326,57 @@ describe("subagent registry lifecycle hardening", () => {
     ).resolves.toBeUndefined();
 
     expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
-    expect(entry.cleanupCompletedAt).toBe(3_500);
+    expect(entry.cleanupCompletedAt).toBe(4_000);
     expect(notifyContextEngineSubagentEnded).toHaveBeenCalledWith({
       childSessionKey: entry.childSessionKey,
       reason: "completed",
       workspaceDir: entry.workspaceDir,
     });
     expect(persist).toHaveBeenCalled();
+  });
+
+  it("emits ended hook while retrying cleanup after completion was already delivered", async () => {
+    const entry = createRunEntry({
+      completionAnnouncedAt: 3_500,
+      endedAt: 4_000,
+      expectsCompletionMessage: true,
+    });
+    const emitSubagentEndedHookForRun = vi.fn(async () => {});
+
+    const controller = mod.createSubagentRegistryLifecycleController({
+      runs: new Map([[entry.runId, entry]]),
+      resumedRuns: new Set(),
+      subagentAnnounceTimeoutMs: 1_000,
+      persist: vi.fn(),
+      clearPendingLifecycleError: vi.fn(),
+      countPendingDescendantRuns: () => 0,
+      suppressAnnounceForSteerRestart: () => false,
+      shouldEmitEndedHookForRun: () => true,
+      emitSubagentEndedHookForRun,
+      notifyContextEngineSubagentEnded: vi.fn(async () => {}),
+      resumeSubagentRun: vi.fn(),
+      captureSubagentCompletionReply: vi.fn(async () => "final completion reply"),
+      runSubagentAnnounceFlow: vi.fn(async () => true),
+      warn: vi.fn(),
+    });
+
+    await expect(
+      controller.completeSubagentRun({
+        runId: entry.runId,
+        endedAt: 4_000,
+        outcome: { status: "ok" },
+        reason: SUBAGENT_ENDED_REASON_COMPLETE,
+        triggerCleanup: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(emitSubagentEndedHookForRun).toHaveBeenCalledTimes(1);
+    expect(emitSubagentEndedHookForRun).toHaveBeenCalledWith({
+      entry,
+      reason: SUBAGENT_ENDED_REASON_COMPLETE,
+      sendFarewell: undefined,
+      accountId: undefined,
+    });
   });
 
   it("skips browser cleanup when steer restart suppresses cleanup flow", async () => {

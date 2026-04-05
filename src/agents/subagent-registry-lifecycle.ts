@@ -361,19 +361,25 @@ export function createSubagentRegistryLifecycleController(params: {
     runId: string,
     cleanup: "delete" | "keep",
     didAnnounce: boolean,
+    options?: {
+      skipAnnounce?: boolean;
+    },
   ) => {
     const entry = params.runs.get(runId);
     if (!entry) {
       return;
     }
     if (didAnnounce) {
-      entry.completionAnnouncedAt = Date.now();
-      setDetachedTaskDeliveryStatusByRunId({
-        runId,
-        runtime: "subagent",
-        sessionKey: entry.childSessionKey,
-        deliveryStatus: "delivered",
-      });
+      if (!options?.skipAnnounce) {
+        entry.completionAnnouncedAt = Date.now();
+        params.persist();
+        setDetachedTaskDeliveryStatusByRunId({
+          runId,
+          runtime: "subagent",
+          sessionKey: entry.childSessionKey,
+          deliveryStatus: "delivered",
+        });
+      }
       entry.wakeOnDescendantSettle = undefined;
       entry.fallbackFrozenResultText = undefined;
       entry.fallbackFrozenResultCapturedAt = undefined;
@@ -446,7 +452,7 @@ export function createSubagentRegistryLifecycleController(params: {
         runId,
         entry,
         cleanup,
-        completedAt: now,
+        completedAt: Math.max(entry.completionAnnouncedAt, entry.endedAt ?? 0),
       });
       return;
     }
@@ -464,14 +470,20 @@ export function createSubagentRegistryLifecycleController(params: {
 
   const startSubagentAnnounceCleanupFlow = (runId: string, entry: SubagentRunRecord): boolean => {
     if (typeof entry.completionAnnouncedAt === "number") {
-      if (!entry.cleanupCompletedAt) {
-        completeCleanupBookkeeping({
-          runId,
-          entry,
-          cleanup: entry.cleanup,
-          completedAt: entry.completionAnnouncedAt,
-        });
+      if (!beginSubagentCleanup(runId)) {
+        return false;
       }
+      void finalizeSubagentCleanup(runId, entry.cleanup, true, {
+        skipAnnounce: true,
+      }).catch((err) => {
+        defaultRuntime.log(`[warn] subagent cleanup finalize failed (${runId}): ${String(err)}`);
+        const current = params.runs.get(runId);
+        if (!current || current.cleanupCompletedAt) {
+          return;
+        }
+        current.cleanupHandled = false;
+        params.persist();
+      });
       return true;
     }
     if (!beginSubagentCleanup(runId)) {
