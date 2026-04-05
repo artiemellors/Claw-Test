@@ -13,7 +13,7 @@ import {
 } from "../../plugins/provider-runtime.runtime.js";
 import { resolveSecretRefString, type SecretRefResolveCache } from "../../secrets/resolve.js";
 import { refreshChutesTokens } from "../chutes-oauth.js";
-import { AUTH_STORE_LOCK_OPTIONS, log } from "./constants.js";
+import { AUTH_STORE_LOCK_OPTIONS, EXTERNAL_CLI_NEAR_EXPIRY_MS, log } from "./constants.js";
 import { resolveTokenExpiryState } from "./credential-state.js";
 import { formatAuthDoctorHint } from "./doctor.js";
 import { ensureAuthStoreFile, resolveAuthStorePath } from "./paths.js";
@@ -173,7 +173,10 @@ async function refreshOAuthTokenWithLock(params: {
       return null;
     }
 
-    if (Date.now() < cred.expires) {
+    // Refresh proactively within EXTERNAL_CLI_NEAR_EXPIRY_MS of expiry, not just after.
+    // This prevents concurrent agents from all hitting expiry at the same moment and
+    // racing to refresh the same single-use refresh token simultaneously.
+    if (Date.now() < cred.expires - EXTERNAL_CLI_NEAR_EXPIRY_MS) {
       return {
         apiKey: await buildOAuthApiKey(cred.provider, cred),
         newCredentials: cred,
@@ -250,7 +253,9 @@ async function tryResolveOAuthProfile(
     return null;
   }
 
-  if (Date.now() < cred.expires) {
+  // Apply EXTERNAL_CLI_NEAR_EXPIRY_MS buffer here too for consistency with the other
+  // expiry checks — ensures fallback profile path also proactively refreshes.
+  if (Date.now() < cred.expires - EXTERNAL_CLI_NEAR_EXPIRY_MS) {
     return await buildOAuthProfileResult({
       provider: cred.provider,
       credentials: cred,
@@ -401,7 +406,10 @@ export async function resolveApiKeyForProfile(
       cred,
     }) ?? cred;
 
-  if (Date.now() < oauthCred.expires) {
+  // Use EXTERNAL_CLI_NEAR_EXPIRY_MS buffer: refresh proactively before expiry to avoid
+  // race condition where multiple concurrent agents all attempt to refresh the same
+  // single-use refresh token at the exact moment it expires.
+  if (Date.now() < oauthCred.expires - EXTERNAL_CLI_NEAR_EXPIRY_MS) {
     return await buildOAuthProfileResult({
       provider: oauthCred.provider,
       credentials: oauthCred,
