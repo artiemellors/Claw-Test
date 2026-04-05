@@ -305,6 +305,33 @@ describe("live model switch", () => {
     });
   });
 
+  it("routes normalized overrides back through persisted ref resolution", async () => {
+    state.loadSessionStoreMock.mockReturnValue({
+      main: {
+        providerOverride: "z-ai",
+        modelOverride: "z-ai/deepseek-chat",
+      },
+    });
+
+    const { resolveLiveSessionModelSelection } = await loadModule();
+
+    resolveLiveSessionModelSelection({
+      cfg: { session: { store: "/tmp/custom-store.json" } },
+      sessionKey: "main",
+      agentId: "reply",
+      defaultProvider: "anthropic",
+      defaultModel: "claude-opus-4-6",
+    });
+
+    expect(state.resolvePersistedSelectedModelRefMock).toHaveBeenCalledWith({
+      defaultProvider: "anthropic",
+      runtimeProvider: undefined,
+      runtimeModel: undefined,
+      overrideProvider: "z-ai",
+      overrideModel: "deepseek-chat",
+    });
+  });
+
   it("queues a live switch only when an active run was aborted", async () => {
     state.abortEmbeddedPiRunMock.mockReturnValue(true);
 
