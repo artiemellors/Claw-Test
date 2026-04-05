@@ -8,6 +8,7 @@ import { migrateLegacyWebFetchConfig } from "../config/legacy-web-fetch.js";
 import { migrateLegacyWebSearchConfig } from "../config/legacy-web-search.js";
 import { migrateLegacyXSearchConfig } from "../config/legacy-x-search.js";
 import { LEGACY_TALK_PROVIDER_ID, normalizeTalkSection } from "../config/talk.js";
+import { DEFAULT_GOOGLE_API_BASE_URL } from "../infra/google-api-base-url.js";
 import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 
 export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
