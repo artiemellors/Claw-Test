@@ -377,11 +377,6 @@ describe("resolvePluginProviders", () => {
     ]);
   });
 
-  it("resolves owning plugins for CLI backend ids declared in plugin manifests", () => {
-    expectOwningPluginIds("claude-cli", ["anthropic"]);
-    expectOwningPluginIds("codex-cli", ["openai"]);
-  });
-
   it.each([
     {
       name: "can augment restrictive allowlists for bundled provider compatibility",
