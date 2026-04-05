@@ -246,6 +246,13 @@ export async function monitorWebInbox(options: {
     if (!from) {
       return null;
     }
+    // Filter out self-messages (user sending to their own number) to prevent infinite reply loops.
+    // WhatsApp echoes self-messages back as inbound, which without this filter would trigger
+    // auto-reply → outbound → webhook echo → inbound → loop forever.
+    if (!group && self.e164 && from === self.e164) {
+      logVerbose(`Skipping self-message to own number ${from}`);
+      return null;
+    }
     const senderE164 = group
       ? participantJid
         ? await resolveInboundJid(participantJid)

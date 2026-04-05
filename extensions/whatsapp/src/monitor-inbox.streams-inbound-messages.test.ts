@@ -8,6 +8,7 @@ import {
   getAuthDir,
   getSock,
   installWebMonitorInboxUnitTestHooks,
+  settleInboundWork,
   startInboxMonitor,
   waitForMessageCalls,
 } from "./monitor-inbox.test-harness.js";
@@ -359,5 +360,62 @@ describe("web monitor inbox", () => {
         message: { conversation: "original" },
       },
     });
+  });
+
+  it("filters out self-messages to prevent infinite reply loops", async () => {
+    const onMessage = vi.fn(async () => {
+      return;
+    });
+
+    const { listener, sock } = await startInboxMonitor(onMessage as InboxOnMessage);
+    const selfMessageId = nextMessageId("self-msg");
+    const upsert = buildNotifyMessageUpsert({
+      id: selfMessageId,
+      remoteJid: "123@s.whatsapp.net", // Same as self number (+123)
+      text: "message to myself",
+      timestamp: 1_700_000_000,
+      pushName: "Me",
+      fromMe: false, // WhatsApp echoes self-messages as fromMe=false
+    });
+
+    sock.ev.emit("messages.upsert", upsert);
+    await settleInboundWork();
+
+    // Self-message should be filtered out and NOT trigger onMessage
+    expect(onMessage).not.toHaveBeenCalled();
+
+    await listener.close();
+  });
+
+  it("allows normal inbound messages from other users", async () => {
+    const onMessage = vi.fn(async () => {
+      return;
+    });
+
+    const { listener, sock } = await startInboxMonitor(onMessage as InboxOnMessage);
+    const otherMessageId = nextMessageId("other-msg");
+    const upsert = buildNotifyMessageUpsert({
+      id: otherMessageId,
+      remoteJid: "999@s.whatsapp.net", // Different from self number (+123)
+      text: "hello from another user",
+      timestamp: 1_700_000_000,
+      pushName: "Other User",
+      fromMe: false,
+    });
+
+    sock.ev.emit("messages.upsert", upsert);
+    await waitForMessageCalls(onMessage, 1);
+
+    // Normal message from other user should be processed
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "hello from another user",
+        from: "+999",
+        to: "+123",
+      }),
+    );
+
+    await listener.close();
   });
 });
