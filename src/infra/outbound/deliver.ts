@@ -28,7 +28,6 @@ import {
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
-import { getAgentScopedMediaLocalRootsForSources } from "../../media/local-roots.js";
 import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { formatErrorMessage } from "../errors.js";
@@ -589,18 +588,7 @@ async function deliverOutboundPayloadsCore(
     cfg,
     agentId: params.session?.agentId ?? params.mirror?.agentId,
     mediaSources: collectPayloadMediaSources(payloads),
-    ...(ignoreConfiguredRoots
-      ? {
-          mediaAccess: {
-            localRoots: getAgentScopedMediaLocalRootsForSources({
-              cfg,
-              agentId: params.session?.agentId ?? params.mirror?.agentId,
-              mediaSources: collectPayloadMediaSources(payloads),
-              ignoreConfiguredRoots: true,
-            }),
-          } satisfies OutboundMediaAccess,
-        }
-      : {}),
+    ignoreConfiguredRoots,
   });
   const results: OutboundDeliveryResult[] = [];
   const handler = await createChannelHandler({

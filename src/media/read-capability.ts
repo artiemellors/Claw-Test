@@ -8,8 +8,7 @@ import {
 import { resolveWorkspaceRoot } from "../agents/workspace-dir.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { FsRoot } from "../config/types.tools.js";
-import { readLocalFileSafely } from "../infra/fs-safe.js";
-import { isPathInside } from "../infra/path-guards.js";
+import { readLocalFileSafely, readPathWithinRoot } from "../infra/fs-safe.js";
 import type { OutboundMediaAccess, OutboundMediaReadFile } from "./load-options.js";
 import { getAgentScopedMediaLocalRootsForSources } from "./local-roots.js";
 
@@ -53,19 +52,28 @@ function createRootScopedReadFile(roots: FsRoot[], workspaceDir?: string): Outbo
   const workspaceRoot = resolveWorkspaceRoot(workspaceDir);
   return async (filePath: string) => {
     const resolvedPath = path.resolve(resolvePathFromInput(filePath, workspaceRoot));
-    const isAllowed = roots.some((root) => {
+    // Try each configured root — use readPathWithinRoot for dir roots (alias-safe,
+    // validates canonical path after symlink resolution) and exact match for file roots.
+    for (const root of roots) {
       const rootPath = path.resolve(root.path);
       if (root.kind === "file") {
-        return resolvedPath === rootPath;
+        if (resolvedPath === rootPath) {
+          return (await readLocalFileSafely({ filePath: resolvedPath })).buffer;
+        }
+        continue;
       }
-      return isPathInside(rootPath + path.sep, resolvedPath);
-    });
-    if (!isAllowed) {
-      throw new Error(
-        `Access denied: media path '${filePath}' is outside configured filesystem roots`,
-      );
+      // For dir roots, readPathWithinRoot enforces the boundary on the canonical
+      // path (after symlink resolution), preventing symlink traversal escapes.
+      try {
+        const result = await readPathWithinRoot({ rootDir: rootPath, filePath: resolvedPath });
+        return result.buffer;
+      } catch {
+        continue; // not inside this root — try next
+      }
     }
-    return (await readLocalFileSafely({ filePath: resolvedPath })).buffer;
+    throw new Error(
+      `Access denied: media path '${filePath}' is outside configured filesystem roots`,
+    );
   };
 }
 
