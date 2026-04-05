@@ -367,6 +367,7 @@ export function createSubagentRegistryLifecycleController(params: {
       return;
     }
     if (didAnnounce) {
+      entry.completionAnnouncedAt = Date.now();
       setDetachedTaskDeliveryStatusByRunId({
         runId,
         runtime: "subagent",
@@ -462,6 +463,17 @@ export function createSubagentRegistryLifecycleController(params: {
   };
 
   const startSubagentAnnounceCleanupFlow = (runId: string, entry: SubagentRunRecord): boolean => {
+    if (typeof entry.completionAnnouncedAt === "number") {
+      if (!entry.cleanupCompletedAt) {
+        completeCleanupBookkeeping({
+          runId,
+          entry,
+          cleanup: entry.cleanup,
+          completedAt: entry.completionAnnouncedAt,
+        });
+      }
+      return true;
+    }
     if (!beginSubagentCleanup(runId)) {
       return false;
     }
