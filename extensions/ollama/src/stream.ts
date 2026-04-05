@@ -505,11 +505,28 @@ function extractOllamaTools(tools: Tool[] | undefined): OllamaTool[] {
   return result;
 }
 
+function resolveOllamaThinking(message: OllamaChatResponse["message"]): string {
+  const thinking = typeof message.thinking === "string" ? message.thinking : "";
+  const reasoning = typeof message.reasoning === "string" ? message.reasoning : "";
+  // Concatenate both fields when present; most models only populate one.
+  if (thinking && reasoning) {
+    return thinking + reasoning;
+  }
+  return thinking || reasoning;
+}
+
 export function buildAssistantMessage(
   response: OllamaChatResponse,
   modelInfo: StreamModelDescriptor,
+  accumulatedThinking?: string,
 ): AssistantMessage {
-  const content: (TextContent | ToolCall)[] = [];
+  const content: AssistantMessage["content"] = [];
+
+  const thinking = accumulatedThinking ?? resolveOllamaThinking(response.message);
+  if (thinking) {
+    content.push({ type: "thinking", thinking } as AssistantMessage["content"][number]);
+  }
+
   const text = response.message.content || "";
   if (text) {
     content.push({ type: "text", text });
@@ -652,59 +669,162 @@ export function createOllamaStreamFn(
 
         const reader = response.body.getReader();
         let accumulatedContent = "";
+        let accumulatedThinking = "";
         const accumulatedToolCalls: OllamaToolCall[] = [];
         let finalResponse: OllamaChatResponse | undefined;
         const modelInfo = { api: model.api, provider: model.provider, id: model.id };
         let streamStarted = false;
+        let thinkingBlockOpen = false;
+        let textBlockOpen = false;
         let textBlockClosed = false;
+        let nextContentIndex = 0;
+        let textContentIndex = -1;
+
+        const ensureStreamStarted = () => {
+          if (streamStarted) {
+            return;
+          }
+          streamStarted = true;
+          const emptyPartial = buildStreamAssistantMessage({
+            model: modelInfo,
+            content: [],
+            stopReason: "stop",
+            usage: buildUsageWithNoCost({}),
+          });
+          stream.push({ type: "start", partial: emptyPartial });
+        };
+
+        const closeThinkingBlock = () => {
+          if (!thinkingBlockOpen) {
+            return;
+          }
+          thinkingBlockOpen = false;
+          const partial = buildStreamAssistantMessage({
+            model: modelInfo,
+            content: [
+              {
+                type: "thinking",
+                thinking: accumulatedThinking,
+              } as AssistantMessage["content"][number],
+            ],
+            stopReason: "stop",
+            usage: buildUsageWithNoCost({}),
+          });
+          stream.push({
+            type: "thinking_end",
+            contentIndex: 0,
+            content: accumulatedThinking,
+            partial,
+          });
+        };
 
         const closeTextBlock = () => {
-          if (!streamStarted || textBlockClosed) {
+          if (!textBlockOpen || textBlockClosed) {
             return;
           }
           textBlockClosed = true;
+          const contentBlocks: AssistantMessage["content"] = [];
+          if (accumulatedThinking) {
+            contentBlocks.push({
+              type: "thinking",
+              thinking: accumulatedThinking,
+            } as AssistantMessage["content"][number]);
+          }
+          contentBlocks.push({ type: "text", text: accumulatedContent });
           const partial = buildStreamAssistantMessage({
             model: modelInfo,
-            content: [{ type: "text", text: accumulatedContent }],
+            content: contentBlocks,
             stopReason: "stop",
             usage: buildUsageWithNoCost({}),
           });
           stream.push({
             type: "text_end",
-            contentIndex: 0,
+            contentIndex: textContentIndex,
             content: accumulatedContent,
             partial,
           });
         };
 
         for await (const chunk of parseNdjsonStream(reader)) {
-          if (chunk.message?.content) {
-            const delta = chunk.message.content;
-
-            if (!streamStarted) {
-              streamStarted = true;
-              // Emit start/text_start with an empty partial before accumulating
-              // the first delta, matching the Anthropic/OpenAI provider contract.
-              const emptyPartial = buildStreamAssistantMessage({
+          // Handle thinking/reasoning tokens from Ollama reasoning models.
+          // Once text has started, ignore any late thinking tokens to prevent
+          // content index misalignment in the stream event contract.
+          const thinkingDelta = textBlockOpen ? "" : resolveOllamaThinking(chunk.message);
+          if (thinkingDelta) {
+            ensureStreamStarted();
+            if (!thinkingBlockOpen) {
+              thinkingBlockOpen = true;
+              nextContentIndex = 1;
+              const partial = buildStreamAssistantMessage({
                 model: modelInfo,
-                content: [],
+                content: [
+                  { type: "thinking", thinking: "" } as AssistantMessage["content"][number],
+                ],
                 stopReason: "stop",
                 usage: buildUsageWithNoCost({}),
               });
-              stream.push({ type: "start", partial: emptyPartial });
-              stream.push({ type: "text_start", contentIndex: 0, partial: emptyPartial });
+              stream.push({ type: "thinking_start", contentIndex: 0, partial });
             }
-
-            accumulatedContent += delta;
+            accumulatedThinking += thinkingDelta;
             const partial = buildStreamAssistantMessage({
               model: modelInfo,
-              content: [{ type: "text", text: accumulatedContent }],
+              content: [
+                {
+                  type: "thinking",
+                  thinking: accumulatedThinking,
+                } as AssistantMessage["content"][number],
+              ],
               stopReason: "stop",
               usage: buildUsageWithNoCost({}),
             });
-            stream.push({ type: "text_delta", contentIndex: 0, delta, partial });
+            stream.push({ type: "thinking_delta", contentIndex: 0, delta: thinkingDelta, partial });
+          }
+
+          if (chunk.message?.content) {
+            const delta = chunk.message.content;
+
+            // Close thinking block before opening text block.
+            closeThinkingBlock();
+
+            if (!textBlockOpen) {
+              ensureStreamStarted();
+              textBlockOpen = true;
+              textContentIndex = nextContentIndex;
+              const contentBlocks: AssistantMessage["content"] = [];
+              if (accumulatedThinking) {
+                contentBlocks.push({
+                  type: "thinking",
+                  thinking: accumulatedThinking,
+                } as AssistantMessage["content"][number]);
+              }
+              const partial = buildStreamAssistantMessage({
+                model: modelInfo,
+                content: contentBlocks,
+                stopReason: "stop",
+                usage: buildUsageWithNoCost({}),
+              });
+              stream.push({ type: "text_start", contentIndex: textContentIndex, partial });
+            }
+
+            accumulatedContent += delta;
+            const contentBlocks: AssistantMessage["content"] = [];
+            if (accumulatedThinking) {
+              contentBlocks.push({
+                type: "thinking",
+                thinking: accumulatedThinking,
+              } as AssistantMessage["content"][number]);
+            }
+            contentBlocks.push({ type: "text", text: accumulatedContent });
+            const partial = buildStreamAssistantMessage({
+              model: modelInfo,
+              content: contentBlocks,
+              stopReason: "stop",
+              usage: buildUsageWithNoCost({}),
+            });
+            stream.push({ type: "text_delta", contentIndex: textContentIndex, delta, partial });
           }
           if (chunk.message?.tool_calls) {
+            closeThinkingBlock();
             closeTextBlock();
             accumulatedToolCalls.push(...chunk.message.tool_calls);
           }
@@ -723,9 +843,14 @@ export function createOllamaStreamFn(
           finalResponse.message.tool_calls = accumulatedToolCalls;
         }
 
-        const assistantMessage = buildAssistantMessage(finalResponse, modelInfo);
+        const assistantMessage = buildAssistantMessage(
+          finalResponse,
+          modelInfo,
+          accumulatedThinking,
+        );
 
-        // Close the text block if we emitted any text_delta events.
+        // Close any open blocks before emitting the done event.
+        closeThinkingBlock();
         closeTextBlock();
 
         stream.push({

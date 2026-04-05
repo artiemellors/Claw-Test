@@ -210,7 +210,7 @@ describe("buildAssistantMessage", () => {
     expect(result.usage.totalTokens).toBe(15);
   });
 
-  it("drops thinking-only output when content is empty", () => {
+  it("includes thinking content block when only thinking is present", () => {
     const response = {
       model: "qwen3:32b",
       created_at: "2026-01-01T00:00:00Z",
@@ -223,10 +223,10 @@ describe("buildAssistantMessage", () => {
     };
     const result = buildAssistantMessage(response, modelInfo);
     expect(result.stopReason).toBe("stop");
-    expect(result.content).toEqual([]);
+    expect(result.content).toEqual([{ type: "thinking", thinking: "Thinking output" }]);
   });
 
-  it("drops reasoning-only output when content and thinking are empty", () => {
+  it("includes thinking content block from reasoning field", () => {
     const response = {
       model: "qwen3:32b",
       created_at: "2026-01-01T00:00:00Z",
@@ -239,7 +239,7 @@ describe("buildAssistantMessage", () => {
     };
     const result = buildAssistantMessage(response, modelInfo);
     expect(result.stopReason).toBe("stop");
-    expect(result.content).toEqual([]);
+    expect(result.content).toEqual([{ type: "thinking", thinking: "Reasoning output" }]);
   });
 
   it("builds response with tool calls", () => {
@@ -923,18 +923,18 @@ describe("createOllamaStreamFn", () => {
     }
   });
 
-  it("drops thinking chunks when no final content is emitted", async () => {
+  it("includes thinking content when no final text is emitted", async () => {
     await expectDoneEventContent(
       [
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":"reasoned"},"done":false}',
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":" output"},"done":false}',
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":2}',
       ],
-      [],
+      [{ type: "thinking", thinking: "reasoned output" }],
     );
   });
 
-  it("prefers streamed content over earlier thinking chunks", async () => {
+  it("includes both thinking and text content", async () => {
     await expectDoneEventContent(
       [
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":"internal"},"done":false}',
@@ -942,22 +942,25 @@ describe("createOllamaStreamFn", () => {
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":" answer"},"done":false}',
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":2}',
       ],
-      [{ type: "text", text: "final answer" }],
+      [
+        { type: "thinking", thinking: "internal" },
+        { type: "text", text: "final answer" },
+      ],
     );
   });
 
-  it("drops reasoning chunks when no final content is emitted", async () => {
+  it("includes reasoning content when no final text is emitted", async () => {
     await expectDoneEventContent(
       [
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","reasoning":"reasoned"},"done":false}',
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","reasoning":" output"},"done":false}',
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":2}',
       ],
-      [],
+      [{ type: "thinking", thinking: "reasoned output" }],
     );
   });
 
-  it("prefers streamed content over earlier reasoning chunks", async () => {
+  it("includes both reasoning and text content", async () => {
     await expectDoneEventContent(
       [
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","reasoning":"internal"},"done":false}',
@@ -965,7 +968,137 @@ describe("createOllamaStreamFn", () => {
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":" answer"},"done":false}',
         '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":2}',
       ],
-      [{ type: "text", text: "final answer" }],
+      [
+        { type: "thinking", thinking: "internal" },
+        { type: "text", text: "final answer" },
+      ],
+    );
+  });
+
+  it("emits thinking_start, thinking_delta, thinking_end events for thinking models", async () => {
+    await withMockNdjsonFetch(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":"Let me"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":" think"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"The answer"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":5,"eval_count":3}',
+      ],
+      async () => {
+        const stream = await createOllamaTestStream({ baseUrl: "http://ollama-host:11434" });
+        const events = await collectStreamEvents(stream);
+
+        const types = events.map((e) => e.type);
+        expect(types).toEqual([
+          "start",
+          "thinking_start",
+          "thinking_delta",
+          "thinking_delta",
+          "thinking_end",
+          "text_start",
+          "text_delta",
+          "text_end",
+          "done",
+        ]);
+
+        // thinking_delta events carry incremental deltas
+        const thinkingDeltas = events.filter((e) => e.type === "thinking_delta");
+        expect(thinkingDeltas[0]).toMatchObject({ contentIndex: 0, delta: "Let me" });
+        expect(thinkingDeltas[1]).toMatchObject({ contentIndex: 0, delta: " think" });
+
+        // thinking_end carries the full accumulated thinking content
+        const thinkingEnd = events.find((e) => e.type === "thinking_end");
+        expect(thinkingEnd).toMatchObject({ contentIndex: 0, content: "Let me think" });
+
+        // text events use contentIndex 1 (after thinking block)
+        const textStart = events.find((e) => e.type === "text_start");
+        expect(textStart).toMatchObject({ contentIndex: 1 });
+        const textDelta = events.find((e) => e.type === "text_delta");
+        expect(textDelta).toMatchObject({ contentIndex: 1, delta: "The answer" });
+
+        // done event contains both thinking and text
+        const doneEvent = events.at(-1);
+        if (doneEvent?.type === "done") {
+          expect(doneEvent.message.content).toEqual([
+            { type: "thinking", thinking: "Let me think" },
+            { type: "text", text: "The answer" },
+          ]);
+        }
+      },
+    );
+  });
+
+  it("emits thinking events for thinking-only responses (no text content)", async () => {
+    await withMockNdjsonFetch(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":"deep thought"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":3,"eval_count":1}',
+      ],
+      async () => {
+        const stream = await createOllamaTestStream({ baseUrl: "http://ollama-host:11434" });
+        const events = await collectStreamEvents(stream);
+
+        const types = events.map((e) => e.type);
+        expect(types).toEqual([
+          "start",
+          "thinking_start",
+          "thinking_delta",
+          "thinking_end",
+          "done",
+        ]);
+
+        const doneEvent = events.at(-1);
+        if (doneEvent?.type === "done") {
+          expect(doneEvent.message.content).toEqual([
+            { type: "thinking", thinking: "deep thought" },
+          ]);
+        }
+      },
+    );
+  });
+
+  it("concatenates both thinking and reasoning when both are present", async () => {
+    await expectDoneEventContent(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":"first ","reasoning":"second"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"ok"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}',
+      ],
+      [
+        { type: "thinking", thinking: "first second" },
+        { type: "text", text: "ok" },
+      ],
+    );
+  });
+
+  it("ignores thinking tokens that arrive after text has started", async () => {
+    await withMockNdjsonFetch(
+      [
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"Hello"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":"","thinking":"late thought"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":" world"},"done":false}',
+        '{"model":"m","created_at":"t","message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":3,"eval_count":2}',
+      ],
+      async () => {
+        const stream = await createOllamaTestStream({ baseUrl: "http://ollama-host:11434" });
+        const events = await collectStreamEvents(stream);
+
+        const types = events.map((e) => e.type);
+        // No thinking events should appear since text started first
+        expect(types).toEqual([
+          "start",
+          "text_start",
+          "text_delta",
+          "text_delta",
+          "text_end",
+          "done",
+        ]);
+
+        // Only text content in final message, no thinking
+        const doneEvent = events.at(-1);
+        if (doneEvent?.type === "done") {
+          expect(doneEvent.message.content).toEqual([{ type: "text", text: "Hello world" }]);
+        }
+      },
     );
   });
 });
