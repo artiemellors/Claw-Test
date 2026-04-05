@@ -17,16 +17,19 @@ export function createAgentScopedHostMediaReadFile(params: {
   cfg: OpenClawConfig;
   agentId?: string;
   workspaceDir?: string;
+  ignoreConfiguredRoots?: boolean;
 }): OutboundMediaReadFile | undefined {
-  const fsConfig = resolveToolFsConfig({ cfg: params.cfg, agentId: params.agentId });
-  // When tools.fs.roots is configured, return a root-scoped readFile that
-  // only allows reads inside the configured roots. This keeps hostReadCapability
-  // active (so assertHostReadMediaAllowed still runs) while enforcing roots.
-  if (fsConfig.roots !== undefined) {
-    if (fsConfig.roots.length === 0) {
-      return undefined; // deny-all — no reads allowed
+  if (!params.ignoreConfiguredRoots) {
+    const fsConfig = resolveToolFsConfig({ cfg: params.cfg, agentId: params.agentId });
+    // When tools.fs.roots is configured, return a root-scoped readFile that
+    // only allows reads inside the configured roots. This keeps hostReadCapability
+    // active (so assertHostReadMediaAllowed still runs) while enforcing roots.
+    if (fsConfig.roots !== undefined) {
+      if (fsConfig.roots.length === 0) {
+        return undefined; // deny-all — no reads allowed
+      }
+      return createRootScopedReadFile(fsConfig.roots, params.workspaceDir);
     }
-    return createRootScopedReadFile(fsConfig.roots, params.workspaceDir);
   }
   if (
     !resolveEffectiveToolFsRootExpansionAllowed({
@@ -94,6 +97,7 @@ export function resolveAgentScopedOutboundMediaAccess(params: {
       cfg: params.cfg,
       agentId: params.agentId,
       workspaceDir: resolvedWorkspaceDir,
+      ignoreConfiguredRoots: params.ignoreConfiguredRoots,
     });
   return {
     ...(localRoots !== undefined ? { localRoots } : {}),

@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { logWarn } from "../logger.js";
-import { resolveBoundaryPath, resolvePathViaExistingAncestor } from "./boundary-path.js";
+import { resolveBoundaryPath } from "./boundary-path.js";
 import { sameFileIdentity } from "./file-identity.js";
 import { isPinnedPathHelperSpawnError, runPinnedPathHelper } from "./fs-pinned-path-helper.js";
 import { runPinnedUnlinkHelper, runPinnedWriteHelper } from "./fs-pinned-write-helper.js";
@@ -70,8 +70,29 @@ const OPEN_APPEND_CREATE_FLAGS =
 
 const ensureTrailingSep = (value: string) => (value.endsWith(path.sep) ? value : value + path.sep);
 
-async function resolveRootDirViaExistingAncestor(rootDir: string): Promise<string> {
-  return path.resolve(await resolvePathViaExistingAncestor(rootDir));
+async function resolveRootDirStrict(rootDir: string): Promise<string> {
+  try {
+    return path.resolve(await fs.realpath(rootDir));
+  } catch (err) {
+    if (isNotFoundPathError(err)) {
+      throw new SafeOpenError("not-found", "root dir not found");
+    }
+    throw err;
+  }
+}
+
+async function resolveRootDirForWrite(rootDir: string): Promise<string> {
+  try {
+    return path.resolve(await fs.realpath(rootDir));
+  } catch (err) {
+    if (isNotFoundPathError(err)) {
+      // For writes with mkdir, the root may not exist yet.
+      // Use the lexical path rather than falling back to an existing ancestor,
+      // which would broaden the boundary.
+      return path.resolve(rootDir);
+    }
+    throw err;
+  }
 }
 
 async function expandRelativePathWithHome(relativePath: string): Promise<string> {
@@ -161,8 +182,12 @@ async function openVerifiedLocalFile(
 async function resolvePathWithinRoot(params: {
   rootDir: string;
   relativePath: string;
+  mode?: "read" | "write";
 }): Promise<{ rootReal: string; rootWithSep: string; resolved: string }> {
-  const rootReal = await resolveRootDirViaExistingAncestor(params.rootDir);
+  const rootReal =
+    params.mode === "write"
+      ? await resolveRootDirForWrite(params.rootDir)
+      : await resolveRootDirStrict(params.rootDir);
   const rootWithSep = ensureTrailingSep(rootReal);
   const expanded = await expandRelativePathWithHome(params.relativePath);
   const resolved = path.resolve(rootWithSep, expanded);
@@ -383,7 +408,10 @@ export async function openWritableFileWithinRoot(params: {
   truncateExisting?: boolean;
   append?: boolean;
 }): Promise<SafeWritableOpenResult> {
-  const { rootReal, rootWithSep, resolved } = await resolvePathWithinRoot(params);
+  const { rootReal, rootWithSep, resolved } = await resolvePathWithinRoot({
+    ...params,
+    mode: "write",
+  });
   try {
     await assertNoPathAliasEscape({
       absolutePath: resolved,
@@ -761,7 +789,11 @@ async function resolvePinnedWriteTargetWithinRoot(params: {
   basename: string;
   mode: number;
 }> {
-  const { rootReal, rootWithSep, resolved } = await resolvePathWithinRoot(params);
+  const { rootReal, rootWithSep, resolved } = await resolvePathWithinRoot({
+    rootDir: params.rootDir,
+    relativePath: params.relativePath,
+    mode: "write",
+  });
   try {
     await assertNoPathAliasEscape({
       absolutePath: resolved,
