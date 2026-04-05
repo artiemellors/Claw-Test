@@ -237,6 +237,17 @@ export const GENERATED_PLUGIN_SDK_FACADES = [
     ],
   },
   {
+    subpath: "bailian",
+    source: pluginSource("bailian", "api.js"),
+    exports: [
+      "BAILIAN_BASE_URL",
+      "BAILIAN_DEFAULT_COST",
+      "BAILIAN_MODEL_CATALOG",
+      "buildBailianModelDefinition",
+      "buildBailianProvider",
+    ],
+  },
+  {
     subpath: "deepseek",
     source: pluginSource("deepseek", "api.js"),
     exports: [

@@ -100,6 +100,15 @@ export interface PluginSdkFacadeTypeMap {
     };
     types: {};
   };
+  bailian: {
+    module: typeof import("@openclaw/bailian/api.js");
+    sourceModules: {
+      source1: {
+        module: typeof import("@openclaw/bailian/api.js");
+      };
+    };
+    types: {};
+  };
   deepseek: {
     module: typeof import("@openclaw/deepseek/api.js");
     sourceModules: {
