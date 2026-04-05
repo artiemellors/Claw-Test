@@ -57,7 +57,11 @@ function createRootScopedReadFile(roots: FsRoot[], workspaceDir?: string): Outbo
     for (const root of roots) {
       const rootPath = path.resolve(root.path);
       if (root.kind === "file") {
-        if (resolvedPath === rootPath) {
+        const match =
+          process.platform === "win32"
+            ? resolvedPath.toLowerCase() === rootPath.toLowerCase()
+            : resolvedPath === rootPath;
+        if (match) {
           return (await readLocalFileSafely({ filePath: resolvedPath })).buffer;
         }
         continue;
