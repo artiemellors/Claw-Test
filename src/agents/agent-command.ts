@@ -823,6 +823,9 @@ async function agentCommandInternal(
               fallbackContextMode: runOptions?.contextMode,
               fallbackContextWindowTokens: runOptions?.contextWindowTokens,
               fallbackReasonCode: runOptions?.fallbackReasonCode,
+              fallbackPrimaryModel: runOptions?.primaryModel,
+              fallbackPrimaryContextWindowTokens: runOptions?.primaryContextWindowTokens,
+              fallbackModel: runOptions?.fallbackModel,
               sessionHasHistory: !isNewSession || (await sessionFileHasContent(sessionFile)),
               onAgentEvent: (evt) => {
                 if (

@@ -542,20 +542,33 @@ export async function runEmbeddedPiAgent(
         const resolvedExtraSystemPrompt = (() => {
           if (!fallbackContextMode || fallbackContextMode === "full") return params.extraSystemPrompt;
           const reasonCode = params.fallbackReasonCode ?? "unknown";
-          const reasonLabels: Record<string, string> = {
-            rate_limit: "Cloud rate-limited (429)",
-            rate_limited: "Cloud rate-limited (429)",
-            overloaded: "Cloud overloaded",
-            timeout: "Cloud timeout",
-            auth: "Cloud auth failed",
-            auth_permanent: "Cloud auth failed",
-            billing: "Cloud billing issue",
-            unknown: "Cloud unavailable",
+          const httpStatusMap: Record<string, number | undefined> = {
+            rate_limit: 429,
+            rate_limited: 429,
+            overloaded: 503,
+            timeout: 408,
+            auth: 401,
+            auth_permanent: 403,
+            billing: 402,
+            format: 400,
+            model_not_found: 404,
+            session_expired: 410,
+            unknown: undefined,
           };
-          const reasonLabel = reasonLabels[reasonCode] ?? reasonLabels.unknown;
+          const httpCode = httpStatusMap[reasonCode];
+          const reasonTag = httpCode ? `${reasonCode} (${httpCode})` : reasonCode;
+          const primaryModel = params.fallbackPrimaryModel ?? "primary model";
+          const fallbackModelName = params.fallbackModel ?? "fallback model";
+          const primaryCtx = params.fallbackPrimaryContextWindowTokens;
+          const fallbackCtx = params.fallbackContextWindowTokens;
+          const ctxLine = primaryCtx && fallbackCtx && fallbackCtx < primaryCtx
+            ? ` Context window changed from ${primaryCtx.toLocaleString()} to ${fallbackCtx.toLocaleString()} tokens (trimmed ${(primaryCtx - fallbackCtx).toLocaleString()} tokens to fit).`
+            : primaryCtx && fallbackCtx
+              ? ` Context window: ${fallbackCtx.toLocaleString()} tokens.`
+              : "";
           const notice = fallbackContextMode === "safe"
-            ? `⚠️ ${reasonLabel}, safe mode active. I can run scripts and check status.`
-            : `⚠️ Running on local model (${reasonLabel}), some context trimmed.`;
+            ? `⚠️ FALLBACK ACTIVATED: ${reasonTag}. Switched from ${primaryModel} to ${fallbackModelName}.${ctxLine} Running in safe mode.`
+            : `⚠️ FALLBACK ACTIVATED: ${reasonTag}. Switched from ${primaryModel} to ${fallbackModelName}.${ctxLine}`;
           const base = params.extraSystemPrompt ?? "";
           return base ? `${notice}\n\n${base}` : notice;
         })();
@@ -645,7 +658,7 @@ export async function runEmbeddedPiAgent(
             config: params.config,
             allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
             contextEngine,
-            contextTokenBudget: ctxInfo.tokens,
+            contextTokenBudget: params.fallbackContextWindowTokens ?? ctxInfo.tokens,
             skillsSnapshot: params.skillsSnapshot,
             prompt,
             images: params.images,

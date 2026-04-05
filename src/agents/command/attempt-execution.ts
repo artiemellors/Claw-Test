@@ -332,6 +332,9 @@ export function runAgentAttempt(params: {
   fallbackContextMode?: "full" | "light" | "safe";
   fallbackContextWindowTokens?: number;
   fallbackReasonCode?: string;
+  fallbackPrimaryModel?: string;
+  fallbackPrimaryContextWindowTokens?: number;
+  fallbackModel?: string;
   sessionHasHistory?: boolean;
 }) {
   const effectivePrompt = resolveFallbackRetryPrompt({
@@ -486,6 +489,9 @@ export function runAgentAttempt(params: {
     fallbackContextMode: params.fallbackContextMode,
     fallbackContextWindowTokens: params.fallbackContextWindowTokens,
     fallbackReasonCode: params.fallbackReasonCode,
+    fallbackPrimaryModel: params.fallbackPrimaryModel,
+    fallbackPrimaryContextWindowTokens: params.fallbackPrimaryContextWindowTokens,
+    fallbackModel: params.fallbackModel,
     cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
     onAgentEvent: params.onAgentEvent,
     bootstrapPromptWarningSignaturesSeen,

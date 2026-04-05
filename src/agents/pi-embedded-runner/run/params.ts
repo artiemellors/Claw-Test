@@ -150,6 +150,12 @@ export type RunEmbeddedPiAgentParams = {
   fallbackContextWindowTokens?: number;
   /** Human-readable reason code for the fallback (e.g. "rate_limited"). */
   fallbackReasonCode?: string;
+  /** Primary model identifier that failed (e.g. "anthropic/claude-sonnet-4-20250514"). */
+  fallbackPrimaryModel?: string;
+  /** Primary model's context window tokens. */
+  fallbackPrimaryContextWindowTokens?: number;
+  /** Fallback model identifier being used. */
+  fallbackModel?: string;
   /**
    * Dispose bundled MCP runtimes when the overall run ends instead of preserving
    * the session-scoped cache. Intended for one-shot local CLI runs that must

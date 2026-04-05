@@ -79,6 +79,12 @@ export type ModelFallbackRunOptions = {
   contextWindowTokens?: number;
   /** Human-readable reason code for the fallback (e.g. "rate_limited"). */
   fallbackReasonCode?: string;
+  /** Primary model identifier (provider/model) that failed. */
+  primaryModel?: string;
+  /** Primary model's context window size (tokens). */
+  primaryContextWindowTokens?: number;
+  /** Fallback model identifier (provider/model) being used. */
+  fallbackModel?: string;
 };
 
 type ModelFallbackRunFn<T> = (
@@ -781,13 +787,14 @@ export async function runWithModelFallback<T>(params: {
       }
     }
 
-    // Resolve context mode for fallback candidates
+    // Resolve context mode for fallback candidates — only apply degraded
+    // context when this is an actual fallback (not the primary attempt).
     const candidateContextMode = resolveModelContextMode({
       cfg: params.cfg,
       provider: candidate.provider,
       modelId: candidate.model,
     });
-    if (candidateContextMode !== "full") {
+    if (candidateContextMode !== "full" && attempts.length > 0) {
       if (!runOptions) runOptions = {};
       runOptions.contextMode = candidateContextMode;
       const ctxInfo = resolveContextWindowInfo({
@@ -800,6 +807,16 @@ export async function runWithModelFallback<T>(params: {
       // Derive reason code from last failed attempt
       const lastAttempt = attempts[attempts.length - 1];
       runOptions.fallbackReasonCode = lastAttempt?.reason ?? "unknown";
+      // Thread model identity so the notice can show "model A → model B"
+      runOptions.primaryModel = `${params.provider}/${params.model}`;
+      runOptions.fallbackModel = `${candidate.provider}/${candidate.model}`;
+      const primaryCtxInfo = resolveContextWindowInfo({
+        cfg: params.cfg,
+        provider: params.provider,
+        modelId: params.model,
+        defaultTokens: DEFAULT_CONTEXT_TOKENS,
+      });
+      runOptions.primaryContextWindowTokens = primaryCtxInfo.tokens;
     }
 
     const attemptRun = await runFallbackAttempt({
