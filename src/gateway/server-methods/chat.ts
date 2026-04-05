@@ -10,6 +10,7 @@ import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.j
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
+import { buildMediaPayload } from "../../channels/plugins/media-payload.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
@@ -1613,6 +1614,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       // Only BodyForAgent gets the timestamp — Body stays raw for UI display.
       // See: https://github.com/openclaw/openclaw/issues/3658
       const stampedMessage = injectTimestamp(messageForAgent, timestampOptsFromConfig(cfg));
+      const persistedImages = await persistedImagesPromise;
 
       const ctx: MsgContext = {
         Body: messageForAgent,
@@ -1636,6 +1638,12 @@ export const chatHandlers: GatewayRequestHandlers = {
         SenderName: clientInfo?.displayName,
         SenderUsername: clientInfo?.displayName,
         GatewayClientScopes: client?.connect?.scopes,
+        ...buildMediaPayload(
+          persistedImages.map((entry) => ({
+            path: entry.path,
+            contentType: entry.contentType,
+          })),
+        ),
       };
 
       const agentId = resolveSessionAgentId({
