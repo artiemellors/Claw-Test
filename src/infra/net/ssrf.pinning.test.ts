@@ -297,7 +297,7 @@ describe("ssrf pinning", () => {
     ).rejects.toThrow(/private|internal/i);
   });
 
-  it("allows literal RFC2544 fake-ip addresses when assumeProxyEnvironment is enabled", async () => {
+  it("still blocks literal RFC2544 fake-ip addresses when assumeProxyEnvironment is enabled", async () => {
     const lookup = createPublicLookupMock();
 
     await expect(
@@ -305,11 +305,8 @@ describe("ssrf pinning", () => {
         lookupFn: lookup,
         policy: { assumeProxyEnvironment: true },
       }),
-    ).resolves.toMatchObject({
-      hostname: "198.18.1.2",
-      addresses: ["93.184.216.34"],
-    });
-    expect(lookup).toHaveBeenCalledTimes(1);
+    ).rejects.toThrow(SsrFBlockedError);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   it("still blocks disallowed hostnames when assumeProxyEnvironment is enabled", async () => {

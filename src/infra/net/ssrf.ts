@@ -365,9 +365,9 @@ export async function resolvePinnedHostnameWithPolicy(
   if (!skipPrivateNetworkChecks && !skipIpRangeChecks) {
     // Phase 1: fail fast for literal hosts/IPs before any DNS lookup side-effects.
     assertAllowedHostOrIpOrThrow(normalized, params.policy);
-  } else if (!skipPrivateNetworkChecks && skipIpRangeChecks && !isRfc2544Address(normalized)) {
-    // In proxy-environment mode, allow RFC2544 fake-ip literals but continue to
-    // fail fast for all other private/special-use literal targets.
+  } else if (!skipPrivateNetworkChecks && skipIpRangeChecks) {
+    // In proxy-environment mode, phase-1 literal host/IP blocking stays intact.
+    // Only phase-2 DNS answers get the narrow RFC2544 fake-ip compatibility.
     assertAllowedHostOrIpOrThrow(normalized, params.policy);
   }
 
