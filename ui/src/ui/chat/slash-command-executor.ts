@@ -3,14 +3,17 @@
  * Calls gateway RPC methods and returns formatted results.
  */
 
-import { createChatModelOverride, resolvePreferredServerChatModelValue } from "../chat-model-ref.ts";
+import {
+  createChatModelOverride,
+  resolvePreferredServerChatModelValue,
+} from "../chat-model-ref.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
 import {
   DEFAULT_AGENT_ID,
   DEFAULT_MAIN_KEY,
   isSubagentSessionKey,
   parseAgentSessionKey,
-} from "../../../../src/routing/session-key.js";
+} from "../session-key.ts";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
