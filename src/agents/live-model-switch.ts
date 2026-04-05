@@ -16,6 +16,21 @@ export { LiveSessionModelSwitchError } from "./live-model-switch-error.js";
 export type LiveSessionModelSelection = EmbeddedRunModelSwitchRequest;
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 
+function normalizeStoredOverrideSelection(
+  providerOverride?: string | null,
+  modelOverride?: string | null,
+): { provider: string; model: string } | null {
+  const provider = providerOverride?.trim();
+  const model = modelOverride?.trim();
+  if (!provider || !model) {
+    return null;
+  }
+  const providerPrefix = `${provider.toLowerCase()}/`;
+  const normalizedModel = model.toLowerCase().startsWith(providerPrefix)
+    ? model.slice(provider.length + 1).trim() || model
+    : model;
+  return { provider, model: normalizedModel };
+}
 export function resolveLiveSessionModelSelection(params: {
   cfg?: { session?: { store?: string } } | undefined;
   sessionKey?: string;
@@ -39,15 +54,19 @@ export function resolveLiveSessionModelSelection(params: {
     agentId,
   });
   const entry = loadSessionStore(storePath, { skipCache: true })[sessionKey];
+  const normalizedOverride = normalizeStoredOverrideSelection(
+    entry?.providerOverride,
+    entry?.modelOverride,
+  );
   const persisted = resolvePersistedSelectedModelRef({
     defaultProvider: defaultModelRef.provider,
     runtimeProvider: entry?.modelProvider,
     runtimeModel: entry?.model,
-    overrideProvider: entry?.providerOverride,
-    overrideModel: entry?.modelOverride,
+    overrideProvider: normalizedOverride?.provider,
+    overrideModel: normalizedOverride?.model,
   });
   const provider =
-    persisted?.provider ?? entry?.providerOverride?.trim() ?? defaultModelRef.provider;
+    persisted?.provider ?? normalizedOverride?.provider ?? entry?.providerOverride?.trim() ?? defaultModelRef.provider;
   const model = persisted?.model ?? defaultModelRef.model;
   const authProfileId = normalizeOptionalString(entry?.authProfileOverride);
   return {

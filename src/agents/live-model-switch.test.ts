@@ -233,6 +233,58 @@ describe("live model switch", () => {
     });
   });
 
+  it("keeps nested model ids under the persisted provider override", async () => {
+    state.loadSessionStoreMock.mockReturnValue({
+      main: {
+        providerOverride: "nvidia",
+        modelOverride: "moonshotai/kimi-k2.5",
+      },
+    });
+
+    const { resolveLiveSessionModelSelection } = await loadModule();
+
+    expect(
+      resolveLiveSessionModelSelection({
+        cfg: { session: { store: "/tmp/custom-store.json" } },
+        sessionKey: "main",
+        agentId: "reply",
+        defaultProvider: "anthropic",
+        defaultModel: "claude-opus-4-6",
+      }),
+    ).toEqual({
+      provider: "nvidia",
+      model: "moonshotai/kimi-k2.5",
+      authProfileId: undefined,
+      authProfileIdSource: undefined,
+    });
+  });
+
+  it("strips duplicated provider prefixes from persisted overrides", async () => {
+    state.loadSessionStoreMock.mockReturnValue({
+      main: {
+        providerOverride: "openai-codex",
+        modelOverride: "openai-codex/gpt-5.4",
+      },
+    });
+
+    const { resolveLiveSessionModelSelection } = await loadModule();
+
+    expect(
+      resolveLiveSessionModelSelection({
+        cfg: { session: { store: "/tmp/custom-store.json" } },
+        sessionKey: "main",
+        agentId: "reply",
+        defaultProvider: "anthropic",
+        defaultModel: "claude-opus-4-6",
+      }),
+    ).toEqual({
+      provider: "openai-codex",
+      model: "gpt-5.4",
+      authProfileId: undefined,
+      authProfileIdSource: undefined,
+    });
+  });
+
   it("queues a live switch only when an active run was aborted", async () => {
     state.abortEmbeddedPiRunMock.mockReturnValue(true);
 
