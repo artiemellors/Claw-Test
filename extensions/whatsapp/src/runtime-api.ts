@@ -75,9 +75,9 @@ export async function loadOutboundMediaFromUrl(
 ) {
   const readFile = options.mediaAccess?.readFile ?? options.mediaReadFile;
   const localRoots =
-    options.mediaAccess?.localRoots?.length && options.mediaAccess.localRoots.length > 0
+    options.mediaAccess?.localRoots !== undefined
       ? options.mediaAccess.localRoots
-      : options.mediaLocalRoots && options.mediaLocalRoots.length > 0
+      : options.mediaLocalRoots !== undefined
         ? options.mediaLocalRoots
         : undefined;
   return await loadWebMedia(
@@ -91,7 +91,7 @@ export async function loadOutboundMediaFromUrl(
         }
       : {
           ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}),
-          ...(localRoots ? { localRoots } : {}),
+          ...(localRoots !== undefined ? { localRoots } : {}),
         },
   );
 }
