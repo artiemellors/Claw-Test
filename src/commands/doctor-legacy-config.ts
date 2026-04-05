@@ -17,7 +17,7 @@ export function normalizeCompatibilityConfigValues(cfg: OpenClawConfig): {
   const changes: string[] = [];
   const NANO_BANANA_SKILL_KEY = "nano-banana-pro";
   const NANO_BANANA_MODEL = "google/gemini-3-pro-image-preview";
-  const GOOGLE_PROVIDER_BASE_URL = "https://generativelanguage.googleapis.com";
+  const GOOGLE_PROVIDER_BASE_URL = DEFAULT_GOOGLE_API_BASE_URL;
   let next: OpenClawConfig = cfg;
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
