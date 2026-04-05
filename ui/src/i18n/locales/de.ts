@@ -385,6 +385,10 @@ export const de: TranslationMap = {
     subtitle: "Gateway Dashboard",
     passwordPlaceholder: "optional",
   },
+  connectCommand: {
+    copyTitle: "Befehl kopieren",
+    copyAriaLabel: "Befehl kopieren: {command}",
+  },
   chat: {
     disconnected: "Verbindung zum Gateway getrennt.",
     refreshTitle: "Chat-Daten aktualisieren",

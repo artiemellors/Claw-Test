@@ -409,6 +409,10 @@ export const es: TranslationMap = {
     id: "Bahasa Indonesia (Indonesian)",
     pl: "Polski (Polish)",
   },
+  connectCommand: {
+    copyTitle: "Copiar comando",
+    copyAriaLabel: "Copiar comando: {command}",
+  },
   cron: {
     summary: {
       enabled: "Habilitado",
