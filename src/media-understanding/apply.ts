@@ -70,16 +70,24 @@ const TEXT_EXT_MIME = new Map<string, string>([
   [".xml", "application/xml"],
 ]);
 
+// RFC 2045 §5.1 MIME type pattern: type/subtype with optional parameters.
+// Parameters must be `; attribute=value` where value is a token or quoted-string.
+// This rejects trailing junk like `; malicious<script>` while accepting
+// valid params like `; charset=utf-8` or `; name="file.jpg"`.
+const MIME_TYPE_SANITIZE_RE =
+  /^([a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)(?:\s*;\s*[a-z0-9!#$&^_.+-]+\s*=\s*(?:[a-z0-9!#$&^_.+-]+|"(?:[^"\\\r\n]|\\.)*"))*$/i;
+
 function sanitizeMimeType(value?: string): string | undefined {
   if (!value) {
     return undefined;
   }
-  const trimmed = value.trim().toLowerCase();
+  const trimmed = value.trim();
   if (!trimmed) {
     return undefined;
   }
-  const match = trimmed.match(/^([a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)/);
-  return match?.[1];
+  // Case-insensitive per RFC 2045 §5.1; lowercase the type/subtype on return.
+  const match = trimmed.match(MIME_TYPE_SANITIZE_RE);
+  return match?.[1]?.toLowerCase();
 }
 
 function resolveFileLimits(cfg: OpenClawConfig) {
