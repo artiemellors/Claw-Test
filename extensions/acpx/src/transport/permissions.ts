@@ -135,6 +135,12 @@ export async function resolvePermissionRequest(
     if (nonInteractivePolicy === "fail") {
       throw new PermissionPromptUnavailableError();
     }
+    if (nonInteractivePolicy === "allow") {
+      if (allowOption) {
+        return selected(allowOption.optionId);
+      }
+      return selected(options[0].optionId);
+    }
     if (rejectOption) {
       return selected(rejectOption.optionId);
     }
