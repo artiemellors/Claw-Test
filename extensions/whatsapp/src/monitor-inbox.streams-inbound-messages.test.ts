@@ -387,6 +387,40 @@ describe("web monitor inbox", () => {
     await listener.close();
   });
 
+  it("allows self-messages when selfChatMode is enabled", async () => {
+    const onMessage = vi.fn(async () => {
+      return;
+    });
+
+    const { listener, sock } = await startInboxMonitor(onMessage as InboxOnMessage, {
+      selfChatMode: true,
+    });
+    const selfMessageId = nextMessageId("self-chat-mode");
+    const upsert = buildNotifyMessageUpsert({
+      id: selfMessageId,
+      remoteJid: "123@s.whatsapp.net", // Same as self number (+123)
+      text: "message to myself in selfChatMode",
+      timestamp: 1_700_000_000,
+      pushName: "Me",
+      fromMe: false,
+    });
+
+    sock.ev.emit("messages.upsert", upsert);
+    await waitForMessageCalls(onMessage, 1);
+
+    // In selfChatMode, self-messages should pass through
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "message to myself in selfChatMode",
+        senderE164: "+123",
+        selfE164: "+123",
+      }),
+    );
+
+    await listener.close();
+  });
+
   it("allows normal inbound messages from other users", async () => {
     const onMessage = vi.fn(async () => {
       return;
