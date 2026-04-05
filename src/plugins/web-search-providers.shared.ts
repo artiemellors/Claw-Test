@@ -1,7 +1,7 @@
-import { resolvePluginActivationInputs } from "./activation-context.js";
-import { resolveBundledWebSearchPluginIds } from "./bundled-web-search.js";
+import { resolveBundledPluginCompatibleActivationInputs } from "./activation-context.js";
 import { type NormalizedPluginsConfig } from "./config-state.js";
 import type { PluginLoadOptions } from "./loader.js";
+import { resolveManifestContractPluginIds } from "./manifest-registry.js";
 import type { PluginWebSearchProviderEntry } from "./types.js";
 
 function resolveBundledWebSearchCompatPluginIds(params: {
@@ -9,7 +9,9 @@ function resolveBundledWebSearchCompatPluginIds(params: {
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
 }): string[] {
-  return resolveBundledWebSearchPluginIds({
+  return resolveManifestContractPluginIds({
+    contract: "webSearchProviders",
+    origin: "bundled",
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
@@ -53,26 +55,17 @@ export function resolveBundledWebSearchResolutionConfig(params: {
   activationSourceConfig?: PluginLoadOptions["config"];
   autoEnabledReasons: Record<string, string[]>;
 } {
-  const autoEnabled = resolvePluginActivationInputs({
+  const activation = resolveBundledPluginCompatibleActivationInputs({
     rawConfig: params.config,
     env: params.env,
-    applyAutoEnable: true,
-  });
-  const bundledCompatPluginIds = resolveBundledWebSearchCompatPluginIds({
-    config: autoEnabled.config,
     workspaceDir: params.workspaceDir,
-    env: params.env,
-  });
-  const activation = resolvePluginActivationInputs({
-    rawConfig: params.config,
-    resolvedConfig: autoEnabled.config,
-    autoEnabledReasons: autoEnabled.autoEnabledReasons,
-    env: params.env,
-    compat: {
-      allowlistPluginIds: params.bundledAllowlistCompat ? bundledCompatPluginIds : undefined,
-      enablementPluginIds: bundledCompatPluginIds,
-      vitestPluginIds: bundledCompatPluginIds,
+    applyAutoEnable: true,
+    compatMode: {
+      allowlist: params.bundledAllowlistCompat,
+      enablement: "always",
+      vitest: true,
     },
+    resolveCompatPluginIds: resolveBundledWebSearchCompatPluginIds,
   });
 
   return {

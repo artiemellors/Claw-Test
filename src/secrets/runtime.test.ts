@@ -10,14 +10,8 @@ import type { PluginWebSearchProviderEntry } from "../plugins/types.js";
 
 type WebProviderUnderTest = "brave" | "gemini" | "grok" | "kimi" | "perplexity" | "firecrawl";
 
-const { resolveBundledPluginWebSearchProvidersMock, resolvePluginWebSearchProvidersMock } =
-  vi.hoisted(() => ({
-    resolveBundledPluginWebSearchProvidersMock: vi.fn(() => buildTestWebSearchProviders()),
-    resolvePluginWebSearchProvidersMock: vi.fn(() => buildTestWebSearchProviders()),
-  }));
-
-vi.mock("../plugins/web-search-providers.js", () => ({
-  resolveBundledPluginWebSearchProviders: resolveBundledPluginWebSearchProvidersMock,
+const { resolvePluginWebSearchProvidersMock } = vi.hoisted(() => ({
+  resolvePluginWebSearchProvidersMock: vi.fn(() => buildTestWebSearchProviders()),
 }));
 
 vi.mock("../plugins/web-search-providers.runtime.js", () => ({
@@ -132,8 +126,6 @@ describe("secrets runtime snapshot", () => {
   });
 
   beforeEach(() => {
-    resolveBundledPluginWebSearchProvidersMock.mockReset();
-    resolveBundledPluginWebSearchProvidersMock.mockReturnValue(buildTestWebSearchProviders());
     resolvePluginWebSearchProvidersMock.mockReset();
     resolvePluginWebSearchProvidersMock.mockReturnValue(buildTestWebSearchProviders());
   });
@@ -181,7 +173,6 @@ describe("secrets runtime snapshot", () => {
         },
       },
       talk: {
-        apiKey: { source: "env", provider: "default", id: "TALK_API_KEY" },
         providers: {
           elevenlabs: {
             apiKey: { source: "env", provider: "default", id: "TALK_PROVIDER_API_KEY" },
@@ -239,7 +230,6 @@ describe("secrets runtime snapshot", () => {
         GITHUB_TOKEN: "ghp-env-token", // pragma: allowlist secret
         REVIEW_SKILL_API_KEY: "sk-skill-ref", // pragma: allowlist secret
         MEMORY_REMOTE_API_KEY: "mem-ref-key", // pragma: allowlist secret
-        TALK_API_KEY: "talk-ref-key", // pragma: allowlist secret
         TALK_PROVIDER_API_KEY: "talk-provider-ref-key", // pragma: allowlist secret
         REMOTE_GATEWAY_TOKEN: "remote-token-ref",
         REMOTE_GATEWAY_PASSWORD: "remote-password-ref", // pragma: allowlist secret
@@ -280,7 +270,7 @@ describe("secrets runtime snapshot", () => {
     );
     expect(snapshot.config.skills?.entries?.["review-pr"]?.apiKey).toBe("sk-skill-ref");
     expect(snapshot.config.agents?.defaults?.memorySearch?.remote?.apiKey).toBe("mem-ref-key");
-    expect(snapshot.config.talk?.apiKey).toBe("talk-ref-key");
+    expect((snapshot.config.talk as { apiKey?: unknown } | undefined)?.apiKey).toBeUndefined();
     expect(snapshot.config.talk?.providers?.elevenlabs?.apiKey).toBe("talk-provider-ref-key");
     expect(snapshot.config.gateway?.remote?.token).toBe("remote-token-ref");
     expect(snapshot.config.gateway?.remote?.password).toBe("remote-password-ref");
@@ -1217,7 +1207,7 @@ describe("secrets runtime snapshot", () => {
     const ignoredInactiveWarnings = snapshot.warnings.filter(
       (warning) => warning.code === "SECRETS_REF_IGNORED_INACTIVE_SURFACE",
     );
-    expect(ignoredInactiveWarnings).toHaveLength(10);
+    expect(ignoredInactiveWarnings).toHaveLength(6);
     expect(snapshot.warnings.map((warning) => warning.path)).toEqual(
       expect.arrayContaining([
         "agents.defaults.memorySearch.remote.apiKey",
@@ -1226,10 +1216,6 @@ describe("secrets runtime snapshot", () => {
         "channels.telegram.accounts.disabled.botToken",
         "plugins.entries.brave.config.webSearch.apiKey",
         "plugins.entries.google.config.webSearch.apiKey",
-        "plugins.entries.xai.config.webSearch.apiKey",
-        "plugins.entries.moonshot.config.webSearch.apiKey",
-        "plugins.entries.perplexity.config.webSearch.apiKey",
-        "plugins.entries.firecrawl.config.webSearch.apiKey",
       ]),
     );
   });
@@ -3131,7 +3117,7 @@ describe("secrets runtime snapshot", () => {
     }
   });
 
-  it("migrates legacy x_search SecretRefs into the xai plugin webSearch auth at runtime", async () => {
+  it("keeps legacy x_search SecretRefs in place until doctor repairs them", async () => {
     const snapshot = await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         tools: {
@@ -3152,17 +3138,14 @@ describe("secrets runtime snapshot", () => {
     });
 
     expect((snapshot.config.tools?.web as Record<string, unknown> | undefined)?.x_search).toEqual({
+      apiKey: "xai-runtime-key",
       enabled: true,
       model: "grok-4-1-fast",
     });
-    expect(snapshot.config.plugins?.entries?.xai?.config).toEqual({
-      webSearch: {
-        apiKey: "xai-runtime-key",
-      },
-    });
+    expect(snapshot.config.plugins?.entries?.xai).toBeUndefined();
   });
 
-  it("still migrates legacy x_search auth when general legacy migration returns an invalid config", async () => {
+  it("still resolves legacy x_search auth in place even when unrelated legacy config is present", async () => {
     const snapshot = await prepareSecretsRuntimeSnapshot({
       config: asConfig({
         tools: {
@@ -3188,13 +3171,10 @@ describe("secrets runtime snapshot", () => {
     });
 
     expect((snapshot.config.tools?.web as Record<string, unknown> | undefined)?.x_search).toEqual({
+      apiKey: "xai-runtime-key-invalid-config",
       enabled: true,
     });
-    expect(snapshot.config.plugins?.entries?.xai?.config).toEqual({
-      webSearch: {
-        apiKey: "xai-runtime-key-invalid-config",
-      },
-    });
+    expect(snapshot.config.plugins?.entries?.xai).toBeUndefined();
   });
 
   it("does not force-enable xai at runtime for knob-only x_search config", async () => {
