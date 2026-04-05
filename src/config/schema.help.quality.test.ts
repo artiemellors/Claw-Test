@@ -472,6 +472,7 @@ const TOOLS_HOOKS_TARGET_KEYS = [
   "tools.byProvider",
   "tools.exec.approvalRunningNoticeMs",
   "tools.exec.strictInlineEval",
+  "tools.exec.obfuscationCheck",
   "tools.links.enabled",
   "tools.links.maxLinks",
   "tools.links.models",

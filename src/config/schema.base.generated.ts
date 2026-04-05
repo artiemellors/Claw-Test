@@ -6675,6 +6675,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                         strictInlineEval: {
                           type: "boolean",
                         },
+                        obfuscationCheck: {
+                          type: "boolean",
+                        },
                         safeBinTrustedDirs: {
                           type: "array",
                           items: {
@@ -16869,6 +16872,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 description:
                   "Require explicit approval for interpreter inline-eval forms such as `python -c`, `node -e`, `ruby -e`, or `osascript -e`. Prevents silent allowlist reuse and downgrades allow-always to ask-each-time for those forms.",
               },
+              obfuscationCheck: {
+                type: "boolean",
+              },
               safeBinTrustedDirs: {
                 type: "array",
                 items: {
@@ -23514,6 +23520,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "tools.exec.strictInlineEval": {
       label: "Require Inline-Eval Approval",
       help: "Require explicit approval for interpreter inline-eval forms such as `python -c`, `node -e`, `ruby -e`, or `osascript -e`. Prevents silent allowlist reuse and downgrades allow-always to ask-each-time for those forms.",
+      tags: ["tools"],
+    },
+    "tools.exec.obfuscationCheck": {
+      label: "Exec Obfuscation Check",
+      help: "Enable the obfuscation detection heuristic that flags encoded or obfuscated commands (base64 piped to shell, hex decoding, etc.). When enabled (default), detected commands require explicit approval and time out with denial. Set to false to disable the heuristic and let those commands go through normal approval flow.",
       tags: ["tools"],
     },
     "tools.exec.safeBinTrustedDirs": {

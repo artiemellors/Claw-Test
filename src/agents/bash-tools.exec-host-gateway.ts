@@ -16,7 +16,7 @@ import {
   describeInterpreterInlineEval,
   detectInterpreterInlineEvalArgv,
 } from "../infra/exec-inline-eval.js";
-import { detectCommandObfuscation } from "../infra/exec-obfuscation-detect.js";
+import { detectCommandObfuscation, OBFUSCATION_NOT_DETECTED } from "../infra/exec-obfuscation-detect.js";
 import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
 import { logInfo } from "../logger.js";
 import { markBackgrounded, tail } from "./bash-process-registry.js";
@@ -58,6 +58,7 @@ export type ProcessGatewayAllowlistParams = {
   safeBins: Set<string>;
   safeBinProfiles: Readonly<Record<string, SafeBinProfile>>;
   strictInlineEval?: boolean;
+  obfuscationCheck?: boolean;
   trigger?: string;
   agentId?: string;
   sessionKey?: string;
@@ -151,7 +152,10 @@ export async function processGatewayAllowlist(
       enforcedCommand = enforced.command;
     }
   }
-  const obfuscation = detectCommandObfuscation(params.command);
+  const obfuscation =
+    params.obfuscationCheck !== false
+      ? detectCommandObfuscation(params.command)
+      : OBFUSCATION_NOT_DETECTED;
   if (obfuscation.detected) {
     logInfo(`exec: obfuscation detected (gateway): ${obfuscation.reasons.join(", ")}`);
     params.warnings.push(`⚠️ Obfuscated command detected: ${obfuscation.reasons.join("; ")}`);
