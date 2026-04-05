@@ -31,7 +31,7 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export const AUTH_POLICIES = ["skip", "fail"] as const;
 export type AuthPolicy = (typeof AUTH_POLICIES)[number];
 
-export const NON_INTERACTIVE_PERMISSION_POLICIES = ["deny", "fail"] as const;
+export const NON_INTERACTIVE_PERMISSION_POLICIES = ["deny", "fail", "allow"] as const;
 export type NonInteractivePermissionPolicy = (typeof NON_INTERACTIVE_PERMISSION_POLICIES)[number];
 
 export const SESSION_RESUME_POLICIES = ["allow-new", "same-session-only"] as const;
