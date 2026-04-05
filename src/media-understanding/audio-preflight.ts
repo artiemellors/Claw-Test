@@ -10,6 +10,8 @@ import {
 } from "./runner.js";
 import type { MediaUnderstandingProvider } from "./types.js";
 
+export const EMPTY_AUDIO_TRANSCRIPT_PLACEHOLDER = "[Voice note was empty or silent]";
+
 /**
  * Transcribes the first audio attachment BEFORE mention checking.
  * This allows voice notes to be processed in group chats with requireMention: true.
@@ -49,16 +51,19 @@ export async function transcribeFirstAudio(params: {
   }
 
   try {
-    const { transcript } = await runAudioTranscription({
+    const { transcript, skippedReason } = await runAudioTranscription({
       ctx,
       cfg,
-      attachments,
+      attachments: [firstAudio],
       agentDir: params.agentDir,
       providers: params.providers,
       activeModel: params.activeModel,
       localPathRoots: resolveMediaAttachmentLocalRoots({ cfg, ctx }),
     });
     if (!transcript) {
+      if (skippedReason === "tooSmall" || skippedReason === "empty") {
+        return EMPTY_AUDIO_TRANSCRIPT_PLACEHOLDER;
+      }
       return undefined;
     }
 
