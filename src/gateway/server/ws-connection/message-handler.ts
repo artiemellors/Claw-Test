@@ -64,6 +64,7 @@ import {
   resolveClientIp,
 } from "../../net.js";
 import { reconcileNodePairingOnConnect } from "../../node-connect-reconcile.js";
+import { shouldAutoApproveNodePairingFromTrustedCidrs } from "../../node-pairing-auto-approve.js";
 import { checkBrowserOrigin } from "../../origin-check.js";
 import {
   ConnectErrorDetailCodes,
@@ -261,6 +262,13 @@ export function attachGatewayWsMessageHandler(params: {
       : clientIp && !isLoopbackAddress(clientIp)
         ? clientIp
         : undefined;
+  const reportedClientIpSource = !reportedClientIp
+    ? "none"
+    : hasProxyHeaders && remoteIsTrustedProxy
+      ? isLoopbackAddress(remoteAddr)
+        ? "loopback-trusted-proxy"
+        : "trusted-proxy"
+      : "direct";
 
   if (hasUntrustedProxyHeaders) {
     logWsControl.warn(
@@ -852,6 +860,19 @@ export function attachGatewayWsMessageHandler(params: {
               isWebchat,
               reason,
             });
+            const allowSilentTrustedCidrsNodePairing =
+              !existingPairedDevice &&
+              shouldAutoApproveNodePairingFromTrustedCidrs({
+                role,
+                reason,
+                scopes,
+                hasBrowserOriginHeader,
+                isControlUi,
+                isWebchat,
+                reportedClientIpSource,
+                reportedClientIp,
+                autoApproveCidrs: configSnapshot.gateway?.nodes?.pairing?.autoApproveCidrs,
+              });
             // QR bootstrap onboarding stays single-use, but the first node bootstrap handshake
             // should seed bounded device tokens and only consume the bootstrap token once the
             // hello-ok path succeeds so reconnects can recover from pre-hello failures.
@@ -876,7 +897,9 @@ export function attachGatewayWsMessageHandler(params: {
               silent:
                 reason === "scope-upgrade"
                   ? false
-                  : allowSilentLocalPairing || allowSilentBootstrapPairing,
+                  : allowSilentLocalPairing ||
+                    allowSilentBootstrapPairing ||
+                    allowSilentTrustedCidrsNodePairing,
             });
             const context = buildRequestContext();
             let approved: Awaited<ReturnType<typeof approveDevicePairing>> | undefined;
