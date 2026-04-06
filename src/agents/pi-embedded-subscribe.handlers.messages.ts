@@ -5,7 +5,7 @@ import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { createInlineCodeState } from "../markdown/code-spans.js";
-import { resolveAssistantMessagePhase } from "../shared/chat-message-content.js";
+import { resolveAssistantPhase } from "./assistant-phase.js";
 import {
   isMessagingToolDuplicateNormalized,
   normalizeTextForComparison,
@@ -67,8 +67,19 @@ const coerceText = (value: unknown): string => {
   return "";
 };
 
-function shouldSuppressAssistantVisibleOutput(message: AgentMessage | undefined): boolean {
-  return resolveAssistantMessagePhase(message) === "commentary";
+function clearCommentaryAssistantTexts(ctx: EmbeddedPiSubscribeContext) {
+  const baseline = Math.max(
+    0,
+    Math.min(ctx.state.assistantTextBaseline ?? 0, ctx.state.assistantTexts.length),
+  );
+  if (ctx.state.assistantTexts.length > baseline) {
+    ctx.state.assistantTexts.splice(baseline, ctx.state.assistantTexts.length - baseline);
+  }
+  ctx.state.assistantTextBaseline = ctx.state.assistantTexts.length;
+  ctx.state.lastAssistantTextMessageIndex = -1;
+  ctx.state.lastAssistantTextNormalized = undefined;
+  ctx.state.lastAssistantTextTrimmed = undefined;
+  ctx.state.lastBlockReplyText = undefined;
 }
 
 function isTranscriptOnlyOpenClawAssistantMessage(message: AgentMessage | undefined): boolean {
@@ -203,7 +214,11 @@ export function handleMessageUpdate(
   }
 
   ctx.noteLastAssistant(msg);
-  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput(msg);
+  const messagePhase = resolveAssistantPhase(msg);
+  if (messagePhase) {
+    ctx.state.currentAssistantPhase = messagePhase;
+  }
+  const suppressVisibleAssistantOutput = messagePhase === "commentary";
   if (ctx.state.deterministicApprovalPromptSent) {
     return;
   }
@@ -289,12 +304,23 @@ export function handleMessageUpdate(
     assistantRecord?.partial && typeof assistantRecord.partial === "object"
       ? (assistantRecord.partial as AssistantMessage)
       : msg;
-  const deliveryPhase = resolveAssistantMessagePhase(partialAssistant);
+  const detectedDeliveryPhase = resolveAssistantPhase(partialAssistant) ?? messagePhase;
+  if (detectedDeliveryPhase) {
+    ctx.state.currentAssistantPhase = detectedDeliveryPhase;
+  }
+  const phaseAwareVisibleText = coerceText(extractAssistantVisibleText(partialAssistant)).trim();
+  const deliveryPhase =
+    detectedDeliveryPhase ??
+    (ctx.state.currentAssistantPhase === "commentary" && !phaseAwareVisibleText
+      ? "commentary"
+      : undefined);
   if (deliveryPhase === "commentary") {
     return;
   }
-  const phaseAwareVisibleText = coerceText(extractAssistantVisibleText(partialAssistant)).trim();
-  const shouldUsePhaseAwareBlockReply = Boolean(deliveryPhase);
+  const shouldUsePhaseAwareBlockReply = Boolean(
+    detectedDeliveryPhase ||
+    (ctx.state.currentAssistantPhase === "commentary" && phaseAwareVisibleText),
+  );
 
   if (chunk) {
     ctx.state.deltaBuffer += chunk;
@@ -439,16 +465,24 @@ export function handleMessageEnd(
   }
 
   const assistantMessage = msg;
-  const suppressVisibleAssistantOutput = shouldSuppressAssistantVisibleOutput(assistantMessage);
   ctx.noteLastAssistant(assistantMessage);
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   if (ctx.state.deterministicApprovalPromptSent) {
     return;
   }
   promoteThinkingTagsToBlocks(assistantMessage);
+  const detectedAssistantPhase = resolveAssistantPhase(assistantMessage);
+  if (detectedAssistantPhase) {
+    ctx.state.currentAssistantPhase = detectedAssistantPhase;
+  }
 
   const rawText = coerceText(extractAssistantText(assistantMessage));
   const rawVisibleText = coerceText(extractAssistantVisibleText(assistantMessage));
+  const assistantPhase =
+    detectedAssistantPhase ??
+    (ctx.state.currentAssistantPhase === "commentary" && !rawVisibleText.trim()
+      ? "commentary"
+      : undefined);
   appendRawStream({
     ts: Date.now(),
     event: "assistant_message_end",
@@ -484,7 +518,8 @@ export function handleMessageEnd(
     ctx.state.reasoningStreamOpen = false;
   };
 
-  if (suppressVisibleAssistantOutput) {
+  if (assistantPhase === "commentary") {
+    clearCommentaryAssistantTexts(ctx);
     emitReasoningEnd(ctx);
     finalizeMessageEnd();
     return;

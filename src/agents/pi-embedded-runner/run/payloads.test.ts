@@ -1,5 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { buildPayloads, expectSingleToolErrorPayload } from "./payloads.test-helpers.js";
+import {
+  buildPayloads,
+  expectSinglePayloadText,
+  expectSingleToolErrorPayload,
+} from "./payloads.test-helpers.js";
+
+function buildPhaseAssistantMessage(params: {
+  text: string;
+  phase: "commentary" | "final_answer";
+}) {
+  return {
+    role: "assistant" as const,
+    phase: params.phase,
+    content: [{ type: "text" as const, text: params.text }],
+    stopReason: "stop" as const,
+    api: "openai-responses" as const,
+    provider: "openai",
+    model: "gpt-5.4",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    timestamp: 0,
+  };
+}
 
 describe("buildEmbeddedRunPayloads tool-error warnings", () => {
   function expectNoPayloads(params: Parameters<typeof buildPayloads>[0]) {
@@ -140,5 +168,26 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     expectNoPayloads({
       assistantTexts: ['{"action":"NO_REPLY"}'],
     });
+  });
+
+  it("suppresses commentary-only fallback assistant payloads", () => {
+    expectNoPayloads({
+      lastAssistant: buildPhaseAssistantMessage({
+        text: "Internal commentary that should stay hidden.",
+        phase: "commentary",
+      }),
+      reasoningLevel: "on",
+    });
+  });
+
+  it("keeps final_answer fallback assistant payloads visible", () => {
+    const payloads = buildPayloads({
+      lastAssistant: buildPhaseAssistantMessage({
+        text: "Visible final answer.",
+        phase: "final_answer",
+      }),
+    });
+
+    expectSinglePayloadText(payloads, "Visible final answer.");
   });
 });

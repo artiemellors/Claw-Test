@@ -517,6 +517,73 @@ describe("handleMessageEnd", () => {
     expect(finalizeAssistantTexts).not.toHaveBeenCalled();
   });
 
+  it("clears commentary assistant text state and skips message_end flush when commentary phase only exists in prior partials", () => {
+    const onBlockReplyFlush = vi.fn();
+    const emitBlockReply = vi.fn();
+    const flushBlockReplyBuffer = vi.fn();
+    const ctx = {
+      params: {
+        runId: "run-1",
+        session: { id: "session-1" },
+        onBlockReply: vi.fn(),
+        onBlockReplyFlush,
+      },
+      state: {
+        assistantTexts: ["Need send."],
+        assistantTextBaseline: 0,
+        currentAssistantPhase: "commentary",
+        emittedAssistantUpdate: false,
+        deterministicApprovalPromptSent: false,
+        reasoningStreamOpen: false,
+        includeReasoning: false,
+        streamReasoning: false,
+        blockReplyBreak: "message_end",
+        deltaBuffer: "Need send.",
+        blockBuffer: "Need send.",
+        blockState: {
+          thinking: false,
+          final: false,
+          inlineCode: createInlineCodeState(),
+        },
+        lastAssistantTextMessageIndex: 0,
+        lastAssistantTextNormalized: "needsend",
+        lastAssistantTextTrimmed: "Need send.",
+        lastBlockReplyText: "Need send.",
+        lastStreamedAssistant: undefined,
+        lastStreamedAssistantCleaned: undefined,
+      },
+      noteLastAssistant: vi.fn(),
+      recordAssistantUsage: vi.fn(),
+      log: { debug: vi.fn(), warn: vi.fn() },
+      stripBlockTags: (text: string) => text,
+      finalizeAssistantTexts: vi.fn(),
+      emitBlockReply,
+      consumeReplyDirectives: vi.fn(() => ({ text: "Need send." })),
+      emitReasoningStream: vi.fn(),
+      flushBlockReplyBuffer,
+      blockChunker: null,
+    } as unknown as EmbeddedPiSubscribeContext;
+
+    void handleMessageEnd(ctx, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: { input: 1, output: 1, total: 2 },
+      },
+    } as never);
+
+    expect(ctx.state.assistantTexts).toEqual([]);
+    expect(ctx.state.assistantTextBaseline).toBe(0);
+    expect(ctx.state.lastAssistantTextMessageIndex).toBe(-1);
+    expect(ctx.state.lastAssistantTextNormalized).toBeUndefined();
+    expect(ctx.state.lastAssistantTextTrimmed).toBeUndefined();
+    expect(ctx.state.lastBlockReplyText).toBeUndefined();
+    expect(emitBlockReply).not.toHaveBeenCalled();
+    expect(flushBlockReplyBuffer).not.toHaveBeenCalled();
+    expect(onBlockReplyFlush).not.toHaveBeenCalled();
+  });
+
   it("does not duplicate block reply for text_end channels when text was already delivered", () => {
     const onBlockReply = vi.fn();
     const emitBlockReply = vi.fn();
