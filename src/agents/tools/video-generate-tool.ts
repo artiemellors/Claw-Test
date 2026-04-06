@@ -98,9 +98,11 @@ const VideoGenerateToolSchema = Type.Object({
   imageRoles: Type.Optional(
     Type.Array(Type.String(), {
       description:
-        "Optional semantic roles for each entry in `images`, parallel by index. " +
+        "Optional semantic roles for the combined reference image list, parallel by index. " +
+        "The list is `image` (if provided) followed by each entry in `images`, in order, " +
+        "after de-duplication. " +
         'Provider-interpreted; common values: "first_frame", "last_frame", ' +
-        '"reference_image". Entries beyond the length of `images` are ignored. ' +
+        '"reference_image". Entries beyond the combined image count are ignored. ' +
         "Use an empty string to leave a position unset.",
     }),
   ),
@@ -117,9 +119,11 @@ const VideoGenerateToolSchema = Type.Object({
   videoRoles: Type.Optional(
     Type.Array(Type.String(), {
       description:
-        "Optional semantic roles for each entry in `videos`, parallel by index. " +
+        "Optional semantic roles for the combined reference video list, parallel by index. " +
+        "The list is `video` (if provided) followed by each entry in `videos`, in order, " +
+        "after de-duplication. " +
         'Provider-interpreted; common values: "reference_video". ' +
-        "Entries beyond the length of `videos` are ignored. " +
+        "Entries beyond the combined video count are ignored. " +
         "Use an empty string to leave a position unset.",
     }),
   ),
@@ -136,9 +140,11 @@ const VideoGenerateToolSchema = Type.Object({
   audioRoles: Type.Optional(
     Type.Array(Type.String(), {
       description:
-        "Optional semantic roles for each entry in `audioRefs`, parallel by index. " +
+        "Optional semantic roles for the combined reference audio list, parallel by index. " +
+        "The list is `audioRef` (if provided) followed by each entry in `audioRefs`, in order, " +
+        "after de-duplication. " +
         'Provider-interpreted; common values: "reference_audio". ' +
-        "Entries beyond the length of `audioRefs` are ignored. " +
+        "Entries beyond the combined audio count are ignored. " +
         "Use an empty string to leave a position unset.",
     }),
   ),
