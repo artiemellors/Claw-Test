@@ -240,8 +240,9 @@ function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
 
       <div class="dreams__moon"></div>
 
-      ${props.active
-        ? html`
+      ${
+        props.active
+          ? html`
             <div class="dreams__bubble">
               <span class="dreams__bubble-text">${dreamText}</span>
             </div>
@@ -254,7 +255,8 @@ function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
               style="top: calc(50% - 120px); left: calc(50% - 90px); width: 8px; height: 8px; animation-delay: 0.4s;"
             ></div>
           `
-        : nothing}
+          : nothing
+      }
 
       <div class="dreams__glow"></div>
       <div class="dreams__lobster">${sleepingLobster}</div>
@@ -270,9 +272,11 @@ function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
           <div class="dreams__status-dot"></div>
           <span>
             ${props.promotedCount} ${t("dreaming.status.promotedSuffix")}
-            ${props.nextCycle
-              ? html`· ${t("dreaming.status.nextSweepPrefix")} ${props.nextCycle}`
-              : nothing}
+            ${
+              props.nextCycle
+                ? html`· ${t("dreaming.status.nextSweepPrefix")} ${props.nextCycle}`
+                : nothing
+            }
             ${props.timezone ? html`· ${props.timezone}` : nothing}
           </span>
         </div>
@@ -301,9 +305,11 @@ function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
         </div>
       </div>
 
-      ${props.statusError
-        ? html`<div class="dreams__controls-error">${props.statusError}</div>`
-        : nothing}
+      ${
+        props.statusError
+          ? html`<div class="dreams__controls-error">${props.statusError}</div>`
+          : nothing
+      }
     </section>
   `;
 }
@@ -414,14 +420,12 @@ function renderDiarySection(props: DreamingProps) {
         <div class="dreams-diary__accent"></div>
         ${entry.date ? html`<time class="dreams-diary__date">${entry.date}</time>` : nothing}
         <div class="dreams-diary__prose">
-          ${entry.body
-            .split("\n")
-            .map(
-              (para, i) =>
-                html`<p class="dreams-diary__para" style="animation-delay: ${0.3 + i * 0.15}s;">
+          ${entry.body.split("\n").map(
+            (para, i) =>
+              html`<p class="dreams-diary__para" style="animation-delay: ${0.3 + i * 0.15}s;">
                   ${para}
                 </p>`,
-            )}
+          )}
         </div>
       </article>
     </section>
