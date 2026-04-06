@@ -4,11 +4,10 @@ import {
   buildXaiResponsesToolBody,
   extractXaiWebSearchContent,
   resolveXaiResponseTextAndCitations,
-  XAI_RESPONSES_ENDPOINT,
 } from "./responses-tool-shared.js";
 export { extractXaiWebSearchContent } from "./responses-tool-shared.js";
 
-export const XAI_WEB_SEARCH_ENDPOINT = XAI_RESPONSES_ENDPOINT;
+export const XAI_WEB_SEARCH_DEFAULT_BASE_URL = "https://api.x.ai/v1";
 export const XAI_DEFAULT_WEB_SEARCH_MODEL = "grok-4-1-fast";
 
 export type XaiWebSearchResponse = {
@@ -38,6 +37,7 @@ export type XaiWebSearchResponse = {
 };
 
 type XaiWebSearchConfig = Record<string, unknown> & {
+  baseUrl?: unknown;
   model?: unknown;
   inlineCitations?: unknown;
 };
@@ -84,6 +84,13 @@ export function resolveXaiSearchConfig(searchConfig?: Record<string, unknown>): 
   return (asRecord(searchConfig?.grok) as XaiWebSearchConfig | undefined) ?? {};
 }
 
+export function resolveXaiWebSearchBaseUrl(searchConfig?: Record<string, unknown>): string {
+  const config = resolveXaiSearchConfig(searchConfig);
+  const baseUrl =
+    typeof config.baseUrl === "string" ? config.baseUrl.trim().replace(/\/+$/, "") : "";
+  return baseUrl || XAI_WEB_SEARCH_DEFAULT_BASE_URL;
+}
+
 export function resolveXaiWebSearchModel(searchConfig?: Record<string, unknown>): string {
   const config = resolveXaiSearchConfig(searchConfig);
   return typeof config.model === "string" && config.model.trim()
@@ -99,12 +106,13 @@ export async function requestXaiWebSearch(params: {
   query: string;
   model: string;
   apiKey: string;
+  baseUrl: string;
   timeoutSeconds: number;
   inlineCitations: boolean;
 }): Promise<XaiWebSearchResult> {
   return await postTrustedWebToolsJson(
     {
-      url: XAI_WEB_SEARCH_ENDPOINT,
+      url: `${params.baseUrl}/responses`,
       timeoutSeconds: params.timeoutSeconds,
       apiKey: params.apiKey,
       body: buildXaiResponsesToolBody({
@@ -134,7 +142,9 @@ export const __testing = {
   extractXaiWebSearchContent,
   resolveXaiInlineCitations,
   resolveXaiSearchConfig,
+  resolveXaiWebSearchBaseUrl,
   resolveXaiWebSearchModel,
   requestXaiWebSearch,
   XAI_DEFAULT_WEB_SEARCH_MODEL,
+  XAI_WEB_SEARCH_DEFAULT_BASE_URL,
 } as const;
