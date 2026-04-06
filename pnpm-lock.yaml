@@ -1100,6 +1100,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/typecast: {}
+
   extensions/venice:
     devDependencies:
       '@openclaw/plugin-sdk':
