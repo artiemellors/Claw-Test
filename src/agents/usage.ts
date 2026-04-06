@@ -24,6 +24,13 @@ export type UsageLike = {
   total_tokens?: number;
   cache_read?: number;
   cache_write?: number;
+  // Google/Gemini usageMetadata format.
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+    cachedContentTokenCount?: number;
+  };
 };
 
 export type NormalizedUsage = {
@@ -90,34 +97,58 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
     return undefined;
   }
 
+  // Google/Gemini usageMetadata mapping.
+  const googleUsage = raw.usageMetadata;
+  const googlePromptTokenCount = googleUsage?.promptTokenCount;
+  const googleCachedContentTokenCount = googleUsage?.cachedContentTokenCount;
+
   // Some providers (pi-ai OpenAI-format) pre-subtract cached_tokens from
   // prompt_tokens upstream.  When cached_tokens > prompt_tokens the result is
   // negative, which is nonsensical.  Clamp to 0.
   const rawInput = asFiniteNumber(
-    raw.input ?? raw.inputTokens ?? raw.input_tokens ?? raw.promptTokens ?? raw.prompt_tokens,
+    raw.input ??
+      raw.inputTokens ??
+      raw.input_tokens ??
+      raw.promptTokens ??
+      raw.prompt_tokens ??
+      googlePromptTokenCount,
   );
-  const input = rawInput !== undefined && rawInput < 0 ? 0 : rawInput;
+  // Gemini's promptTokenCount includes cached tokens; subtract cachedContentTokenCount
+  // to get the true uncached input. Only subtract when input actually came from
+  // googlePromptTokenCount (not from other providers' pre-subtracted values).
+  const inputAfterCache =
+    rawInput !== undefined && rawInput < 0
+      ? 0
+      : rawInput !== undefined &&
+        rawInput === googlePromptTokenCount &&
+        googleCachedContentTokenCount !== undefined
+        ? Math.max(0, rawInput - googleCachedContentTokenCount)
+        : rawInput;
   const output = asFiniteNumber(
     raw.output ??
       raw.outputTokens ??
       raw.output_tokens ??
       raw.completionTokens ??
-      raw.completion_tokens,
+      raw.completion_tokens ??
+      googleUsage?.candidatesTokenCount,
   );
   const cacheRead = asFiniteNumber(
     raw.cacheRead ??
       raw.cache_read ??
       raw.cache_read_input_tokens ??
       raw.cached_tokens ??
-      raw.prompt_tokens_details?.cached_tokens,
+      raw.prompt_tokens_details?.cached_tokens ??
+      googleCachedContentTokenCount,
   );
   const cacheWrite = asFiniteNumber(
     raw.cacheWrite ?? raw.cache_write ?? raw.cache_creation_input_tokens,
   );
-  const total = asFiniteNumber(raw.total ?? raw.totalTokens ?? raw.total_tokens);
+  const total = asFiniteNumber(
+    raw.total ?? raw.totalTokens ?? raw.total_tokens ?? googleUsage?.totalTokenCount,
+  );
 
   if (
-    input === undefined &&
+    inputAfterCache === undefined &&
     output === undefined &&
     cacheRead === undefined &&
     cacheWrite === undefined &&
@@ -127,7 +158,7 @@ export function normalizeUsage(raw?: UsageLike | null): NormalizedUsage | undefi
   }
 
   return {
-    input,
+    input: inputAfterCache,
     output,
     cacheRead,
     cacheWrite,
