@@ -89,13 +89,21 @@ async function completeThreadTitle(params: {
       },
       options: {
         maxTokens: DISCORD_THREAD_TITLE_MAX_TOKENS,
-        temperature: DISCORD_THREAD_TITLE_TEMPERATURE,
+        ...(shouldSendThreadTitleTemperature(params.model)
+          ? { temperature: DISCORD_THREAD_TITLE_TEMPERATURE }
+          : {}),
         signal: controller.signal,
       },
     });
   } finally {
     clearTimeout(timer);
   }
+}
+
+function shouldSendThreadTitleTemperature(
+  model: Parameters<typeof completeWithPreparedSimpleCompletionModel>[0]["model"],
+): boolean {
+  return model.api !== "openai-codex-responses";
 }
 
 function buildThreadTitleUserMessage(params: {
