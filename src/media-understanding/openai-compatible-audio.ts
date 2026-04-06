@@ -1,4 +1,5 @@
 import path from "node:path";
+import { extensionForMime } from "../media/mime.js";
 import {
   assertOkOrThrowHttpError,
   postTranscriptionRequest,
@@ -16,6 +17,24 @@ type OpenAiCompatibleAudioParams = AudioTranscriptionRequest & {
 function resolveModel(model: string | undefined, fallback: string): string {
   const trimmed = model?.trim();
   return trimmed || fallback;
+}
+
+function resolveAudioUploadFileName(
+  fileName: string | undefined,
+  mime: string | undefined,
+): string {
+  const trimmed = fileName?.trim() || "audio";
+  const parsed = path.parse(trimmed);
+  const mimeExt = extensionForMime(mime);
+  if (!mimeExt || parsed.ext.toLowerCase() === mimeExt) {
+    return trimmed;
+  }
+  return path.format({
+    ...parsed,
+    base: "",
+    ext: mimeExt,
+    name: parsed.name || parsed.base || "audio",
+  });
 }
 
 export async function transcribeOpenAiCompatibleAudio(
@@ -40,7 +59,7 @@ export async function transcribeOpenAiCompatibleAudio(
 
   const model = resolveModel(params.model, params.defaultModel);
   const form = new FormData();
-  const fileName = params.fileName?.trim() || path.basename(params.fileName) || "audio";
+  const fileName = resolveAudioUploadFileName(params.fileName, params.mime);
   const bytes = new Uint8Array(params.buffer);
   const blob = new Blob([bytes], {
     type: params.mime ?? "application/octet-stream",

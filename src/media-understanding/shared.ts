@@ -38,6 +38,19 @@ function sanitizeAuditContext(auditContext: string | undefined): string | undefi
   return cleaned.slice(0, MAX_AUDIT_CONTEXT_CHARS);
 }
 
+function resolveTranscriptionPinDns(
+  body: BodyInit,
+  pinDns: boolean | undefined,
+): boolean | undefined {
+  if (pinDns !== undefined) {
+    return pinDns;
+  }
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    return false;
+  }
+  return undefined;
+}
+
 export function resolveProviderHttpRequestConfig(params: {
   baseUrl?: string;
   defaultBaseUrl: string;
@@ -122,6 +135,7 @@ export async function postTranscriptionRequest(params: {
   dispatcherPolicy?: PinnedDispatcherPolicy;
   auditContext?: string;
 }) {
+  const pinDns = resolveTranscriptionPinDns(params.body, params.pinDns);
   return fetchWithTimeoutGuarded(
     params.url,
     {
@@ -133,11 +147,11 @@ export async function postTranscriptionRequest(params: {
     params.fetchFn,
     params.allowPrivateNetwork ||
       params.dispatcherPolicy ||
-      params.pinDns !== undefined ||
+      pinDns !== undefined ||
       params.auditContext
       ? {
           ...(params.allowPrivateNetwork ? { ssrfPolicy: { allowPrivateNetwork: true } } : {}),
-          ...(params.pinDns !== undefined ? { pinDns: params.pinDns } : {}),
+          ...(pinDns !== undefined ? { pinDns } : {}),
           ...(params.dispatcherPolicy ? { dispatcherPolicy: params.dispatcherPolicy } : {}),
           ...(params.auditContext ? { auditContext: params.auditContext } : {}),
         }

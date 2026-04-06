@@ -268,4 +268,28 @@ describe("fetchWithTimeoutGuarded", () => {
       }),
     );
   });
+
+  it("disables pinDns automatically for FormData transcription requests", async () => {
+    fetchWithSsrFGuardMock.mockResolvedValue({
+      response: new Response(null, { status: 200 }),
+      finalUrl: "https://example.com",
+      release: async () => {},
+    });
+
+    const body = new FormData();
+    body.append("model", "gpt-4o-mini-transcribe");
+
+    await postTranscriptionRequest({
+      url: "https://api.example.com/v1/transcriptions",
+      headers: new Headers(),
+      body,
+      fetchFn: fetch,
+    });
+
+    expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pinDns: false,
+      }),
+    );
+  });
 });
