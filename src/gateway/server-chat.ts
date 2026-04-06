@@ -206,6 +206,7 @@ export type ChatRunState = {
   /** Length of text at the time of the last broadcast, used to avoid duplicate flushes. */
   deltaLastBroadcastLen: Map<string, number>;
   abortedRuns: Map<string, number>;
+  finalizedRuns: Map<string, number>;
   clear: () => void;
 };
 
@@ -215,6 +216,7 @@ export function createChatRunState(): ChatRunState {
   const deltaSentAt = new Map<string, number>();
   const deltaLastBroadcastLen = new Map<string, number>();
   const abortedRuns = new Map<string, number>();
+  const finalizedRuns = new Map<string, number>();
 
   const clear = () => {
     registry.clear();
@@ -222,6 +224,7 @@ export function createChatRunState(): ChatRunState {
     deltaSentAt.clear();
     deltaLastBroadcastLen.clear();
     abortedRuns.clear();
+    finalizedRuns.clear();
   };
 
   return {
@@ -230,6 +233,7 @@ export function createChatRunState(): ChatRunState {
     deltaSentAt,
     deltaLastBroadcastLen,
     abortedRuns,
+    finalizedRuns,
     clear,
   };
 }
@@ -728,6 +732,16 @@ export function createAgentEventHandler({
     // Include sessionKey so Control UI can filter tool streams per session.
     const agentPayload = sessionKey ? { ...eventForClients, sessionKey } : eventForClients;
     const last = agentRunSeq.get(evt.runId) ?? 0;
+    const lifecyclePhase =
+      evt.stream === "lifecycle" && typeof evt.data?.phase === "string" ? evt.data.phase : null;
+    const isFreshRunStart = lifecyclePhase === "start" || evt.seq === 1;
+    if (last === 0 && chatRunState.finalizedRuns.has(evt.runId) && isFreshRunStart) {
+      chatRunState.finalizedRuns.delete(evt.runId);
+    }
+    const isStalePostLifecycleEvent = last === 0 && chatRunState.finalizedRuns.has(evt.runId);
+    if (isStalePostLifecycleEvent) {
+      return;
+    }
     const isToolEvent = evt.stream === "tool";
     const isItemEvent = evt.stream === "item";
     const toolVerbose = isToolEvent ? resolveToolVerboseLevel(evt.runId, sessionKey) : "off";
@@ -743,7 +757,8 @@ export function createAgentEventHandler({
               : { ...eventForClients, data };
           })()
         : agentPayload;
-    if (last > 0 && evt.seq !== last + 1) {
+    const expectedSeq = last > 0 ? last + 1 : 1;
+    if (evt.seq !== expectedSeq) {
       broadcast("agent", {
         runId: eventRunId,
         stream: "error",
@@ -751,7 +766,7 @@ export function createAgentEventHandler({
         sessionKey,
         data: {
           reason: "seq gap",
-          expected: last + 1,
+          expected: expectedSeq,
           received: evt.seq,
         },
       });
@@ -799,9 +814,6 @@ export function createAgentEventHandler({
       }
       broadcast("agent", agentPayload);
     }
-
-    const lifecyclePhase =
-      evt.stream === "lifecycle" && typeof evt.data?.phase === "string" ? evt.data.phase : null;
 
     if (isControlUiVisible && sessionKey) {
       // Send tool events to node/channel subscribers only when verbose is enabled;
@@ -858,6 +870,7 @@ export function createAgentEventHandler({
     if (lifecyclePhase === "end" || lifecyclePhase === "error") {
       toolEventRecipients.markFinal(evt.runId);
       clearAgentRunContext(evt.runId);
+      chatRunState.finalizedRuns.set(evt.runId, Date.now());
       agentRunSeq.delete(evt.runId);
       agentRunSeq.delete(clientRunId);
     }
