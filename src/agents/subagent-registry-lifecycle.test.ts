@@ -418,6 +418,66 @@ describe("subagent registry lifecycle hardening", () => {
     expect(Number.isNaN(entry.cleanupCompletedAt)).toBe(false);
   });
 
+  it("continues cleanup when setDetachedTaskDeliveryStatusByRunId throws on delivered path", async () => {
+    const persist = vi.fn();
+    const warn = vi.fn();
+    const emitSubagentEndedHookForRun = vi.fn(async () => {});
+    const entry = createRunEntry({
+      endedAt: 4_000,
+      expectsCompletionMessage: false,
+      retainAttachmentsOnKeep: false,
+    });
+    taskExecutorMocks.setDetachedTaskDeliveryStatusByRunId.mockImplementation(() => {
+      throw new Error("delivery status boom");
+    });
+
+    const controller = createSubagentRegistryLifecycleController({
+      runs: new Map([[entry.runId, entry]]),
+      resumedRuns: new Set(),
+      subagentAnnounceTimeoutMs: 1_000,
+      persist,
+      clearPendingLifecycleError: vi.fn(),
+      countPendingDescendantRuns: () => 0,
+      suppressAnnounceForSteerRestart: () => false,
+      shouldEmitEndedHookForRun: () => true,
+      emitSubagentEndedHookForRun,
+      notifyContextEngineSubagentEnded: vi.fn(async () => {}),
+      resumeSubagentRun: vi.fn(),
+      captureSubagentCompletionReply: vi.fn(async () => "final completion reply"),
+      runSubagentAnnounceFlow: vi.fn(async () => true),
+      warn,
+    });
+
+    await expect(
+      controller.completeSubagentRun({
+        runId: entry.runId,
+        endedAt: 4_000,
+        outcome: { status: "ok" },
+        reason: SUBAGENT_ENDED_REASON_COMPLETE,
+        triggerCleanup: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    // Delivery status threw, but cleanup still completed.
+    expect(warn).toHaveBeenCalledWith(
+      "failed to update subagent background task delivery state",
+      expect.objectContaining({
+        error: { name: "Error", message: "delivery status boom" },
+        deliveryStatus: "delivered",
+      }),
+    );
+
+    // Hook was emitted despite delivery-status failure.
+    expect(emitSubagentEndedHookForRun).toHaveBeenCalledTimes(1);
+
+    // Attachments cleaned up.
+    expect(helperMocks.safeRemoveAttachmentsDir).toHaveBeenCalledTimes(1);
+
+    // Bookkeeping completed.
+    expect(entry.cleanupCompletedAt).toBeTypeOf("number");
+    expect(persist).toHaveBeenCalled();
+  });
+
   it("skips browser cleanup when steer restart suppresses cleanup flow", async () => {
     const entry = createRunEntry({
       expectsCompletionMessage: false,

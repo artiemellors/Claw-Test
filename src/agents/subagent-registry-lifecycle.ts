@@ -373,12 +373,21 @@ export function createSubagentRegistryLifecycleController(params: {
       if (!options?.skipAnnounce) {
         entry.completionAnnouncedAt = Date.now();
         params.persist();
-        setDetachedTaskDeliveryStatusByRunId({
-          runId,
-          runtime: "subagent",
-          sessionKey: entry.childSessionKey,
-          deliveryStatus: "delivered",
-        });
+        try {
+          setDetachedTaskDeliveryStatusByRunId({
+            runId,
+            runtime: "subagent",
+            sessionKey: entry.childSessionKey,
+            deliveryStatus: "delivered",
+          });
+        } catch (err) {
+          params.warn("failed to update subagent background task delivery state", {
+            error: buildSafeLifecycleErrorMeta(err),
+            runId: maskRunId(runId),
+            childSessionKey: maskSessionKey(entry.childSessionKey),
+            deliveryStatus: "delivered",
+          });
+        }
       }
       entry.wakeOnDescendantSettle = undefined;
       entry.fallbackFrozenResultText = undefined;

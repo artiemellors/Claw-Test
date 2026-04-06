@@ -237,6 +237,7 @@ export function createSubagentRunManager(params: {
         : undefined,
       cleanupCompletedAt: undefined,
       cleanupHandled: false,
+      completionAnnouncedAt: undefined,
       suppressAnnounceReason: undefined,
       announceRetryCount: undefined,
       lastAnnounceRetryAt: undefined,
