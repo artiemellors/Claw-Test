@@ -4,6 +4,7 @@ import {
   resolveAgentWorkspaceDir,
   resolveSessionAgentId,
   resolveAgentSkillsFilter,
+  resolveMessageRoutingModel,
 } from "../../agents/agent-scope.js";
 import { resolveModelRefFromString } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
@@ -224,6 +225,8 @@ export async function getReplyFromConfig(
   opts?.onTypingController?.(typing);
 
   const finalized = finalizeInboundContext(ctx);
+  // Capture raw user text before media/link preprocessing may mutate finalized fields.
+  const rawUserTextForRouting = ctx.RawBody ?? ctx.Body ?? "";
 
   if (!isFastTestEnv) {
     await applyMediaUnderstandingIfNeeded({
@@ -323,6 +326,23 @@ export async function getReplyFromConfig(
     if (resolved) {
       provider = resolved.ref.provider;
       model = resolved.ref.model;
+    }
+  }
+
+  // Apply keyword-based message routing if no higher-priority override is in effect.
+  if (!hasResolvedHeartbeatModelOverride && !hasSessionModelOverride && !channelModelOverride) {
+    const messageText = rawUserTextForRouting;
+    const routingModel = resolveMessageRoutingModel(cfg, agentId, messageText);
+    if (routingModel) {
+      const resolved = resolveModelRefFromString({
+        raw: routingModel,
+        defaultProvider,
+        aliasIndex,
+      });
+      if (resolved) {
+        provider = resolved.ref.provider;
+        model = resolved.ref.model;
+      }
     }
   }
 

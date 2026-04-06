@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveAgentModelFallbackValues } from "../config/model-input.js";
+import {
+  resolveAgentModelFallbackValues,
+  resolveAgentTaskModelValue,
+} from "../config/model-input.js";
 import { resolveStateDir } from "../config/paths.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -31,6 +34,8 @@ function stripNullBytes(s: string): string {
 export { resolveAgentIdFromSessionKey };
 
 type AgentEntry = NonNullable<NonNullable<OpenClawConfig["agents"]>["list"]>[number];
+
+export type AgentModelTask = "chat" | "systemPrompt" | "simpleCompletion" | "messageRouting";
 
 type ResolvedAgentConfig = {
   name?: string;
@@ -195,8 +200,19 @@ export function resolveAgentEffectiveModelPrimary(
   cfg: OpenClawConfig,
   agentId: string,
 ): string | undefined {
+  return resolveAgentEffectiveModelPrimaryForTask(cfg, agentId, "chat");
+}
+
+export function resolveAgentEffectiveModelPrimaryForTask(
+  cfg: OpenClawConfig,
+  agentId: string,
+  task: AgentModelTask,
+): string | undefined {
+  const agentModel = resolveAgentConfig(cfg, agentId)?.model;
   return (
-    resolveAgentExplicitModelPrimary(cfg, agentId) ??
+    resolveAgentTaskModelValue(agentModel, task) ??
+    resolveModelPrimary(agentModel) ??
+    resolveAgentTaskModelValue(cfg.agents?.defaults?.model, task) ??
     resolveModelPrimary(cfg.agents?.defaults?.model)
   );
 }
@@ -360,4 +376,59 @@ export function resolveAgentDir(
   }
   const root = resolveStateDir(env);
   return path.join(root, "agents", id, "agent");
+}
+
+/**
+ * Resolves the model to use for a given message based on the agent's
+ * messageRouting config. Returns undefined if no rule matches or routing
+ * is not configured.
+ */
+export function resolveMessageRoutingModel(
+  cfg: OpenClawConfig,
+  agentId: string,
+  messageText: string,
+): string | undefined {
+  const agentConfig = resolveAgentConfig(cfg, agentId);
+  const routing =
+    (
+      agentConfig?.model as
+        | {
+            tasks?: {
+              messageRouting?: import("../config/types.agents-shared.js").MessageRoutingConfig;
+            };
+          }
+        | undefined
+    )?.tasks?.messageRouting ??
+    (
+      cfg.agents?.defaults?.model as
+        | {
+            tasks?: {
+              messageRouting?: import("../config/types.agents-shared.js").MessageRoutingConfig;
+            };
+          }
+        | undefined
+    )?.tasks?.messageRouting;
+
+  if (!routing?.rules?.length) {
+    return routing?.default?.trim() || undefined;
+  }
+
+  const normalizedText = messageText.toLowerCase();
+
+  for (const rule of routing.rules) {
+    if (!Array.isArray(rule.match) || rule.match.length === 0) {
+      continue;
+    }
+    const matched = rule.match.some(
+      (keyword) =>
+        typeof keyword === "string" &&
+        keyword.trim().length > 0 &&
+        normalizedText.includes(keyword.toLowerCase()),
+    );
+    if (matched) {
+      return rule.model?.trim() || undefined;
+    }
+  }
+
+  return routing.default?.trim() || undefined;
 }

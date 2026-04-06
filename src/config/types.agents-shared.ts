@@ -5,6 +5,31 @@ import type {
   SandboxSshSettings,
 } from "./types.sandbox.js";
 
+export type MessageRoutingRule = {
+  /** Keywords/phrases to match (case-insensitive, any match triggers this rule). */
+  match: string[];
+  /** Model to use when this rule matches (provider/model or alias). */
+  model: string;
+};
+
+export type MessageRoutingConfig = {
+  /** Ordered list of routing rules. First match wins. */
+  rules: MessageRoutingRule[];
+  /** Fallback model if no rule matches. Defaults to agent primary if omitted. */
+  default?: string;
+};
+
+export type AgentTaskModelConfig = {
+  /** Model used for normal chat / turn execution. */
+  chat?: string;
+  /** Model used when assembling or rendering the system prompt/runtime prompt context. */
+  systemPrompt?: string;
+  /** Model used for lightweight one-shot completions and helper flows. */
+  simpleCompletion?: string;
+  /** Keyword-based pre-turn routing: select a model based on message content. */
+  messageRouting?: MessageRoutingConfig;
+};
+
 export type AgentModelConfig =
   | string
   | {
@@ -12,6 +37,8 @@ export type AgentModelConfig =
       primary?: string;
       /** Per-agent model fallbacks (provider/model). */
       fallbacks?: string[];
+      /** Optional task-specific model overrides. */
+      tasks?: AgentTaskModelConfig;
     };
 
 export type AgentSandboxConfig = {
