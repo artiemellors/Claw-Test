@@ -17,6 +17,7 @@ import type { SessionEntry } from "./types.js";
 async function ensureSessionHeader(params: {
   sessionFile: string;
   sessionId: string;
+  sessionKey?: string;
 }): Promise<void> {
   if (fs.existsSync(params.sessionFile)) {
     return;
@@ -28,6 +29,7 @@ async function ensureSessionHeader(params: {
     id: params.sessionId,
     timestamp: new Date().toISOString(),
     cwd: process.cwd(),
+    ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
   };
   await fs.promises.writeFile(params.sessionFile, `${JSON.stringify(header)}\n`, {
     encoding: "utf-8",
@@ -188,7 +190,7 @@ export async function appendExactAssistantMessageToSessionTranscript(params: {
     };
   }
 
-  await ensureSessionHeader({ sessionFile, sessionId: entry.sessionId });
+  await ensureSessionHeader({ sessionFile, sessionId: entry.sessionId, sessionKey });
 
   const explicitIdempotencyKey =
     params.idempotencyKey ??
