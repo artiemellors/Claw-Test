@@ -590,6 +590,8 @@ async function executeVideoGenerationJob(params: {
   }
 
   // Partition assets: buffer-backed → saved to local file; url-only → delivered by URL.
+  // Assets with neither buffer nor url are a provider bug — surface an error rather than
+  // silently dropping the video and reporting a misleading success.
   const urlOnlyVideos: Array<{ url: string; mimeType: string; fileName?: string }> = [];
   const bufferVideos: Array<(typeof result.videos)[number] & { buffer: Buffer }> = [];
   for (const video of result.videos) {
@@ -597,6 +599,10 @@ async function executeVideoGenerationJob(params: {
       bufferVideos.push(video as (typeof result.videos)[number] & { buffer: Buffer });
     } else if (video.url) {
       urlOnlyVideos.push({ url: video.url, mimeType: video.mimeType, fileName: video.fileName });
+    } else {
+      throw new Error(
+        `Provider ${result.provider} returned a video asset with neither buffer nor url — cannot deliver.`,
+      );
     }
   }
 
