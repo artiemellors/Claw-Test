@@ -188,6 +188,8 @@ function resolveNpmCommandInvocation(npmArgs: string[]): NpmCommandInvocation {
 }
 
 function packOpenClawToTempDir(packDir: string): string {
+  const npmCacheDir = join(packDir, ".npm-cache");
+  mkdirSync(npmCacheDir, { recursive: true });
   const invocation = resolveNpmCommandInvocation([
     "pack",
     "--ignore-scripts",
@@ -202,6 +204,8 @@ function packOpenClawToTempDir(packDir: string): string {
       ...process.env,
       ...invocation.env,
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+      NPM_CONFIG_CACHE: npmCacheDir,
+      npm_config_cache: npmCacheDir,
     },
     maxBuffer: NPM_PACK_MAX_BUFFER_BYTES,
     stdio: ["ignore", "pipe", "pipe"],

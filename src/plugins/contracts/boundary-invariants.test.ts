@@ -18,6 +18,7 @@ const ALLOWED_EXTENSION_PATH_STRING_TESTS = new Set([
   "src/cli/capability-cli.test.ts",
   "src/commands/doctor-legacy-config.migrations.test.ts",
   "src/plugins/contracts/bundled-extension-config-api-guardrails.test.ts",
+  "src/plugin-sdk/browser-maintenance.test.ts",
   "src/scripts/test-projects.test.ts",
 ]);
 

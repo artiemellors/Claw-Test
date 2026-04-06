@@ -155,14 +155,7 @@ function isRemoteUrl(value: string): boolean {
 }
 
 function shouldConvertHeicBuffer(opts: { contentType?: string; fileName?: string }): boolean {
-  if (!isHeicSource(opts)) {
-    return false;
-  }
-  const normalizedContentType = normalizeMimeType(opts.contentType);
-  if (!normalizedContentType) {
-    return true;
-  }
-  return HEIC_MIME_RE.test(normalizedContentType);
+  return isHeicSource(opts);
 }
 
 async function normalizeAudioOnlyWebmMime(
