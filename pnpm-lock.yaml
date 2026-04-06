@@ -436,6 +436,8 @@ importers:
 
   extensions/imessage: {}
 
+  extensions/inworld: {}
+
   extensions/irc: {}
 
   extensions/kilocode: {}

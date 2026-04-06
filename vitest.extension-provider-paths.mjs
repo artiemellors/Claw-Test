@@ -13,6 +13,7 @@ export const providerExtensionIds = [
   "google",
   "groq",
   "huggingface",
+  "inworld",
   "kimi-coding",
   "microsoft",
   "microsoft-foundry",
