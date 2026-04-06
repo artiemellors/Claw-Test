@@ -361,10 +361,15 @@ async function execSystemctlUser(
   const sudoUser = env.SUDO_USER?.trim();
 
   // Under sudo, prefer the invoking non-root user's scope directly.
+  // If the machine-scope attempt fails (e.g. systemd-machined unavailable or
+  // permission denied), fall through to the normal --user → machine fallback.
   if (sudoUser && sudoUser !== "root" && machineUser) {
     const machineScopeArgs = resolveSystemctlMachineUserScopeArgs(machineUser);
     if (machineScopeArgs.length > 0) {
-      return await execSystemctl([...machineScopeArgs, ...args]);
+      const machineResult = await execSystemctl([...machineScopeArgs, ...args]);
+      if (machineResult.code === 0) {
+        return machineResult;
+      }
     }
   }
 
