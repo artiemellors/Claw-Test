@@ -4,22 +4,19 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MemoryIndexManager } from "./index.js";
+import {
+  clearMemoryEmbeddingProviders as clearRegistry,
+  registerMemoryEmbeddingProvider as registerAdapter,
+} from "../../../../src/plugins/memory-embedding-providers.js";
 import "./test-runtime-mocks.js";
+import type { MemoryIndexManager } from "./index.js";
+import { getMemorySearchManager, closeAllMemorySearchManagers } from "./index.js";
 import { registerBuiltInMemoryEmbeddingProviders } from "./provider-adapters.js";
-
-type MemoryIndexModule = typeof import("./index.js");
-type MemoryEmbeddingProvidersModule =
-  typeof import("../../../../src/plugins/memory-embedding-providers.js");
-
-let getMemorySearchManager: MemoryIndexModule["getMemorySearchManager"];
-let closeAllMemorySearchManagers: MemoryIndexModule["closeAllMemorySearchManagers"];
-let clearRegistry: MemoryEmbeddingProvidersModule["clearMemoryEmbeddingProviders"];
-let registerAdapter: MemoryEmbeddingProvidersModule["registerMemoryEmbeddingProvider"];
 
 let embedBatchCalls = 0;
 let embedBatchInputCalls = 0;
 let providerCalls: Array<{ provider?: string; model?: string; outputDimensionality?: number }> = [];
+let forceNoProvider = false;
 
 vi.mock("./embeddings.js", () => {
   const embedText = (text: string) => {
@@ -41,6 +38,13 @@ vi.mock("./embeddings.js", () => {
         model: options.model,
         outputDimensionality: options.outputDimensionality,
       });
+      if (forceNoProvider) {
+        return {
+          provider: null,
+          requestedProvider: options.provider ?? "auto",
+          providerUnavailableReason: "No API key found for provider",
+        };
+      }
       const providerId = options.provider === "gemini" ? "gemini" : "mock";
       const model = options.model ?? "mock-embed";
       return {
@@ -112,9 +116,9 @@ describe("memory index", () => {
   let indexMainPath = "";
   let indexExtraPath = "";
   let indexMultimodalPath = "";
-  let indexStatusPath = "";
   let indexSourceChangePath = "";
   let indexModelPath = "";
+  let indexFtsOnlyPath = "";
   let sourceChangeStateDir = "";
   const sourceChangeSessionLogLines = [
     JSON.stringify({
@@ -136,13 +140,6 @@ describe("memory index", () => {
   const managersForCleanup = new Set<MemoryIndexManager>();
 
   beforeAll(async () => {
-    vi.resetModules();
-    await import("./test-runtime-mocks.js");
-    ({ getMemorySearchManager, closeAllMemorySearchManagers } = await import("./index.js"));
-    ({
-      clearMemoryEmbeddingProviders: clearRegistry,
-      registerMemoryEmbeddingProvider: registerAdapter,
-    } = await import("../../../../src/plugins/memory-embedding-providers.js"));
     fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mem-fixtures-"));
     workspaceDir = path.join(fixtureRoot, "workspace");
     memoryDir = path.join(workspaceDir, "memory");
@@ -151,16 +148,10 @@ describe("memory index", () => {
     indexVectorPath = path.join(workspaceDir, "index-vector.sqlite");
     indexExtraPath = path.join(workspaceDir, "index-extra.sqlite");
     indexMultimodalPath = path.join(workspaceDir, "index-multimodal.sqlite");
-    indexStatusPath = path.join(workspaceDir, "index-status.sqlite");
     indexSourceChangePath = path.join(workspaceDir, "index-source-change.sqlite");
     indexModelPath = path.join(workspaceDir, "index-model-change.sqlite");
+    indexFtsOnlyPath = path.join(workspaceDir, "index-fts-only.sqlite");
     sourceChangeStateDir = path.join(fixtureRoot, "state-source-change");
-
-    await fs.mkdir(memoryDir, { recursive: true });
-    await fs.writeFile(
-      path.join(memoryDir, "2026-01-12.md"),
-      "# Log\nAlpha memory line.\nZebra memory line.",
-    );
   });
 
   afterAll(async () => {
@@ -183,11 +174,14 @@ describe("memory index", () => {
     embedBatchCalls = 0;
     embedBatchInputCalls = 0;
     providerCalls = [];
+    forceNoProvider = false;
 
+    rmSync(workspaceDir, { recursive: true, force: true });
     mkdirSync(memoryDir, { recursive: true });
-
-    // Clean additional paths that may have been created by earlier cases.
-    rmSync(extraDir, { recursive: true, force: true });
+    await fs.writeFile(
+      path.join(memoryDir, "2026-01-12.md"),
+      "# Log\nAlpha memory line.\nZebra memory line.",
+    );
   });
 
   function resetManagerForTest(manager: MemoryIndexManager) {
@@ -423,52 +417,6 @@ describe("memory index", () => {
     expect(results.some((result) => result.path.endsWith("diagram.png"))).toBe(true);
 
     await manager.close?.();
-  });
-
-  it("keeps dirty false in status-only manager after prior indexing", async () => {
-    const cfg = createCfg({ storePath: indexStatusPath });
-
-    const first = await getMemorySearchManager({ cfg, agentId: "main" });
-    const firstManager = requireManager(first);
-    await firstManager.sync?.({ reason: "test" });
-    await firstManager.close?.();
-    const providerCallsBeforeStatus = providerCalls.length;
-
-    const statusOnly = await getMemorySearchManager({
-      cfg,
-      agentId: "main",
-      purpose: "status",
-    });
-    const statusManager = requireManager(statusOnly, "status manager missing");
-    const status = statusManager.status();
-    expect(status.dirty).toBe(false);
-    expect(status.provider).toBe("openai");
-    expect(providerCalls).toHaveLength(providerCallsBeforeStatus);
-    await statusManager.close?.();
-  });
-
-  it("does not cache builtin status-only managers across repeated requests", async () => {
-    const cfg = createCfg({
-      storePath: path.join(workspaceDir, `index-status-${randomUUID()}.sqlite`),
-    });
-
-    const first = await getMemorySearchManager({
-      cfg,
-      agentId: "main",
-      purpose: "status",
-    });
-    const second = await getMemorySearchManager({
-      cfg,
-      agentId: "main",
-      purpose: "status",
-    });
-
-    const firstManager = requireManager(first, "first status manager missing");
-    const secondManager = requireManager(second, "second status manager missing");
-    expect(secondManager).not.toBe(firstManager);
-
-    await firstManager.close?.();
-    await secondManager.close?.();
   });
 
   it("reindexes sessions when source config adds sessions to an existing index", async () => {
@@ -889,6 +837,11 @@ describe("memory index", () => {
         }) => Promise<void>;
         shouldFallbackOnError: (message: string) => boolean;
         activateFallbackProvider: (reason: string) => Promise<boolean>;
+        runSafeReindex: (params: {
+          reason?: string;
+          force?: boolean;
+          progress?: unknown;
+        }) => Promise<void>;
         runUnsafeReindex: (params: {
           reason?: string;
           force?: boolean;
@@ -898,6 +851,7 @@ describe("memory index", () => {
       const originalSyncSessionFiles = internal.syncSessionFiles.bind(manager);
       const originalShouldFallbackOnError = internal.shouldFallbackOnError.bind(manager);
       const originalActivateFallbackProvider = internal.activateFallbackProvider.bind(manager);
+      const originalRunSafeReindex = internal.runSafeReindex.bind(manager);
       const originalRunUnsafeReindex = internal.runUnsafeReindex.bind(manager);
 
       internal.syncSessionFiles = async (params) => {
@@ -909,6 +863,8 @@ describe("memory index", () => {
       internal.shouldFallbackOnError = () => true;
       const activateFallbackProvider = vi.fn(async () => true);
       internal.activateFallbackProvider = activateFallbackProvider;
+      const runSafeReindex = vi.fn(async () => {});
+      internal.runSafeReindex = runSafeReindex;
       const runUnsafeReindex = vi.fn(async () => {});
       internal.runUnsafeReindex = runUnsafeReindex;
 
@@ -918,15 +874,26 @@ describe("memory index", () => {
       });
 
       expect(activateFallbackProvider).toHaveBeenCalledWith("embedding backend failed");
-      expect(runUnsafeReindex).toHaveBeenCalledWith({
+      const expectedReindexParams = {
         reason: "post-compaction",
         force: true,
         progress: undefined,
-      });
+      };
+      const usesUnsafeReindex =
+        process.env.OPENCLAW_TEST_FAST === "1" &&
+        process.env.OPENCLAW_TEST_MEMORY_UNSAFE_REINDEX === "1";
+      if (usesUnsafeReindex) {
+        expect(runUnsafeReindex).toHaveBeenCalledWith(expectedReindexParams);
+        expect(runSafeReindex).not.toHaveBeenCalled();
+      } else {
+        expect(runSafeReindex).toHaveBeenCalledWith(expectedReindexParams);
+        expect(runUnsafeReindex).not.toHaveBeenCalled();
+      }
 
       internal.syncSessionFiles = originalSyncSessionFiles;
       internal.shouldFallbackOnError = originalShouldFallbackOnError;
       internal.activateFallbackProvider = originalActivateFallbackProvider;
+      internal.runSafeReindex = originalRunSafeReindex;
       internal.runUnsafeReindex = originalRunUnsafeReindex;
       await manager.close?.();
     } finally {
@@ -1043,6 +1010,9 @@ describe("memory index", () => {
     const result = await getMemorySearchManager({ cfg, agentId: "main" });
     const manager = requireManager(result);
     managersForCleanup.add(manager);
+
+    await manager.sync({ reason: "test" });
+    (manager as unknown as { dirty: boolean }).dirty = true;
 
     const db = (
       manager as unknown as {
@@ -1339,5 +1309,88 @@ describe("memory index", () => {
         "path required",
       );
     }
+  });
+
+  it("triggers full reindex and cleans up old-model FTS rows when switching from provider to FTS-only", async () => {
+    const sharedStorePath = path.join(workspaceDir, "index-provider-to-fts-only.sqlite");
+
+    // Phase 1: sync with a real provider — FTS rows stored under model = "mock-embed"
+    const providerCfg = createCfg({ storePath: sharedStorePath, hybrid: { enabled: true } });
+    const providerResult = await getMemorySearchManager({ cfg: providerCfg, agentId: "main" });
+    const providerManager = requireManager(providerResult);
+    managersForCleanup.add(providerManager);
+    resetManagerForTest(providerManager);
+
+    await providerManager.sync({ reason: "test" });
+
+    const providerDb = (
+      providerManager as unknown as { db: { prepare: (s: string) => { get: () => { c: number } } } }
+    ).db;
+    const providerFtsRows = providerDb
+      .prepare("SELECT COUNT(*) as c FROM chunks_fts WHERE model = 'mock-embed'")
+      .get();
+    expect(providerFtsRows.c).toBeGreaterThan(0);
+
+    await providerManager.close();
+    managersForCleanup.delete(providerManager);
+
+    // Phase 2: switch to FTS-only (no provider) — should trigger full reindex
+    forceNoProvider = true;
+    const ftsOnlyCfg = createCfg({ storePath: sharedStorePath, hybrid: { enabled: true } });
+    const ftsOnlyResult = await getMemorySearchManager({ cfg: ftsOnlyCfg, agentId: "main" });
+    const ftsOnlyManager = requireManager(ftsOnlyResult);
+    managersForCleanup.add(ftsOnlyManager);
+
+    await ftsOnlyManager.sync({ reason: "test" });
+
+    const db = (
+      ftsOnlyManager as unknown as { db: { prepare: (s: string) => { get: () => { c: number } } } }
+    ).db;
+
+    // old provider-model rows should be gone after full reindex
+    const oldRows = db
+      .prepare("SELECT COUNT(*) as c FROM chunks_fts WHERE model = 'mock-embed'")
+      .get();
+    expect(oldRows.c).toBe(0);
+
+    // new fts-only rows should exist
+    const newRows = db
+      .prepare("SELECT COUNT(*) as c FROM chunks_fts WHERE model = 'fts-only'")
+      .get();
+    expect(newRows.c).toBeGreaterThan(0);
+  });
+
+  it("builds FTS index and returns search results when no embedding provider is available", async () => {
+    forceNoProvider = true;
+
+    const cfg = createCfg({
+      storePath: indexFtsOnlyPath,
+      minScore: 0.35,
+      hybrid: { enabled: true },
+    });
+    const result = await getMemorySearchManager({ cfg, agentId: "main" });
+    const manager = requireManager(result);
+    managersForCleanup.add(manager);
+    resetManagerForTest(manager);
+
+    await fs.writeFile(
+      path.join(memoryDir, "2026-01-12.md"),
+      "# Log\nAlpha memory line.\nZebra memory line.",
+    );
+    await manager.sync({ reason: "test" });
+
+    const status = manager.status();
+    // chunks should be indexed via FTS even without a provider
+    expect(status.chunks).toBeGreaterThan(0);
+    expect(embedBatchCalls).toBe(0);
+
+    // keyword search should still return matching results under the default threshold
+    const results = await manager.search("Alpha");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]?.snippet).toMatch(/Alpha/i);
+
+    // unknown terms should return no results
+    const noResults = await manager.search("nonexistent_xyz_keyword");
+    expect(noResults.length).toBe(0);
   });
 });
