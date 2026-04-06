@@ -8,12 +8,9 @@ import {
 } from "./pw-tools-core.test-harness.js";
 
 function clearProxyEnvironment(): void {
-  vi.stubEnv("HTTP_PROXY", "");
-  vi.stubEnv("HTTPS_PROXY", "");
-  vi.stubEnv("ALL_PROXY", "");
-  vi.stubEnv("http_proxy", "");
-  vi.stubEnv("https_proxy", "");
-  vi.stubEnv("all_proxy", "");
+  for (const key of PROXY_ENV_KEYS) {
+    vi.stubEnv(key, "");
+  }
 }
 
 installPwToolsCoreTestHooks();
