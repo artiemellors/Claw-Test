@@ -183,10 +183,10 @@ export default definePluginEntry({
         }
         await ensureOllamaModelPulled({ config, model, prompter });
       },
-      createStreamFn: ({ config, model }) => {
+      createStreamFn: ({ config, model, provider }) => {
         return createConfiguredOllamaStreamFn({
           model,
-          providerBaseUrl: config?.models?.providers?.ollama?.baseUrl,
+          providerBaseUrl: config?.models?.providers?.[provider]?.baseUrl,
         });
       },
       ...OPENAI_COMPATIBLE_REPLAY_HOOKS,

@@ -594,9 +594,18 @@ export function createOllamaStreamFn(
   baseUrl: string,
   defaultHeaders?: Record<string, string>,
 ): StreamFn {
-  const chatUrl = resolveOllamaChatUrl(baseUrl);
+  const defaultChatUrl = resolveOllamaChatUrl(baseUrl);
 
   return (model, context, options) => {
+    // Resolve the chat URL per-call so that ollama-variant providers (e.g.
+    // "ollama2" on a different port) that reuse the globally-registered "ollama"
+    // API stream function still reach their own configured endpoint.  The
+    // globally-registered function is created once for the first provider that
+    // uses api:"ollama"; without this per-call resolution every subsequent
+    // provider with the same api value would share that one baked-in URL
+    // regardless of their own baseUrl config (#61678).
+    const modelBaseUrl = (model as { baseUrl?: string }).baseUrl?.trim();
+    const chatUrl = modelBaseUrl ? resolveOllamaChatUrl(modelBaseUrl) : defaultChatUrl;
     const stream = createAssistantMessageEventStream();
 
     const run = async () => {
