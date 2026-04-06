@@ -182,7 +182,9 @@ async function isLikelyLiveSubagentSession(params: {
       timeoutMs: 10_000,
     });
     const messages =
-      result && typeof result === "object" && Array.isArray((result as { messages?: unknown[] }).messages)
+      result &&
+      typeof result === "object" &&
+      Array.isArray((result as { messages?: unknown[] }).messages)
         ? (result as { messages: unknown[] }).messages
         : [];
     return messages.length > 0;
@@ -618,7 +620,6 @@ async function sweepSubagentRuns() {
       continue;
     }
     clearPendingLifecycleError(runId);
-    await safeRemoveAttachmentsDir(entry);
     try {
       await subagentRegistryDeps.callGateway({
         method: "sessions.delete",
@@ -637,6 +638,10 @@ async function sweepSubagentRuns() {
       });
       continue;
     }
+    // Delete attachments AFTER successful sessions.delete so that a gateway
+    // failure does not leave a partially-swept run (no attachments but still
+    // present in the runs map).
+    await safeRemoveAttachmentsDir(entry);
     void notifyContextEngineSubagentEnded({
       childSessionKey: entry.childSessionKey,
       reason: "swept",

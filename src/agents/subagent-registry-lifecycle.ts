@@ -371,30 +371,29 @@ export function createSubagentRegistryLifecycleController(params: {
     }
     if (didAnnounce) {
       if (!options?.skipAnnounce) {
-        let deliveryStatusWritten = false;
-        try {
-          setDetachedTaskDeliveryStatusByRunId({
-            runId,
-            runtime: "subagent",
-            sessionKey: entry.childSessionKey,
-            deliveryStatus: "delivered",
-          });
-          deliveryStatusWritten = true;
-        } catch (err) {
-          params.warn("failed to update subagent background task delivery state", {
-            error: buildSafeLifecycleErrorMeta(err),
-            runId: maskRunId(runId),
-            childSessionKey: maskSessionKey(entry.childSessionKey),
-            deliveryStatus: "delivered",
-          });
-          // Do not set completionAnnouncedAt on failure — the next retry will
-          // re-attempt the full announce + delivery-status sequence instead of
-          // permanently skipping via skipAnnounce.
-        }
-        if (deliveryStatusWritten) {
-          entry.completionAnnouncedAt = Date.now();
-          params.persist();
-        }
+        // Mark the announce as delivered FIRST so that if the delivery-status
+        // write below throws, the next retry will NOT re-inject completion
+        // context into the parent session (the core dedup invariant).
+        entry.completionAnnouncedAt = Date.now();
+        params.persist();
+      }
+      // Always attempt the delivery-status write — both on first announce and
+      // on deduped retries — so that a transient failure on the first attempt
+      // gets reconciled when cleanup is retried via the skipAnnounce path.
+      try {
+        setDetachedTaskDeliveryStatusByRunId({
+          runId,
+          runtime: "subagent",
+          sessionKey: entry.childSessionKey,
+          deliveryStatus: "delivered",
+        });
+      } catch (err) {
+        params.warn("failed to update subagent background task delivery state", {
+          error: buildSafeLifecycleErrorMeta(err),
+          runId: maskRunId(runId),
+          childSessionKey: maskSessionKey(entry.childSessionKey),
+          deliveryStatus: "delivered",
+        });
       }
       entry.wakeOnDescendantSettle = undefined;
       entry.fallbackFrozenResultText = undefined;
