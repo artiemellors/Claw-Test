@@ -452,7 +452,7 @@ export function createSubagentRegistryLifecycleController(params: {
         runId,
         entry,
         cleanup,
-        completedAt: Math.max(entry.completionAnnouncedAt, entry.endedAt ?? 0),
+        completedAt: Math.max(entry.completionAnnouncedAt ?? 0, entry.endedAt ?? 0),
       });
       return;
     }
@@ -559,6 +559,7 @@ export function createSubagentRegistryLifecycleController(params: {
       entry.suppressAnnounceReason = undefined;
       entry.cleanupHandled = false;
       entry.cleanupCompletedAt = undefined;
+      entry.completionAnnouncedAt = undefined;
       mutated = true;
     }
 

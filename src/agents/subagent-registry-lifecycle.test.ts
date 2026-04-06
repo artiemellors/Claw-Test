@@ -379,6 +379,44 @@ describe("subagent registry lifecycle hardening", () => {
     });
   });
 
+  it("produces valid cleanupCompletedAt on give-up path when completionAnnouncedAt is undefined", async () => {
+    const persist = vi.fn();
+    const entry = createRunEntry({
+      endedAt: 4_000,
+      expectsCompletionMessage: false,
+      retainAttachmentsOnKeep: true,
+    });
+
+    const controller = mod.createSubagentRegistryLifecycleController({
+      runs: new Map([[entry.runId, entry]]),
+      resumedRuns: new Set(),
+      subagentAnnounceTimeoutMs: 1_000,
+      persist,
+      clearPendingLifecycleError: vi.fn(),
+      countPendingDescendantRuns: () => 0,
+      suppressAnnounceForSteerRestart: () => false,
+      shouldEmitEndedHookForRun: () => false,
+      emitSubagentEndedHookForRun: vi.fn(async () => {}),
+      notifyContextEngineSubagentEnded: vi.fn(async () => {}),
+      resumeSubagentRun: vi.fn(),
+      captureSubagentCompletionReply: vi.fn(async () => undefined),
+      runSubagentAnnounceFlow: vi.fn(async () => true),
+      warn: vi.fn(),
+    });
+
+    // completionAnnouncedAt is intentionally undefined here (give-up scenario).
+    expect(entry.completionAnnouncedAt).toBeUndefined();
+
+    await controller.finalizeResumedAnnounceGiveUp({
+      runId: entry.runId,
+      entry,
+      reason: "retry-limit",
+    });
+
+    expect(entry.cleanupCompletedAt).toBeTypeOf("number");
+    expect(Number.isNaN(entry.cleanupCompletedAt)).toBe(false);
+  });
+
   it("skips browser cleanup when steer restart suppresses cleanup flow", async () => {
     const entry = createRunEntry({
       expectsCompletionMessage: false,
