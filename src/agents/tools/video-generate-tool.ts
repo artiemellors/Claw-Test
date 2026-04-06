@@ -535,6 +535,8 @@ type ExecutedVideoGeneration = {
   provider: string;
   model: string;
   savedPaths: string[];
+  /** URLs of url-only assets (no local file saved). */
+  urlOnlyUrls: string[];
   /** Total number of generated videos, including url-only assets not in savedPaths. */
   count: number;
   contentText: string;
@@ -687,6 +689,7 @@ async function executeVideoGenerationJob(params: {
     provider: result.provider,
     model: result.model,
     savedPaths: savedVideos.map((video) => video.path),
+    urlOnlyUrls: urlOnlyVideos.map((video) => video.url),
     count: totalCount,
     contentText: lines.join("\n"),
     wakeResult: lines.join("\n"),
@@ -968,7 +971,9 @@ export function createVideoGenerateTool(options?: {
                 status: "ok",
                 statusLabel: "completed successfully",
                 result: executed.wakeResult,
-                mediaUrls: executed.savedPaths,
+                // Include both local saved paths and url-only remote URLs so the
+                // delivery layer can attach or link all generated videos.
+                mediaUrls: [...executed.savedPaths, ...executed.urlOnlyUrls],
               });
             } catch (error) {
               log.warn("Video generation completion wake failed after successful generation", {
