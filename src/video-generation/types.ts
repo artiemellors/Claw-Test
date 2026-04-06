@@ -16,6 +16,8 @@ export type VideoGenerationSourceAsset = {
   buffer?: Buffer;
   mimeType?: string;
   fileName?: string;
+  /** Optional semantic role hint interpreted by the receiving provider (e.g. "first_frame", "last_frame", "style_ref"). Core does not validate or act on this value. */
+  role?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -36,10 +38,15 @@ export type VideoGenerationRequest = {
   aspectRatio?: string;
   resolution?: VideoGenerationResolution;
   durationSeconds?: number;
+  /** Enable generated audio in the output when the provider supports it. Distinct from inputAudios (reference audio input). */
   audio?: boolean;
   watermark?: boolean;
   inputImages?: VideoGenerationSourceAsset[];
   inputVideos?: VideoGenerationSourceAsset[];
+  /** Reference audio assets (e.g. background music). Role field on each asset is forwarded to the provider as-is. */
+  inputAudios?: VideoGenerationSourceAsset[];
+  /** Arbitrary provider-specific options forwarded as-is to provider.generateVideo. Core does not validate or log the contents. */
+  providerOptions?: Record<string, unknown>;
 };
 
 export type VideoGenerationResult = {
@@ -59,6 +66,8 @@ export type VideoGenerationModeCapabilities = {
   maxVideos?: number;
   maxInputImages?: number;
   maxInputVideos?: number;
+  /** Max number of reference audio assets the provider accepts (e.g. background music, voice reference). */
+  maxInputAudios?: number;
   maxDurationSeconds?: number;
   supportedDurationSeconds?: readonly number[];
   supportedDurationSecondsByModel?: Readonly<Record<string, readonly number[]>>;
@@ -68,6 +77,7 @@ export type VideoGenerationModeCapabilities = {
   supportsSize?: boolean;
   supportsAspectRatio?: boolean;
   supportsResolution?: boolean;
+  /** Provider can generate audio in the output video. */
   supportsAudio?: boolean;
   supportsWatermark?: boolean;
 };

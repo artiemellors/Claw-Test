@@ -38,6 +38,9 @@ export type GenerateVideoParams = {
   watermark?: boolean;
   inputImages?: VideoGenerationSourceAsset[];
   inputVideos?: VideoGenerationSourceAsset[];
+  inputAudios?: VideoGenerationSourceAsset[];
+  /** Arbitrary provider-specific options forwarded as-is to provider.generateVideo. Core does not validate or log the contents. */
+  providerOptions?: Record<string, unknown>;
 };
 
 export type GenerateVideoRuntimeResult = {
@@ -121,6 +124,8 @@ export async function generateVideo(
         watermark: sanitized.watermark,
         inputImages: params.inputImages,
         inputVideos: params.inputVideos,
+        inputAudios: params.inputAudios,
+        providerOptions: params.providerOptions,
       });
       if (!Array.isArray(result.videos) || result.videos.length === 0) {
         throw new Error("Video generation provider returned no videos.");

@@ -135,6 +135,30 @@ describe("video-generation runtime", () => {
     ]);
   });
 
+  it("forwards providerOptions to the provider unchanged", async () => {
+    mocks.resolveAgentModelPrimaryValue.mockReturnValue("video-plugin/vid-v1");
+    let seenProviderOptions: unknown;
+    const provider: VideoGenerationProvider = {
+      id: "video-plugin",
+      capabilities: {},
+      async generateVideo(req) {
+        seenProviderOptions = req.providerOptions;
+        return { videos: [{ buffer: Buffer.from("x"), mimeType: "video/mp4" }] };
+      },
+    };
+    mocks.getVideoGenerationProvider.mockReturnValue(provider);
+
+    await generateVideo({
+      cfg: {
+        agents: { defaults: { videoGenerationModel: { primary: "video-plugin/vid-v1" } } },
+      } as OpenClawConfig,
+      prompt: "test",
+      providerOptions: { seed: 42, draft: true, camerafixed: false },
+    });
+
+    expect(seenProviderOptions).toEqual({ seed: 42, draft: true, camerafixed: false });
+  });
+
   it("lists runtime video-generation providers through the provider registry", () => {
     const providers: VideoGenerationProvider[] = [
       {
