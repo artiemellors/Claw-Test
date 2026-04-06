@@ -371,8 +371,7 @@ export function createSubagentRegistryLifecycleController(params: {
     }
     if (didAnnounce) {
       if (!options?.skipAnnounce) {
-        entry.completionAnnouncedAt = Date.now();
-        params.persist();
+        let deliveryStatusWritten = false;
         try {
           setDetachedTaskDeliveryStatusByRunId({
             runId,
@@ -380,6 +379,7 @@ export function createSubagentRegistryLifecycleController(params: {
             sessionKey: entry.childSessionKey,
             deliveryStatus: "delivered",
           });
+          deliveryStatusWritten = true;
         } catch (err) {
           params.warn("failed to update subagent background task delivery state", {
             error: buildSafeLifecycleErrorMeta(err),
@@ -387,6 +387,13 @@ export function createSubagentRegistryLifecycleController(params: {
             childSessionKey: maskSessionKey(entry.childSessionKey),
             deliveryStatus: "delivered",
           });
+          // Do not set completionAnnouncedAt on failure — the next retry will
+          // re-attempt the full announce + delivery-status sequence instead of
+          // permanently skipping via skipAnnounce.
+        }
+        if (deliveryStatusWritten) {
+          entry.completionAnnouncedAt = Date.now();
+          params.persist();
         }
       }
       entry.wakeOnDescendantSettle = undefined;
