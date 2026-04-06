@@ -356,7 +356,7 @@ run_prestart_cli() {
   # requires the gateway container's network namespace to already exist. That
   # creates a circular dependency for config writes that are needed before the
   # gateway can start cleanly.
-  run_prestart_gateway --entrypoint node openclaw-gateway \
+  run_prestart_gateway --user node --entrypoint node openclaw-gateway \
     dist/index.js "$@"
 }
 
