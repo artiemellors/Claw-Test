@@ -9,6 +9,8 @@ import {
   getMemoryFlushPlanResolver,
   getMemoryPromptSectionBuilder,
   getMemoryRuntime,
+  listMemoryCorpusSupplements,
+  listMemoryPromptSupplements,
   registerMemoryFlushPlanResolver,
   restoreMemoryPluginState,
 } from "../../plugins/memory-state.js";
@@ -57,7 +59,9 @@ const state = vi.hoisted(() => ({
 }));
 
 const initialMemoryPluginState = {
+  corpusSupplements: listMemoryCorpusSupplements(),
   promptBuilder: getMemoryPromptSectionBuilder(),
+  promptSupplements: listMemoryPromptSupplements(),
   flushPlanResolver: getMemoryFlushPlanResolver(),
   runtime: getMemoryRuntime(),
 };
@@ -119,7 +123,6 @@ beforeAll(async () => {
 beforeEach(() => {
   state.compactEmbeddedPiSessionMock.mockClear();
   state.runEmbeddedPiAgentMock.mockClear();
-  state.runCliAgentMock.mockClear();
   restoreMemoryPluginState(initialMemoryPluginState);
   vi.mocked(enqueueFollowupRun).mockClear();
   vi.mocked(refreshQueuedFollowupSession).mockClear();
