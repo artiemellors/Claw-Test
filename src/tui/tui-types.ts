@@ -125,6 +125,7 @@ export type TuiStateAccess = {
   autoMessageSent: boolean;
   toolsExpanded: boolean;
   showThinking: boolean;
+  tuiAliases: Record<string, string>;
   connectionStatus: string;
   activityStatus: string;
   statusTimeout: ReturnType<typeof setTimeout> | null;

@@ -1,9 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { saveTuiAliases } from "./tui-aliases.js";
 import { createCommandHandlers } from "./tui-command-handlers.js";
+
+vi.mock("./tui-aliases.js", async () => {
+  const actual = await vi.importActual<typeof import("./tui-aliases.js")>("./tui-aliases.js");
+  return {
+    ...actual,
+    saveTuiAliases: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 type LoadHistoryMock = ReturnType<typeof vi.fn> & (() => Promise<void>);
 type SetActivityStatusMock = ReturnType<typeof vi.fn> & ((text: string) => void);
 type SetSessionMock = ReturnType<typeof vi.fn> & ((key: string) => Promise<void>);
+
+beforeEach(() => {
+  vi.mocked(saveTuiAliases).mockReset();
+  vi.mocked(saveTuiAliases).mockResolvedValue(undefined);
+});
 
 function createHarness(params?: {
   sendChat?: ReturnType<typeof vi.fn>;
@@ -16,6 +30,7 @@ function createHarness(params?: {
   setActivityStatus?: SetActivityStatusMock;
   isConnected?: boolean;
   activeChatRunId?: string | null;
+  tuiAliases?: Record<string, string>;
 }) {
   const sendChat = params?.sendChat ?? vi.fn().mockResolvedValue({ runId: "r1" });
   const patchSession = params?.patchSession ?? vi.fn().mockResolvedValue({});
@@ -31,12 +46,14 @@ function createHarness(params?: {
   const refreshSessionInfo = params?.refreshSessionInfo ?? vi.fn().mockResolvedValue(undefined);
   const applySessionInfoFromPatch = params?.applySessionInfoFromPatch ?? vi.fn();
   const setActivityStatus = params?.setActivityStatus ?? (vi.fn() as SetActivityStatusMock);
+  const refreshAutocomplete = vi.fn();
   const state = {
     currentSessionKey: "agent:main:main",
     activeChatRunId: params?.activeChatRunId ?? null,
     pendingOptimisticUserMessage: false,
     isConnected: params?.isConnected ?? true,
     sessionInfo: {},
+    tuiAliases: params?.tuiAliases ?? {},
   };
 
   const { handleCommand } = createCommandHandlers({
@@ -61,6 +78,7 @@ function createHarness(params?: {
     forgetLocalRunId: vi.fn(),
     forgetLocalBtwRunId: vi.fn(),
     requestExit: vi.fn(),
+    refreshAutocomplete,
   });
 
   return {
@@ -78,6 +96,7 @@ function createHarness(params?: {
     setActivityStatus,
     noteLocalRunId,
     noteLocalBtwRunId,
+    refreshAutocomplete,
     state,
   };
 }
@@ -252,5 +271,89 @@ describe("tui command handlers", () => {
     expect(addSystem).toHaveBeenCalledWith("activation set to always");
     expect(applySessionInfoFromPatch).toHaveBeenCalledWith({ groupActivation: "always" });
     expect(refreshSessionInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves a quoted alias and refreshes autocomplete", async () => {
+    const { handleCommand, addSystem, refreshAutocomplete, state } = createHarness();
+
+    await handleCommand('/alias review "check the PR and address comments"');
+
+    expect(state.tuiAliases).toMatchObject({
+      review: "check the PR and address comments",
+    });
+    expect(addSystem).toHaveBeenCalledWith("alias saved: review");
+    expect(refreshAutocomplete).toHaveBeenCalled();
+  });
+
+  it("runs a saved alias as a normal message", async () => {
+    const { handleCommand, sendChat, addUser } = createHarness({
+      tuiAliases: {
+        review: "check the PR and address comments",
+      },
+    });
+
+    await handleCommand("/alias review");
+
+    expect(addUser).toHaveBeenCalledWith("check the PR and address comments");
+    expect(sendChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "check the PR and address comments",
+      }),
+    );
+  });
+
+  it("removes aliases with /unalias", async () => {
+    const { handleCommand, addSystem, refreshAutocomplete, state } = createHarness({
+      tuiAliases: {
+        review: "check the PR",
+      },
+    });
+
+    await handleCommand("/unalias review");
+
+    expect(state.tuiAliases).toEqual({});
+    expect(addSystem).toHaveBeenCalledWith("alias removed: review");
+    expect(refreshAutocomplete).toHaveBeenCalled();
+  });
+
+  it("does not mutate aliases in memory when save fails", async () => {
+    vi.mocked(saveTuiAliases).mockRejectedValueOnce(new Error("disk full"));
+    const { handleCommand, addSystem, refreshAutocomplete, state } = createHarness();
+
+    await handleCommand('/alias review "check the PR"');
+
+    expect(state.tuiAliases).toEqual({});
+    expect(addSystem).toHaveBeenCalledWith("alias save failed: Error: disk full");
+    expect(refreshAutocomplete).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty quoted alias prompts instead of running the alias", async () => {
+    const { handleCommand, addSystem, sendChat } = createHarness({
+      tuiAliases: {
+        review: "existing prompt",
+      },
+    });
+
+    await handleCommand('/alias review ""');
+
+    expect(addSystem).toHaveBeenCalledWith("usage: /alias <name> <prompt> or /alias <name>");
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+
+  it("does not delete aliases in memory when remove fails", async () => {
+    vi.mocked(saveTuiAliases).mockRejectedValueOnce(new Error("disk full"));
+    const { handleCommand, addSystem, refreshAutocomplete, state } = createHarness({
+      tuiAliases: {
+        review: "check the PR",
+      },
+    });
+
+    await handleCommand("/unalias review");
+
+    expect(state.tuiAliases).toEqual({
+      review: "check the PR",
+    });
+    expect(addSystem).toHaveBeenCalledWith("alias remove failed: Error: disk full");
+    expect(refreshAutocomplete).not.toHaveBeenCalled();
   });
 });
