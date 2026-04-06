@@ -206,10 +206,24 @@ export function resolveIMessageInboundDecision(params: {
   // user's own handle). When is_from_me=true in self-chat, the message could be
   // either: (a) a real user message typed by the user, or (b) an agent reply
   // echo reflected back by iMessage. We must distinguish them.
+  //
+  // IMPORTANT: imsg RPC sets both `sender` and `chat_identifier` to the
+  // recipient's handle for outbound DMs, causing sender === chatIdentifier to be
+  // true for ALL 1-on-1 conversations — not just actual self-chat. This routes
+  // every DM through the echo cache path (with its short TTL) instead of the
+  // unconditional "from me" drop, causing echo loops when the cache expires.
+  // To fix this, we also check `destination_caller_id` — in a real self-chat
+  // it matches the sender, but in a regular DM it contains the bot's own
+  // iMessage address (e.g. "bot@icloud.com"). See: #59845, #60014
+  const destCallerId = params.message.destination_caller_id;
+  const senderMatchesChatId =
+    normalizeIMessageHandle(sender) === normalizeIMessageHandle(chatIdentifier);
   const isSelfChat =
     !isGroup &&
     chatIdentifier != null &&
-    normalizeIMessageHandle(sender) === normalizeIMessageHandle(chatIdentifier);
+    senderMatchesChatId &&
+    (!destCallerId ||
+      normalizeIMessageHandle(destCallerId) === normalizeIMessageHandle(sender));
   // Track whether we already processed the is_from_me=true self-chat path.
   // When true, the selfChatCache.has() check below must be skipped — we just
   // called remember() and would immediately match our own entry.
