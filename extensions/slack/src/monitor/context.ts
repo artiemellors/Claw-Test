@@ -45,6 +45,7 @@ export type SlackMonitorContext = {
   groupDmEnabled: boolean;
   groupDmChannels: string[];
   defaultRequireMention: boolean;
+  defaultRequireMentionInThreads?: boolean;
   channelsConfig?: SlackChannelConfigEntries;
   channelsConfigKeys: string[];
   groupPolicy: GroupPolicy;
@@ -110,6 +111,7 @@ export function createSlackMonitorContext(params: {
   groupDmEnabled: boolean;
   groupDmChannels: Array<string | number> | undefined;
   defaultRequireMention?: boolean;
+  defaultRequireMentionInThreads?: boolean;
   channelsConfig?: SlackMonitorContext["channelsConfig"];
   groupPolicy: SlackMonitorContext["groupPolicy"];
   useAccessGroups: boolean;
@@ -409,6 +411,7 @@ export function createSlackMonitorContext(params: {
     groupDmEnabled: params.groupDmEnabled,
     groupDmChannels,
     defaultRequireMention,
+    defaultRequireMentionInThreads: params.defaultRequireMentionInThreads,
     channelsConfig: params.channelsConfig,
     channelsConfigKeys,
     groupPolicy: params.groupPolicy,
