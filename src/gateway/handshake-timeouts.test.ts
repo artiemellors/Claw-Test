@@ -59,6 +59,8 @@ describe("gateway handshake timeouts", () => {
         VITEST: "1",
       }),
     ).toBe(DEFAULT_PREAUTH_HANDSHAKE_TIMEOUT_MS);
+  });
+
   test("getConnectChallengeTimeoutMsFromEnv reads OPENCLAW_CONNECT_CHALLENGE_TIMEOUT_MS", () => {
     expect(getConnectChallengeTimeoutMsFromEnv({})).toBeUndefined();
     expect(
