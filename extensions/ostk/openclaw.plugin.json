@@ -1,0 +1,14 @@
+{
+  "id": "ostk",
+  "name": "ostk kernel backend",
+  "description": "Run agent sessions through the ostk kernel with compiled context, session journals, and pin-enforced capabilities",
+  "enabledByDefault": true,
+  "cliBackends": [
+    "ostk"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
