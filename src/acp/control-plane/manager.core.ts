@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { logVerbose } from "../../globals.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { isAcpSessionKey } from "../../sessions/session-key-utils.js";
+import { isTransientAssistantApiFailure } from "../../shared/assistant-error-format.js";
 import {
   createRunningTaskRun,
   completeTaskRunByRunId,
@@ -714,7 +715,8 @@ export class AcpSessionManager {
           this.createBackgroundTaskRecord(taskContext, turnStartedAt);
         }
         let taskProgressSummary = "";
-        for (let attempt = 0; attempt < 2; attempt += 1) {
+        const maxTurnAttempts = 5;
+        for (let attempt = 0; attempt < maxTurnAttempts; attempt += 1) {
           const resolution = this.resolveSession({
             cfg: input.cfg,
             sessionKey,
@@ -729,6 +731,7 @@ export class AcpSessionManager {
           let activeTurnStarted = false;
           let sawTurnOutput = false;
           let retryFreshHandle = false;
+          let retryContinue = false;
           let skipPostTurnCleanup = false;
           try {
             const ensured = await this.ensureRuntimeHandle({
@@ -875,37 +878,47 @@ export class AcpSessionManager {
                 ? "ACP turn failed before completion."
                 : "Could not initialize ACP session runtime.",
             });
-            retryFreshHandle = this.shouldRetryTurnWithFreshHandle({
+            const turnRetry = this.evaluateTurnRetryDecision({
               attempt,
               sessionKey,
               error: acpError,
               sawTurnOutput,
             });
-            if (retryFreshHandle) {
-              continue;
-            }
-            this.recordTurnCompletion({
-              startedAt: turnStartedAt,
-              errorCode: acpError.code,
-            });
-            if (taskContext) {
-              this.markBackgroundTaskTerminal(taskContext.runId, {
-                sessionKey,
-                status: resolveBackgroundTaskFailureStatus(acpError),
-                endedAt: Date.now(),
-                lastEventAt: Date.now(),
-                error: acpError.message,
-                progressSummary: taskProgressSummary || null,
-                terminalSummary: null,
+            if (turnRetry !== false) {
+              retryContinue = true;
+              retryFreshHandle = turnRetry === "fresh-handle";
+              if (retryFreshHandle) {
+                this.clearCachedRuntimeState(sessionKey);
+              }
+              const backoffMs = Math.min(25_000, 1200 * 2 ** attempt);
+              logVerbose(
+                `acp-manager: ACP turn retry after ${turnRetry} (${backoffMs}ms backoff, attempt ${attempt + 1}/${maxTurnAttempts}): ${acpError.message.slice(0, 200)}`,
+              );
+              await new Promise((r) => setTimeout(r, backoffMs));
+            } else {
+              this.recordTurnCompletion({
+                startedAt: turnStartedAt,
+                errorCode: acpError.code,
               });
+              if (taskContext) {
+                this.markBackgroundTaskTerminal(taskContext.runId, {
+                  sessionKey,
+                  status: resolveBackgroundTaskFailureStatus(acpError),
+                  endedAt: Date.now(),
+                  lastEventAt: Date.now(),
+                  error: acpError.message,
+                  progressSummary: taskProgressSummary || null,
+                  terminalSummary: null,
+                });
+              }
+              await this.setSessionState({
+                cfg: input.cfg,
+                sessionKey,
+                state: "error",
+                lastError: acpError.message,
+              });
+              throw acpError;
             }
-            await this.setSessionState({
-              cfg: input.cfg,
-              sessionKey,
-              state: "error",
-              lastError: acpError.message,
-            });
-            throw acpError;
           } finally {
             if (input.signal && onCallerAbort) {
               input.signal.removeEventListener("abort", onCallerAbort);
@@ -952,7 +965,7 @@ export class AcpSessionManager {
               }
             }
           }
-          if (retryFreshHandle) {
+          if (retryContinue) {
             continue;
           }
         }
@@ -1604,23 +1617,21 @@ export class AcpSessionManager {
     this.errorCountsByCode.set(normalized, (this.errorCountsByCode.get(normalized) ?? 0) + 1);
   }
 
-  private shouldRetryTurnWithFreshHandle(params: {
+  private evaluateTurnRetryDecision(params: {
     attempt: number;
     sessionKey: string;
     error: AcpRuntimeError;
     sawTurnOutput: boolean;
-  }): boolean {
-    if (params.attempt > 0 || params.sawTurnOutput) {
-      return false;
+  }): false | "fresh-handle" | "same-handle" {
+    const msg = params.error.message;
+    const maxTransientAttempts = 3;
+    if (params.attempt < maxTransientAttempts && isTransientAssistantApiFailure(msg)) {
+      return params.attempt >= 1 ? "fresh-handle" : "same-handle";
     }
-    if (!this.isRecoverableAcpxExitError(params.error.message)) {
-      return false;
+    if (params.attempt === 0 && !params.sawTurnOutput && this.isRecoverableAcpxExitError(msg)) {
+      return "fresh-handle";
     }
-    this.clearCachedRuntimeState(params.sessionKey);
-    logVerbose(
-      `acp-manager: retrying ${params.sessionKey} with a fresh runtime handle after early turn failure: ${params.error.message}`,
-    );
-    return true;
+    return false;
   }
 
   private isRecoverableAcpxExitError(message: string): boolean {
