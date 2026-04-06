@@ -384,6 +384,51 @@ function resumeSubagentRun(runId: string) {
   resumedRuns.add(runId);
 }
 
+let graceRecheckTimer: NodeJS.Timeout | null = null;
+
+/**
+ * After startup, runs created within ORPHAN_GRACE_MS are exempt from orphan
+ * detection. This schedules a single delayed pass to re-evaluate those runs
+ * once the grace window has expired, so they are not silently leaked. (#61801)
+ */
+function scheduleGraceWindowOrphanRecheck() {
+  if (graceRecheckTimer) {
+    return;
+  }
+  const now = Date.now();
+  let maxRemainingMs = 0;
+  for (const entry of subagentRuns.values()) {
+    const createdAt = entry.createdAt;
+    if (typeof createdAt !== "number") {
+      continue;
+    }
+    const elapsed = now - createdAt;
+    if (elapsed < ORPHAN_GRACE_MS) {
+      const remaining = ORPHAN_GRACE_MS - elapsed;
+      if (remaining > maxRemainingMs) {
+        maxRemainingMs = remaining;
+      }
+    }
+  }
+  if (maxRemainingMs <= 0) {
+    return;
+  }
+  // Add a small buffer (5s) to avoid racing with the exact boundary.
+  const delayMs = maxRemainingMs + 5_000;
+  graceRecheckTimer = setTimeout(() => {
+    graceRecheckTimer = null;
+    if (
+      reconcileOrphanedRestoredRuns({
+        runs: subagentRuns,
+        resumedRuns,
+      })
+    ) {
+      persistSubagentRuns();
+    }
+  }, delayMs);
+  graceRecheckTimer.unref?.();
+}
+
 function restoreSubagentRunsOnce() {
   if (restoreAttempted) {
     return;
@@ -416,6 +461,12 @@ function restoreSubagentRunsOnce() {
     for (const runId of subagentRuns.keys()) {
       resumeSubagentRun(runId);
     }
+
+    // Schedule a delayed orphan re-check for runs that were exempt from
+    // orphan detection due to the grace window (ORPHAN_GRACE_MS). Without
+    // this, runs created just before a crash would never be re-evaluated
+    // after the grace window expires. (#61801)
+    scheduleGraceWindowOrphanRecheck();
 
     // Schedule orphan recovery for subagent sessions that were aborted
     // by a SIGUSR1 reload. This runs after a short delay to let the
@@ -470,10 +521,10 @@ async function sweepSubagentRuns() {
       continue;
     }
     clearPendingLifecycleError(runId);
-    subagentRuns.delete(runId);
-    mutated = true;
     // Archive/purge is terminal for the run record; remove any retained attachments too.
     await safeRemoveAttachmentsDir(entry);
+    // Delete the session first — only remove the run record on success so the
+    // record is preserved for retry on the next sweep cycle. (#61801)
     try {
       await subagentRegistryDeps.callGateway({
         method: "sessions.delete",
@@ -484,10 +535,18 @@ async function sweepSubagentRuns() {
         },
         timeoutMs: 10_000,
       });
-    } catch {
-      // ignore
+    } catch (err) {
+      log.warn("sessions.delete failed during sweep, keeping run record for retry", {
+        runId,
+        childSessionKey: entry.childSessionKey,
+        err,
+      });
+      continue;
     }
-    // Notify context engine after sessions.delete to avoid duplicate
+    // Session deleted successfully — now safe to remove the run record.
+    subagentRuns.delete(runId);
+    mutated = true;
+    // Notify context engine after successful deletion to avoid duplicate
     // notifications when the session is still live. (#49004)
     void notifyContextEngineSubagentEnded({
       childSessionKey: entry.childSessionKey,
@@ -634,6 +693,10 @@ export function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
   subagentRegistryRuntimePromise = null;
   resetAnnounceQueuesForTests();
   stopSweeper();
+  if (graceRecheckTimer) {
+    clearTimeout(graceRecheckTimer);
+    graceRecheckTimer = null;
+  }
   restoreAttempted = false;
   if (listenerStop) {
     listenerStop();
