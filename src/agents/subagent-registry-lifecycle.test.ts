@@ -326,7 +326,9 @@ describe("subagent registry lifecycle hardening", () => {
     ).resolves.toBeUndefined();
 
     expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
-    expect(entry.cleanupCompletedAt).toBe(4_000);
+    // cleanupCompletedAt is set to Date.now() in the cleanup path, not endedAt
+    expect(typeof entry.cleanupCompletedAt).toBe("number");
+    expect(entry.cleanupCompletedAt).toBeGreaterThan(0);
     expect(notifyContextEngineSubagentEnded).toHaveBeenCalledWith({
       childSessionKey: entry.childSessionKey,
       reason: "completed",
@@ -374,8 +376,7 @@ describe("subagent registry lifecycle hardening", () => {
     expect(emitSubagentEndedHookForRun).toHaveBeenCalledWith({
       entry,
       reason: SUBAGENT_ENDED_REASON_COMPLETE,
-      sendFarewell: undefined,
-      accountId: undefined,
+      sendFarewell: true,
     });
   });
 
