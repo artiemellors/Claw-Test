@@ -350,7 +350,7 @@ OpenClaw ships with the pi‑ai catalog. These providers require **no**
 ### Google Vertex
 
 - Provider: `google-vertex`
-- Auth: gcloud ADC
+- Auth: `GOOGLE_CLOUD_API_KEY` (simplest) or gcloud ADC (`GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION` + `gcloud auth application-default login` or `GOOGLE_APPLICATION_CREDENTIALS`)
   - Gemini CLI JSON replies are parsed from `response`; usage falls back to
     `stats`, with `stats.cached` normalized into OpenClaw `cacheRead`.
 

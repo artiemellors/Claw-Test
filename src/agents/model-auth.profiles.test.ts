@@ -794,4 +794,32 @@ describe("getApiKeyForModel", () => {
     expect(resolved?.apiKey).toBe("gcp-vertex-credentials");
     expect(resolved?.source).toBe("gcloud adc");
   });
+
+  it("resolveEnvApiKey('google-vertex') returns GOOGLE_CLOUD_API_KEY when set", async () => {
+    await withEnvAsync(
+      {
+        GOOGLE_CLOUD_API_KEY: "AIzaSyTest1234567890", // pragma: allowlist secret
+      },
+      async () => {
+        const resolved = resolveEnvApiKey("google-vertex");
+        expect(resolved?.apiKey).toBe("AIzaSyTest1234567890");
+        expect(resolved?.source).toContain("GOOGLE_CLOUD_API_KEY");
+      },
+    );
+  });
+
+  it("resolveEnvApiKey('google-vertex') does not return GOOGLE_CLOUD_API_KEY when the env var is unset", async () => {
+    await withEnvAsync(
+      {
+        GOOGLE_CLOUD_API_KEY: undefined,
+        GOOGLE_CLOUD_PROJECT: undefined,
+        GOOGLE_CLOUD_LOCATION: undefined,
+        GOOGLE_APPLICATION_CREDENTIALS: undefined,
+      },
+      async () => {
+        const resolved = resolveEnvApiKey("google-vertex", {} as NodeJS.ProcessEnv);
+        expect(resolved).toBeNull();
+      },
+    );
+  });
 });
