@@ -83,6 +83,14 @@ export function resolveCronSession(params: {
       lastAccountId: undefined,
       lastThreadId: undefined,
       deliveryContext: undefined,
+      // Clear runtime model state from the previous session so
+      // LiveSessionModelSwitchError is not triggered by a mismatch
+      // between the old session's runtime model and the new run's model.
+      // Preserve modelOverride/providerOverride — these represent the
+      // user's model preference and are used as a fallback when the cron
+      // payload does not specify an explicit model override.
+      model: undefined,
+      modelProvider: undefined,
     }),
   };
   return { storePath, store, sessionEntry, systemSent, isNewSession };
