@@ -1146,6 +1146,35 @@ export async function executeJobCore(
   if (abortSignal?.aborted) {
     return resolveAbortError();
   }
+
+  // Pre-hook gate: run optional shell command before the job.
+  if (job.preHook?.command) {
+    const { runPreHook } = await import("../pre-hook.js");
+    const hookResult = await runPreHook(job.preHook, abortSignal);
+    if (hookResult.outcome === "skip") {
+      state.deps.log.info(
+        { jobId: job.id, jobName: job.name, stdout: hookResult.stdout, stderr: hookResult.stderr },
+        "cron: pre-hook returned skip",
+      );
+      return { status: "skipped", error: "pre-hook: skipped" };
+    }
+    if (hookResult.outcome === "error") {
+      state.deps.log.warn(
+        {
+          jobId: job.id,
+          exitCode: hookResult.exitCode,
+          stdout: hookResult.stdout,
+          stderr: hookResult.stderr,
+        },
+        `cron: pre-hook failed: ${hookResult.message}`,
+      );
+      return { status: "error", error: `pre-hook: ${hookResult.message}` };
+    }
+  }
+
+  if (abortSignal?.aborted) {
+    return resolveAbortError();
+  }
   if (job.sessionTarget === "main") {
     return await executeMainSessionCronJob(state, job, abortSignal, waitWithAbort);
   }
