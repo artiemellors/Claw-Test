@@ -9,12 +9,14 @@ Docs: https://docs.openclaw.ai
 - Providers/Anthropic: restore Claude CLI as the preferred local Anthropic path in onboarding, model-auth guidance, and doctor flows again, and keep the Docker Claude CLI live lane aligned with the restored guidance.
 - Plugins/webhooks: add a bundled webhook ingress plugin so external automation can create and drive bound TaskFlows through per-route shared-secret endpoints. (#61892) Thanks @mbelinky.
 - Tools/media: document per-provider music and video generation capabilities, and add shared live video-to-video sweep coverage for providers that support local reference clips.
+- ACP/ACPX plugin: bump the bundled `acpx` pin to `0.5.1` so plugin-local installs and strict version checks pick up the latest published runtime release. (#62148) Thanks @onutc.
 
 ### Fixes
 
 - Channels/secrets: keep bundled channel artifact and secret-contract loading stable under lazy loading so bundled channel secrets continue to appear in `openclaw secret`, status, and security-audit surfaces.
 - Providers/xAI: recognize `api.grok.x.ai` as an xAI-native endpoint again so native xAI web-search attribution keeps working on Grok-hosted base URLs. (#61377) Thanks @jjjojoj.
 - Providers/Anthropic/cache: preserve thinking blocks for Claude Opus 4.5+, Sonnet 4.5+, and newer Claude 4-family models so Anthropic prompt-cache prefixes keep matching after thinking turns. (#61793)
+- Auth/OpenAI Codex OAuth: reload fresh on-disk credentials inside the locked refresh path and retry once after `refresh_token_reused` rotates only the stored refresh token, so relogin/restart recovery stops getting stuck on stale cached auth state. Thanks @owen-ever.
 - Providers/Ollama: honor the selected provider's `baseUrl` during streaming so multi-Ollama setups stop routing every stream to the first configured Ollama endpoint. (#61678)
 - Browser/remote CDP: retry the DevTools websocket once after remote browser restarts so healthy remote browser profiles do not fail availability checks during CDP warm-up. (#57397) Thanks @ThanhNguyxn07.
 - Memory/vector recall: surface explicit warnings when `sqlite-vec` is unavailable or vector writes are degraded so memory indexing no longer reports false-success while semantic recall is impaired.
@@ -64,6 +66,7 @@ Docs: https://docs.openclaw.ai
 - Gateway/WS handshake: raise the default pre-auth handshake timeout to 15 seconds so Raspberry Pi and other slower local hosts stop dropping healthy CLI connections during startup, while keeping `OPENCLAW_HANDSHAKE_TIMEOUT_MS` as a runtime override for unusually slow environments. Fixes #46097.
 - Agents/exec: keep `strictInlineEval` commands blocked after approval timeouts on both gateway and node exec hosts, so timeout fallback no longer turns timed-out inline interpreter prompts into automatic execution.
 - QQ Bot/media: route gateway-side attachment and fallback downloads through guarded QQ/Tencent HTTPS fetches so QQ media handling no longer follows arbitrary remote hosts.
+- Exec/runtime events: mark background `notifyOnExit` summaries and ACP parent-stream relays as untrusted system events so lower-trust runtime output no longer re-enters later turns as trusted `System:` text.
 - Hooks/wake: queue direct and mapped wake-hook payloads as untrusted system events so external wake content no longer enters the main session as trusted input. (#62003)
 
 ## 2026.4.5
