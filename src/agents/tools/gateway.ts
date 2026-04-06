@@ -5,6 +5,7 @@ import {
   resolveLeastPrivilegeOperatorScopesForMethod,
   type OperatorScope,
 } from "../../gateway/method-scopes.js";
+import { isLoopbackHost } from "../../gateway/net.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../utils/message-channel.js";
@@ -174,8 +175,13 @@ export function isRemoteGatewayTargetForAgentTools(params: {
     if (cfg.gateway?.mode === "remote") {
       return true;
     }
-    const hostname = new URL(override).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-    return hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1";
+    try {
+      return !isLoopbackHost(new URL(override).hostname);
+    } catch {
+      // Let the actual gateway call reject invalid overrides; treat malformed targets as remote
+      // here so write guards stay conservative.
+      return true;
+    }
   }
   const connectionDetails = buildGatewayConnectionDetails({ config: cfg });
   // OPENCLAW_GATEWAY_URL may point to a loopback address for local dev setups. Only classify as
@@ -186,10 +192,7 @@ export function isRemoteGatewayTargetForAgentTools(params: {
     cfg.gateway?.mode !== "remote"
   ) {
     try {
-      const hostname = new URL(connectionDetails.url).hostname
-        .toLowerCase()
-        .replace(/^\[|\]$/g, "");
-      if (hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1") {
+      if (isLoopbackHost(new URL(connectionDetails.url).hostname)) {
         return false;
       }
     } catch {
