@@ -1,19 +1,10 @@
-import { promises as fs } from "node:fs";
 import { loadConfig } from "../config/config.js";
-import {
-  loadSessionStore,
-  resolveAgentIdFromSessionKey,
-  resolveAgentsDirFromSessionStorePath,
-  resolveStorePath,
-  type SessionEntry,
-} from "../config/sessions.js";
 import type { ensureContextEnginesInitialized as ensureContextEnginesInitializedFn } from "../context-engine/init.js";
 import type { resolveContextEngine as resolveContextEngineFn } from "../context-engine/registry.js";
 import type { SubagentEndReason } from "../context-engine/types.js";
 import { callGateway } from "../gateway/call.js";
 import { onAgentEvent } from "../infra/agent-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { isSubagentSessionKey } from "../routing/session-key.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
 import type { ensureRuntimePluginsLoaded as ensureRuntimePluginsLoadedFn } from "./runtime-plugins.js";
 import { resetAnnounceQueuesForTests } from "./subagent-announce-queue.js";
@@ -147,140 +138,6 @@ async function resolveSubagentRegistryContextEngine(cfg: ReturnType<typeof loadC
 
 function persistSubagentRuns() {
   subagentRegistryDeps.persistSubagentRunsToDisk(subagentRuns);
-}
-
-const STARTUP_ORPHAN_RECONCILE_GRACE_MS = 5 * 60 * 1000;
-const STARTUP_ORPHAN_RECONCILE_RETRY_MS = 60_000;
-
-function scheduleStartupOrphanReconciliation(delayMs = 0) {
-  const timer = setTimeout(() => {
-    void reconcileOrphanedSessionStoreEntries();
-  }, delayMs);
-  timer.unref?.();
-}
-
-async function isLikelyLiveSubagentSession(params: {
-  sessionKey: string;
-  sessionEntry?: SessionEntry;
-}): Promise<boolean> {
-  const updatedAt = params.sessionEntry?.updatedAt;
-  if (
-    typeof updatedAt === "number" &&
-    Number.isFinite(updatedAt) &&
-    Date.now() - updatedAt < STARTUP_ORPHAN_RECONCILE_GRACE_MS
-  ) {
-    return true;
-  }
-
-  try {
-    const result = await subagentRegistryDeps.callGateway({
-      method: "sessions.get",
-      params: {
-        key: params.sessionKey,
-        limit: 1,
-      },
-      timeoutMs: 10_000,
-    });
-    const messages =
-      result &&
-      typeof result === "object" &&
-      Array.isArray((result as { messages?: unknown[] }).messages)
-        ? (result as { messages: unknown[] }).messages
-        : [];
-    return messages.length > 0;
-  } catch (err) {
-    log.warn("startup orphan reconciliation: liveness check failed; keeping session", {
-      childSessionKey: params.sessionKey,
-      error: String(err),
-    });
-    return true;
-  }
-}
-
-async function reconcileOrphanedSessionStoreEntries() {
-  try {
-    const cfg = subagentRegistryDeps.loadConfig();
-    const knownSessionKeys = new Set(
-      [...subagentRuns.values()]
-        .map((entry) => entry.childSessionKey?.trim().toLowerCase())
-        .filter(Boolean),
-    );
-    const storePaths = new Set<string>();
-    const defaultStorePath = resolveStorePath(cfg.session?.store, {});
-    storePaths.add(defaultStorePath);
-
-    for (const entry of subagentRuns.values()) {
-      if (!entry.childSessionKey) {
-        continue;
-      }
-      storePaths.add(
-        resolveStorePath(cfg.session?.store, {
-          agentId: resolveAgentIdFromSessionKey(entry.childSessionKey),
-        }),
-      );
-    }
-
-    const agentsDir = resolveAgentsDirFromSessionStorePath(defaultStorePath);
-    if (agentsDir) {
-      try {
-        const entries = await fs.readdir(agentsDir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            storePaths.add(resolveStorePath(cfg.session?.store, { agentId: entry.name }));
-          }
-        }
-      } catch {
-        // Best-effort only.
-      }
-    }
-
-    for (const storePath of storePaths) {
-      let store: Record<string, SessionEntry>;
-      try {
-        store = loadSessionStore(storePath);
-      } catch {
-        continue;
-      }
-
-      for (const [sessionKey, sessionEntry] of Object.entries(store)) {
-        if (!isSubagentSessionKey(sessionKey)) {
-          continue;
-        }
-        if (knownSessionKeys.has(sessionKey.toLowerCase())) {
-          continue;
-        }
-        if (await isLikelyLiveSubagentSession({ sessionKey, sessionEntry })) {
-          log.info("startup orphan reconciliation: skipping live subagent session", {
-            childSessionKey: sessionKey,
-          });
-          continue;
-        }
-        try {
-          await subagentRegistryDeps.callGateway({
-            method: "sessions.delete",
-            params: {
-              key: sessionKey,
-              deleteTranscript: true,
-              emitLifecycleHooks: false,
-            },
-            timeoutMs: 10_000,
-          });
-        } catch (err) {
-          log.warn("startup orphan reconciliation: sessions.delete failed; scheduling retry", {
-            childSessionKey: sessionKey,
-            error: String(err),
-          });
-          scheduleStartupOrphanReconciliation(STARTUP_ORPHAN_RECONCILE_RETRY_MS);
-          return;
-        }
-      }
-    }
-  } catch (err) {
-    log.warn("startup orphan reconciliation failed; scheduling retry", {
-      error: String(err),
-    });
-    scheduleStartupOrphanReconciliation(STARTUP_ORPHAN_RECONCILE_RETRY_MS);
-  }
 }
 
 const resumedRuns = new Set<string>();
@@ -533,14 +390,11 @@ function restoreSubagentRunsOnce() {
   }
   restoreAttempted = true;
   ensureListener();
-  let restoreSucceeded = false;
   try {
     const restoredCount = subagentRegistryDeps.restoreSubagentRunsFromDisk({
       runs: subagentRuns,
       mergeOnly: true,
     });
-    restoreSucceeded = true;
-    scheduleStartupOrphanReconciliation();
     if (restoredCount === 0) {
       return;
     }
@@ -577,10 +431,6 @@ function restoreSubagentRunsOnce() {
     );
   } catch {
     // ignore restore failures
-  }
-
-  if (!restoreSucceeded) {
-    log.warn("startup orphan reconciliation skipped because run restore failed");
   }
 }
 
