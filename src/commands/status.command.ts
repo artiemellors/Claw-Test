@@ -1,4 +1,5 @@
 import { withProgress } from "../cli/progress.js";
+import type { DoctorMemoryStatusPayload } from "../gateway/server-methods/doctor.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
 import { normalizeUpdateChannel, resolveUpdateChannelDisplay } from "../infra/update-channels.js";
 import type { Tone } from "../memory-host-sdk/status.js";
@@ -200,6 +201,18 @@ export async function statusCommand(
           )
           .catch(() => null)
       : null;
+  const gatewayMemoryStatus =
+    opts.deep && gatewayReachable && memoryPlugin.enabled && !memory
+      ? await loadGatewayCallModule()
+          .then(({ callGateway }) =>
+            callGateway<DoctorMemoryStatusPayload>({
+              method: "doctor.memory.status",
+              timeoutMs: opts.timeoutMs,
+              config: scan.cfg,
+            }),
+          )
+          .catch(() => null)
+      : null;
 
   const configChannel = normalizeUpdateChannel(cfg.update?.channel);
   const channelInfo = resolveUpdateChannelDisplay({
@@ -222,6 +235,7 @@ export async function statusCommand(
       updateChannelSource: channelInfo.source,
       memory,
       memoryPlugin,
+      gatewayMemoryStatus,
       gateway: {
         mode: gatewayMode,
         url: gatewayConnection.url,
@@ -448,6 +462,14 @@ export async function statusCommand(
     }
     if (!memory) {
       const slot = memoryPlugin.slot ? `plugin ${memoryPlugin.slot}` : "plugin";
+      const gatewayMemoryProvider =
+        typeof gatewayMemoryStatus?.provider === "string" &&
+        gatewayMemoryStatus.provider.trim().length > 0
+          ? gatewayMemoryStatus.provider.trim()
+          : null;
+      if (gatewayMemoryProvider) {
+        return `${muted(`enabled (${slot})`)} · ${ok("gateway active")} · provider ${gatewayMemoryProvider}`;
+      }
       return muted(`enabled (${slot}) · unavailable`);
     }
     const parts: string[] = [];
