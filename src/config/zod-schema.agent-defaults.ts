@@ -103,6 +103,14 @@ export const AgentDefaultsSchema = z
           .describe(
             "Idle timeout for LLM streaming responses in seconds. If no token is received within this time, the request is aborted. Set to 0 to disable. Default: 60 seconds.",
           ),
+        modelCooldownThresholdMinutes: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe(
+            "Model cooldown circuit breaker threshold in minutes. When all credentials return model_cooldown with reset_seconds exceeding this threshold, the session enters a cooldown state and rejects new messages until the cooldown expires. Default: 60 minutes. Set to 0 to disable.",
+          ),
       })
       .strict()
       .optional(),

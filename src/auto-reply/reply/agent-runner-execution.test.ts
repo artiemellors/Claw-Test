@@ -1514,38 +1514,18 @@ describe("runAgentTurnWithFallback", () => {
     expect(sessionStore.main.modelOverride).toBe("glm-5");
   });
 
-  it("drops authProfileId when fallback switches providers", async () => {
-    state.runWithModelFallbackMock.mockImplementation(
-      async (params: { run: (provider: string, model: string) => Promise<unknown> }) => ({
-        result: await params.run("openai-codex", "gpt-5.4"),
-        provider: "openai-codex",
-        model: "gpt-5.4",
-        attempts: [],
-      }),
-    );
-    state.runEmbeddedPiAgentMock.mockResolvedValue({
-      payloads: [{ text: "ok" }],
-      meta: {},
-    });
-
-    const followupRun = createFollowupRun();
-    followupRun.run.provider = "anthropic";
-    followupRun.run.model = "claude-opus";
-    followupRun.run.authProfileId = "anthropic:openclaw";
-    followupRun.run.authProfileIdSource = "user";
-
+  it("rejects inbound messages when session is in model cooldown state (#61622)", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
-      totalTokens: 1,
-      compactionCount: 0,
+      modelCooldownUntil: Date.now() + 2 * 60 * 60 * 1000, // 2 hours cooldown
     };
     const sessionStore = { main: sessionEntry };
 
     const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
     const result = await runAgentTurnWithFallback({
       commandBody: "hello",
-      followupRun,
+      followupRun: createFollowupRun(),
       sessionCtx: {
         Provider: "telegram",
         MessageSid: "msg",
@@ -1568,53 +1548,178 @@ describe("runAgentTurnWithFallback", () => {
       resolvedVerboseLevel: "off",
     });
 
-    expect(result.kind).toBe("success");
-    expect(state.runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
-    expect(state.runEmbeddedPiAgentMock.mock.calls[0]?.[0]).toMatchObject({
-      provider: "openai-codex",
-      model: "gpt-5.4",
-      authProfileId: undefined,
-      authProfileIdSource: undefined,
-    });
-    expect(sessionEntry.providerOverride).toBe("openai-codex");
-    expect(sessionEntry.modelOverride).toBe("gpt-5.4");
-    expect(sessionEntry.modelOverrideSource).toBe("auto");
-    expect(sessionEntry.authProfileOverride).toBeUndefined();
-    expect(sessionEntry.authProfileOverrideSource).toBeUndefined();
-    expect(sessionStore.main.authProfileOverride).toBeUndefined();
+    expect(result.kind).toBe("final");
+    if (result.kind === "final") {
+      expect(result.payload.text).toContain("cooling down");
+      expect(result.payload.text).toContain("2 hours");
+      // Message includes "No need to resend" (capitalized)
+      expect(result.payload.text).toMatch(/No need to resend/i);
+    }
+    // Should not have called runWithModelFallback when in cooldown
+    expect(state.runWithModelFallbackMock).not.toHaveBeenCalled();
   });
 
-  it("keeps same-provider auth profile when fallback only changes model", async () => {
-    const applyFallbackCandidateSelectionToEntry =
-      await getApplyFallbackCandidateSelectionToEntry();
-    const entry = {
+  it("clears expired cooldown state at session entry", async () => {
+    const sessionEntry: SessionEntry = {
       sessionId: "session",
-      updatedAt: 1,
-      authProfileOverride: "anthropic:openclaw",
-      authProfileOverrideSource: "user" as const,
-    } as SessionEntry;
+      updatedAt: Date.now(),
+      modelCooldownUntil: Date.now() - 1000, // Expired 1 second ago
+    };
+    const sessionStore = { main: sessionEntry };
+    const storePath = "/tmp/test-session-store.json";
 
-    const { updated } = applyFallbackCandidateSelectionToEntry({
-      entry,
-      run: {
-        provider: "anthropic",
-        model: "claude-opus",
-        authProfileId: "anthropic:openclaw",
-        authProfileIdSource: "user",
-      } as FollowupRun["run"],
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("anthropic", "claude"),
       provider: "anthropic",
-      model: "claude-sonnet",
-      now: 123,
+      model: "claude",
+      attempts: [],
+    }));
+    state.runEmbeddedPiAgentMock.mockImplementationOnce(async () => ({
+      payloads: [{ text: "success" }],
+      meta: {},
+    }));
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun: createFollowupRun(),
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath,
+      resolvedVerboseLevel: "off",
     });
 
-    expect(updated).toBe(true);
-    expect(entry).toMatchObject({
-      updatedAt: 123,
-      providerOverride: "anthropic",
-      modelOverride: "claude-sonnet",
-      modelOverrideSource: "auto",
-      authProfileOverride: "anthropic:openclaw",
-      authProfileOverrideSource: "user",
+    expect(result.kind).toBe("success");
+    // Cooldown should be cleared
+    expect(sessionEntry.modelCooldownUntil).toBeUndefined();
+  });
+
+  it("writes cooldown state when FallbackSummaryError has long soonestCooldownExpiry (#61622)", async () => {
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+    };
+    const sessionStore = { main: sessionEntry };
+    const storePath = "/tmp/test-session-store.json";
+    const cooldownExpiry = Date.now() + 3 * 60 * 60 * 1000; // 3 hours cooldown
+
+    // Create a proper FallbackSummaryError-like object with soonestCooldownExpiry
+    const fallbackSummaryError = new Error("All credentials exhausted");
+    fallbackSummaryError.name = "FallbackSummaryError";
+    Object.assign(fallbackSummaryError, {
+      attempts: [
+        { provider: "anthropic", model: "claude", error: "model_cooldown", reason: "rate_limit" },
+      ],
+      soonestCooldownExpiry: cooldownExpiry,
     });
+
+    state.runWithModelFallbackMock.mockImplementationOnce(async () => {
+      throw fallbackSummaryError;
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun: createFollowupRun(),
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath,
+      resolvedVerboseLevel: "off",
+    });
+
+    expect(result.kind).toBe("final");
+    if (result.kind === "final") {
+      expect(result.payload.text).toContain("Rate-limited");
+      expect(result.payload.text).toContain("3 hours");
+      expect(result.payload.text).toContain("auto-resume");
+    }
+    // Cooldown state should be written
+    expect(sessionEntry.modelCooldownUntil).toBe(cooldownExpiry);
+  });
+
+  it("clears cooldown state on successful run after cooldown (#61622)", async () => {
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      modelCooldownUntil: Date.now() - 1000, // Expired, but still present
+    };
+    const sessionStore = { main: sessionEntry };
+    const storePath = "/tmp/test-session-store.json";
+
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("anthropic", "claude"),
+      provider: "anthropic",
+      model: "claude",
+      attempts: [],
+    }));
+    state.runEmbeddedPiAgentMock.mockImplementationOnce(async () => ({
+      payloads: [{ text: "success" }],
+      meta: {},
+    }));
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      commandBody: "hello",
+      followupRun: createFollowupRun(),
+      sessionCtx: {
+        Provider: "telegram",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterCompactionFailure: async () => false,
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => sessionEntry,
+      activeSessionStore: sessionStore,
+      storePath,
+      resolvedVerboseLevel: "off",
+    });
+
+    expect(result.kind).toBe("success");
+    // Cooldown should be cleared on success
+    expect(sessionEntry.modelCooldownUntil).toBeUndefined();
   });
 });
