@@ -2271,6 +2271,7 @@ Notes:
         model: "minimax/MiniMax-M2.7",
         maxConcurrent: 8,
         runTimeoutSeconds: 900,
+        minRunTimeoutSeconds: 120,
         archiveAfterMinutes: 60,
       },
     },
@@ -2281,6 +2282,7 @@ Notes:
 - `model`: default model for spawned sub-agents. If omitted, sub-agents inherit the caller's model.
 - `allowAgents`: default allowlist of target agent ids for `sessions_spawn` when the requester agent does not set its own `subagents.allowAgents` (`["*"]` = any; default: same agent only).
 - `runTimeoutSeconds`: default timeout (seconds) for `sessions_spawn` when the tool call omits `runTimeoutSeconds`. `0` means no timeout.
+- `minRunTimeoutSeconds`: floor (seconds) for positive sub-agent timeouts, including fallback from `runTimeoutSeconds`; `0` remains no timeout.
 - Per-subagent tool policy: `tools.subagents.tools.allow` / `tools.subagents.tools.deny`.
 
 ---
