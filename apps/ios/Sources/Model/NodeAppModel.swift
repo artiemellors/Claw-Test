@@ -145,6 +145,7 @@ final class NodeAppModel {
     private var operatorGatewayTask: Task<Void, Never>?
     private var voiceWakeSyncTask: Task<Void, Never>?
     @ObservationIgnored private var cameraHUDDismissTask: Task<Void, Never>?
+    @ObservationIgnored private var cameraHUDDismissToken = 0
     @ObservationIgnored private lazy var capabilityRouter: NodeCapabilityRouter = self.buildCapabilityRouter()
     private let gatewayHealthMonitor = GatewayHealthMonitor()
     private var gatewayHealthMonitorDisabled = false
@@ -635,6 +636,9 @@ final class NodeAppModel {
             let res = try await self.operatorGateway.request(method: "agents.list", paramsJSON: "{}", timeoutSeconds: 8)
             let decoded = try JSONDecoder().decode(AgentsListResult.self, from: res)
             await MainActor.run {
+                let previousAgentName = self.activeAgentName
+                let previousMainSessionKey = self.mainSessionKey
+
                 self.gatewayDefaultAgentId = decoded.defaultid
                 self.gatewayAgents = decoded.agents
                 self.applyMainSessionKey(decoded.mainkey)
@@ -645,6 +649,14 @@ final class NodeAppModel {
                 }
                 self.talkMode.updateMainSessionKey(self.mainSessionKey)
                 self.homeCanvasRevision &+= 1
+
+                if LiveActivityManager.shared.isActive,
+                   (self.activeAgentName != previousAgentName || self.mainSessionKey != previousMainSessionKey)
+                {
+                    LiveActivityManager.shared.refreshIdentity(
+                        agentName: self.activeAgentName,
+                        sessionKey: self.mainSessionKey)
+                }
             }
         } catch {
             // Best-effort only.
@@ -658,6 +670,8 @@ final class NodeAppModel {
     }
 
     func setSelectedAgentId(_ agentId: String?) {
+        let previousAgentName = self.activeAgentName
+        let previousMainSessionKey = self.mainSessionKey
         let trimmed = (agentId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let stableID = (self.connectedGatewayID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if stableID.isEmpty {
@@ -677,6 +691,13 @@ final class NodeAppModel {
                     sessionKey: self.mainSessionKey,
                     deliveryChannel: self.shareDeliveryChannel,
                     deliveryTo: self.shareDeliveryTo))
+        }
+        if LiveActivityManager.shared.isActive,
+           (self.activeAgentName != previousAgentName || self.mainSessionKey != previousMainSessionKey)
+        {
+            LiveActivityManager.shared.refreshIdentity(
+                agentName: self.activeAgentName,
+                sessionKey: self.mainSessionKey)
         }
     }
 
@@ -1125,7 +1146,11 @@ final class NodeAppModel {
         }
         // Status pill mirrors screen recording state so it stays visible without overlay stacking.
         self.screenRecordActive = true
-        defer { self.screenRecordActive = false }
+        LiveActivityManager.shared.handleWorking(task: "Recording screen…")
+        defer {
+            self.screenRecordActive = false
+            LiveActivityManager.shared.handleWorking(task: nil)
+        }
         let path = try await self.screenRecorder.record(
             screenIndex: params.screenIndex,
             durationMs: params.durationMs,
@@ -1702,19 +1727,35 @@ private extension NodeAppModel {
 
     func showCameraHUD(text: String, kind: CameraHUDKind, autoHideSeconds: Double? = nil) {
         self.cameraHUDDismissTask?.cancel()
+        self.cameraHUDDismissToken &+= 1
+        let dismissToken = self.cameraHUDDismissToken
 
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             self.cameraHUDText = text
             self.cameraHUDKind = kind
         }
 
+        // Mirror transient camera/recording activity to the Dynamic Island, but do not
+        // surface raw error strings on the lock screen / Dynamic Island.
+        if kind != .error {
+            LiveActivityManager.shared.handleWorking(task: text)
+        }
+
         guard let autoHideSeconds else { return }
         self.cameraHUDDismissTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(autoHideSeconds * 1_000_000_000))
+            do {
+                try await Task.sleep(nanoseconds: UInt64(autoHideSeconds * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard dismissToken == self.cameraHUDDismissToken else { return }
             withAnimation(.easeOut(duration: 0.25)) {
                 self.cameraHUDText = nil
                 self.cameraHUDKind = nil
             }
+            // Task complete — return Dynamic Island to idle.
+            LiveActivityManager.shared.handleWorking(task: nil)
         }
     }
 }
@@ -2139,7 +2180,7 @@ private extension NodeAppModel {
                         liveActivity.handleConnecting()
                     } else {
                         liveActivity.startActivity(
-                            agentName: self.selectedAgentId ?? "main",
+                            agentName: self.activeAgentName,
                             sessionKey: self.mainSessionKey)
                     }
                 }
