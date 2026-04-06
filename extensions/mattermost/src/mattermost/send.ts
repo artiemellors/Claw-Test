@@ -39,6 +39,8 @@ export type MattermostSendOpts = {
   attachmentText?: string;
   /** Retry options for DM channel creation */
   dmRetryOptions?: CreateDmChannelRetryOptions;
+  /** Abort signal forwarded to the underlying HTTP request */
+  signal?: AbortSignal;
 };
 
 export type MattermostSendResult = {
@@ -461,6 +463,7 @@ export async function sendMessageMattermost(
     rootId: opts.replyToId,
     fileIds,
     props,
+    signal: opts.signal,
   });
 
   recordMattermostOutboundActivity(accountId);
