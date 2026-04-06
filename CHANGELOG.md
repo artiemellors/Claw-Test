@@ -127,6 +127,7 @@ Docs: https://docs.openclaw.ai
 - Agents/model resolution: keep explicit-model runtime comparisons on the configured workspace plugin registry, so workspace-installed providers do not silently fall back to stale explicit metadata during runtime model lookup.
 - Providers/Z.AI: default onboarding and endpoint detection to GLM-5.1 instead of GLM-5. (#61998) Thanks @serg0x.
 - Reply execution: prefer the active runtime snapshot over stale queued reply config during embedded reply and follow-up execution so SecretRef-backed reply turns stop crashing after secrets have already resolved. (#62693) Thanks @mbelinky.
+- Providers/Google video: fall back to the REST Veo path for affected text-only SDK 404 and empty-result failures, while keeping reference-input generation on the SDK path and normalizing REST video downloads. (#61878) Thanks @leoleedev.
 
 ## 2026.4.5
 
