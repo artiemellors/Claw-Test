@@ -306,6 +306,12 @@ importers:
 
   extensions/comfy: {}
 
+  extensions/computer-use:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: 0.34.48
+        version: 0.34.48
+
   extensions/copilot-proxy: {}
 
   extensions/deepgram: {}
