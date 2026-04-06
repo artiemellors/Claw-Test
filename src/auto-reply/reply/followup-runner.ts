@@ -21,6 +21,7 @@ import { stripHeartbeatToken } from "../heartbeat.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
+import { applyDeferredMediaUnderstandingToQueuedRun } from "./followup-media.js";
 import {
   resolveQueuedReplyExecutionConfig,
   resolveQueuedReplyRuntimeConfig,
@@ -183,6 +184,7 @@ export function createFollowupRunner(params: {
         activeSessionEntry?.systemPromptReport,
       );
       replyOperation.setPhase("running");
+      await applyDeferredMediaUnderstandingToQueuedRun(queued, { logLabel: "followup" });
       try {
         const fallbackResult = await runWithModelFallback({
           cfg: runtimeConfig,
