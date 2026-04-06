@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { MAX_VIDEO_BYTES } from "../../media/constants.js";
 import { saveMediaBuffer } from "../../media/store.js";
 import { loadWebMedia } from "../../media/web-media.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
@@ -524,7 +525,7 @@ async function executeVideoGenerationJob(params: {
         video.buffer,
         video.mimeType,
         "tool-video-generation",
-        undefined,
+        MAX_VIDEO_BYTES,
         params.filename || video.fileName,
       ),
     ),
