@@ -623,8 +623,9 @@ export async function runAgentTurnWithFallback(params: {
   // When all credentials return model_cooldown with a long reset_seconds,
   // the session enters a cooldown state to prevent infinite retry loops.
   const cooldownUntil = params.getActiveSessionEntry()?.modelCooldownUntil;
-  if (typeof cooldownUntil === "number" && cooldownUntil > Date.now()) {
-    const secsLeft = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 1000));
+  const now = Date.now();
+  if (typeof cooldownUntil === "number" && cooldownUntil > now) {
+    const secsLeft = Math.max(1, Math.ceil((cooldownUntil - now) / 1000));
     const minsLeft = Math.ceil(secsLeft / 60);
     const hoursLeft = Math.ceil(secsLeft / 3600);
     let cooldownMessage: string;
@@ -648,7 +649,7 @@ export async function runAgentTurnWithFallback(params: {
   // Clear expired cooldown state if present
   if (
     typeof cooldownUntil === "number" &&
-    cooldownUntil <= Date.now() &&
+    cooldownUntil <= now &&
     params.sessionKey &&
     params.activeSessionStore &&
     params.storePath
@@ -1538,8 +1539,18 @@ export async function runAgentTurnWithFallback(params: {
       } else if (isRateLimit) {
         const baseMessage = buildRateLimitCooldownMessage(err);
         if (cooldownUntilMs) {
-          const hoursLeft = Math.ceil((cooldownUntilMs - Date.now()) / 3600000);
-          fallbackText = `${baseMessage}\n\n⏳ All credentials are cooling down for ~${hoursLeft} hours. I'll auto-resume when ready — no need to resend.`;
+          const cdSecsLeft = Math.max(1, Math.ceil((cooldownUntilMs - Date.now()) / 1000));
+          const cdMinsLeft = Math.ceil(cdSecsLeft / 60);
+          const cdHoursLeft = Math.ceil(cdSecsLeft / 3600);
+          let cdDuration: string;
+          if (cdHoursLeft > 1) {
+            cdDuration = `~${cdHoursLeft} hours`;
+          } else if (cdMinsLeft > 1) {
+            cdDuration = `~${cdMinsLeft} minutes`;
+          } else {
+            cdDuration = `~${cdSecsLeft} seconds`;
+          }
+          fallbackText = `${baseMessage}\n\n⏳ All credentials are cooling down for ${cdDuration}. I'll auto-resume when ready — no need to resend.`;
         } else {
           fallbackText = baseMessage;
         }
