@@ -95,6 +95,7 @@ let subagentRegistryRuntimePromise: Promise<
 > | null = null;
 
 let sweeper: NodeJS.Timeout | null = null;
+let sweepInProgress = false;
 let listenerStarted = false;
 let listenerStop: (() => void) | null = null;
 // Use var to avoid TDZ when init runs across circular imports during bootstrap.
@@ -500,6 +501,9 @@ function startSweeper() {
     return;
   }
   sweeper = setInterval(() => {
+    if (sweepInProgress) {
+      return;
+    }
     void sweepSubagentRuns();
   }, 60_000);
   sweeper.unref?.();
@@ -514,51 +518,59 @@ function stopSweeper() {
 }
 
 async function sweepSubagentRuns() {
-  const now = Date.now();
-  let mutated = false;
-  for (const [runId, entry] of subagentRuns.entries()) {
-    if (!entry.archiveAtMs || entry.archiveAtMs > now) {
-      continue;
-    }
-    clearPendingLifecycleError(runId);
-    // Archive/purge is terminal for the run record; remove any retained attachments too.
-    await safeRemoveAttachmentsDir(entry);
-    // Delete the session first — only remove the run record on success so the
-    // record is preserved for retry on the next sweep cycle. (#61801)
-    try {
-      await subagentRegistryDeps.callGateway({
-        method: "sessions.delete",
-        params: {
-          key: entry.childSessionKey,
-          deleteTranscript: true,
-          emitLifecycleHooks: false,
-        },
-        timeoutMs: 10_000,
-      });
-    } catch (err) {
-      log.warn("sessions.delete failed during sweep, keeping run record for retry", {
-        runId,
+  if (sweepInProgress) {
+    return;
+  }
+  sweepInProgress = true;
+  try {
+    const now = Date.now();
+    let mutated = false;
+    for (const [runId, entry] of subagentRuns.entries()) {
+      if (!entry.archiveAtMs || entry.archiveAtMs > now) {
+        continue;
+      }
+      clearPendingLifecycleError(runId);
+      // Archive/purge is terminal for the run record; remove any retained attachments too.
+      await safeRemoveAttachmentsDir(entry);
+      // Delete the session first — only remove the run record on success so the
+      // record is preserved for retry on the next sweep cycle. (#61801)
+      try {
+        await subagentRegistryDeps.callGateway({
+          method: "sessions.delete",
+          params: {
+            key: entry.childSessionKey,
+            deleteTranscript: true,
+            emitLifecycleHooks: false,
+          },
+          timeoutMs: 10_000,
+        });
+      } catch (err) {
+        log.warn("sessions.delete failed during sweep, keeping run record for retry", {
+          runId,
+          childSessionKey: entry.childSessionKey,
+          err,
+        });
+        continue;
+      }
+      // Session deleted successfully — now safe to remove the run record.
+      subagentRuns.delete(runId);
+      mutated = true;
+      // Notify context engine after successful deletion to avoid duplicate
+      // notifications when the session is still live. (#49004)
+      void notifyContextEngineSubagentEnded({
         childSessionKey: entry.childSessionKey,
-        err,
+        reason: "swept",
+        workspaceDir: entry.workspaceDir,
       });
-      continue;
     }
-    // Session deleted successfully — now safe to remove the run record.
-    subagentRuns.delete(runId);
-    mutated = true;
-    // Notify context engine after successful deletion to avoid duplicate
-    // notifications when the session is still live. (#49004)
-    void notifyContextEngineSubagentEnded({
-      childSessionKey: entry.childSessionKey,
-      reason: "swept",
-      workspaceDir: entry.workspaceDir,
-    });
-  }
-  if (mutated) {
-    persistSubagentRuns();
-  }
-  if (subagentRuns.size === 0) {
-    stopSweeper();
+    if (mutated) {
+      persistSubagentRuns();
+    }
+    if (subagentRuns.size === 0) {
+      stopSweeper();
+    }
+  } finally {
+    sweepInProgress = false;
   }
 }
 
@@ -693,6 +705,7 @@ export function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
   subagentRegistryRuntimePromise = null;
   resetAnnounceQueuesForTests();
   stopSweeper();
+  sweepInProgress = false;
   if (graceRecheckTimer) {
     clearTimeout(graceRecheckTimer);
     graceRecheckTimer = null;
