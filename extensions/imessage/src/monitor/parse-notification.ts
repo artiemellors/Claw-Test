@@ -72,7 +72,8 @@ export function parseIMessageNotification(raw: unknown): IMessagePayload | null 
     !isOptionalString(message.chat_guid) ||
     !isOptionalString(message.chat_name) ||
     !isOptionalStringArray(message.participants) ||
-    !isOptionalBoolean(message.is_group)
+    !isOptionalBoolean(message.is_group) ||
+    !isOptionalString(message.destination_caller_id)
   ) {
     return null;
   }

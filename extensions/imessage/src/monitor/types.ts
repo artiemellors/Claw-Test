@@ -24,6 +24,7 @@ export type IMessagePayload = {
   chat_name?: string | null;
   participants?: string[] | null;
   is_group?: boolean | null;
+  destination_caller_id?: string | null;
 };
 
 export type MonitorIMessageOpts = {
