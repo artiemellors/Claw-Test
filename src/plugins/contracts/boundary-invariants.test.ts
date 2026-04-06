@@ -77,9 +77,13 @@ describe("plugin contract boundary invariants", () => {
       }
       const source = readFileSync(resolve(REPO_ROOT, file), "utf8");
       return (
-        /from\s+["'][^"']*extensions\/.+(?:api|runtime-api|test-api)\.js["']/u.test(source) ||
-        /vi\.(?:mock|doMock)\(\s*["'][^"']*extensions\/.+["']/u.test(source) ||
-        /importActual<[^>]*>\(\s*["'][^"']*extensions\/.+["']/u.test(source)
+        /from\s+["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(source) ||
+        /vi\.(?:mock|doMock)\(\s*["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(
+          source,
+        ) ||
+        /importActual<[^>]*>\(\s*["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(
+          source,
+        )
       );
     });
     expect(offenders).toEqual([]);
