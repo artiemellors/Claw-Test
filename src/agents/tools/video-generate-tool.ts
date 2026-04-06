@@ -763,9 +763,10 @@ export function createVideoGenerateTool(options?: {
       });
       const audio = readBooleanToolParam(args, "audio");
       const watermark = readBooleanToolParam(args, "watermark");
+      const providerOptionsRaw = readSnakeCaseParamRaw(args, "providerOptions");
       const providerOptions =
-        args.providerOptions != null && typeof args.providerOptions === "object"
-          ? (args.providerOptions as Record<string, unknown>)
+        providerOptionsRaw != null && typeof providerOptionsRaw === "object"
+          ? (providerOptionsRaw as Record<string, unknown>)
           : undefined;
       const imageInputs = normalizeReferenceInputs({
         args,
@@ -774,23 +775,24 @@ export function createVideoGenerateTool(options?: {
         maxCount: MAX_INPUT_IMAGES,
       });
       // *Roles: parallel string arrays giving each asset a semantic role hint.
+      // Use readSnakeCaseParamRaw so both camelCase and snake_case keys are accepted.
       const parseRolesArg = (raw: unknown): string[] =>
         (Array.isArray(raw) ? raw : []).map((r) => (typeof r === "string" ? r.trim() : ""));
-      const imageRoles = parseRolesArg(args.imageRoles);
+      const imageRoles = parseRolesArg(readSnakeCaseParamRaw(args, "imageRoles"));
       const videoInputs = normalizeReferenceInputs({
         args,
         singularKey: "video",
         pluralKey: "videos",
         maxCount: MAX_INPUT_VIDEOS,
       });
-      const videoRoles = parseRolesArg(args.videoRoles);
+      const videoRoles = parseRolesArg(readSnakeCaseParamRaw(args, "videoRoles"));
       const audioInputs = normalizeReferenceInputs({
         args,
         singularKey: "audioRef",
         pluralKey: "audioRefs",
         maxCount: MAX_INPUT_AUDIOS,
       });
-      const audioRoles = parseRolesArg(args.audioRoles);
+      const audioRoles = parseRolesArg(readSnakeCaseParamRaw(args, "audioRoles"));
 
       const selectedProvider = resolveSelectedVideoGenerationProvider({
         config: effectiveCfg,
