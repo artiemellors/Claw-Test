@@ -78,6 +78,7 @@ export const pluginRegistrationContractCases = {
   },
   mistral: {
     pluginId: "mistral",
+    speechProviderIds: ["mistral"],
     mediaUnderstandingProviderIds: ["mistral"],
   },
   moonshot: {

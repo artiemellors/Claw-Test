@@ -4,6 +4,7 @@ import { applyMistralModelCompat, MISTRAL_MODEL_COMPAT_PATCH } from "./api.js";
 import { mistralMediaUnderstandingProvider } from "./media-understanding-provider.js";
 import { applyMistralConfig, MISTRAL_DEFAULT_MODEL_REF } from "./onboard.js";
 import { buildMistralProvider } from "./provider-catalog.js";
+import { buildMistralSpeechProvider } from "./speech-provider.js";
 
 const PROVIDER_ID = "mistral";
 const MISTRAL_MODEL_HINTS = [
@@ -97,6 +98,7 @@ export default defineSingleProviderPluginEntry({
     buildReplayPolicy: () => buildMistralReplayPolicy(),
   },
   register(api) {
+    api.registerSpeechProvider(buildMistralSpeechProvider());
     api.registerMediaUnderstandingProvider(mistralMediaUnderstandingProvider);
   },
 });
