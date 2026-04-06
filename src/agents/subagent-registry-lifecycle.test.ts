@@ -298,7 +298,7 @@ describe("subagent registry lifecycle hardening", () => {
     const runSubagentAnnounceFlow = vi.fn(async () => true);
     const notifyContextEngineSubagentEnded = vi.fn(async () => {});
 
-    const controller = mod.createSubagentRegistryLifecycleController({
+    const controller = createSubagentRegistryLifecycleController({
       runs: new Map([[entry.runId, entry]]),
       resumedRuns: new Set(),
       subagentAnnounceTimeoutMs: 1_000,
@@ -345,7 +345,7 @@ describe("subagent registry lifecycle hardening", () => {
     });
     const emitSubagentEndedHookForRun = vi.fn(async () => {});
 
-    const controller = mod.createSubagentRegistryLifecycleController({
+    const controller = createSubagentRegistryLifecycleController({
       runs: new Map([[entry.runId, entry]]),
       resumedRuns: new Set(),
       subagentAnnounceTimeoutMs: 1_000,
@@ -388,7 +388,7 @@ describe("subagent registry lifecycle hardening", () => {
       retainAttachmentsOnKeep: true,
     });
 
-    const controller = mod.createSubagentRegistryLifecycleController({
+    const controller = createSubagentRegistryLifecycleController({
       runs: new Map([[entry.runId, entry]]),
       resumedRuns: new Set(),
       subagentAnnounceTimeoutMs: 1_000,
