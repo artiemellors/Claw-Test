@@ -37,6 +37,7 @@ import {
   type GatewayRemoteCredentialFallback,
   type GatewayRemoteCredentialPrecedence,
 } from "./credentials.js";
+import { waitForEventLoopReady } from "./event-loop-ready.js";
 import {
   CLI_DEFAULT_OPERATOR_SCOPES,
   resolveLeastPrivilegeOperatorScopesForMethod,
@@ -710,6 +711,10 @@ async function executeGatewayRequestWithScopes<T>(params: {
   safeTimerTimeoutMs: number;
   connectionDetails: GatewayConnectionDetails;
 }): Promise<T> {
+  // Ensure the event loop is not starved by deferred module evaluation before
+  // opening any network connections (see waitForEventLoopReady jsdoc).
+  await waitForEventLoopReady(params.timeoutMs);
+
   const { opts, scopes, url, token, password, tlsFingerprint, timeoutMs, safeTimerTimeoutMs } =
     params;
   // Yield to the event loop before starting the WebSocket connection.
