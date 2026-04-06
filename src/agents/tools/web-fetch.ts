@@ -366,8 +366,12 @@ async function maybeFetchProviderWebFetchPayload(
 }
 
 async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string, unknown>> {
+  const cachePolicyKey = JSON.stringify({
+    dangerouslyAllowPrivateNetwork: params.dangerouslyAllowPrivateNetwork === true,
+    assumeProxyEnvironment: params.assumeProxyEnvironment === true,
+  });
   const cacheKey = normalizeCacheKey(
-    `fetch:${params.url}:${params.extractMode}:${params.maxChars}`,
+    `fetch:${params.url}:${params.extractMode}:${params.maxChars}:${cachePolicyKey}`,
   );
   const cached = readCache(FETCH_CACHE, cacheKey);
   if (cached) {
