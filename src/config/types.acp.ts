@@ -45,4 +45,8 @@ export type AcpConfig = {
   maxConcurrentSessions?: number;
   stream?: AcpStreamConfig;
   runtime?: AcpRuntimeConfig;
+  /** Inject workspace bootstrap files (SOUL.md, AGENTS.md, etc.) into the ACP task string. Default: true. */
+  injectBootstrap?: boolean;
+  /** Inject session handback instructions so ACP agents can hand control back to the main agent. Default: true. */
+  sessionHandback?: boolean;
 };

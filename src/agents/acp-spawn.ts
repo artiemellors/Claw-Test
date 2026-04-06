@@ -57,10 +57,26 @@ import {
   resolveAcpSpawnStreamLogPath,
   startAcpSpawnParentStreamRelay,
 } from "./acp-spawn-parent-stream.js";
-import { resolveAgentConfig, resolveDefaultAgentId } from "./agent-scope.js";
+import {
+  listAgentEntries,
+  resolveAgentConfig,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "./agent-scope.js";
 import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 import { resolveSpawnedWorkspaceInheritance } from "./spawned-context.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./tools/sessions-helpers.js";
+import { loadWorkspaceBootstrapFiles } from "./workspace.js";
+
+const ACP_BOOTSTRAP_INCLUDE = new Set([
+  "AGENTS.md",
+  "SOUL.md",
+  "IDENTITY.md",
+  "USER.md",
+  "TOOLS.md",
+  "MEMORY.md",
+  "memory.md",
+]);
 
 const log = createSubsystemLogger("agents/acp-spawn");
 
@@ -364,15 +380,41 @@ function hasSessionLocalHeartbeatRelayRoute(params: {
 function resolveTargetAcpAgentId(params: {
   requestedAgentId?: string;
   cfg: OpenClawConfig;
-}): { ok: true; agentId: string } | { ok: false; error: string } {
+}): { ok: true; agentId: string; profileCwd?: string } | { ok: false; error: string } {
   const requested = normalizeOptionalAgentId(params.requestedAgentId);
   if (requested) {
-    return { ok: true, agentId: requested };
+    // Check if the requested ID is an agent profile alias that maps to
+    // a different underlying ACP harness ID (e.g. "analyst" → "claude").
+    const profile = listAgentEntries(params.cfg).find((a) => normalizeAgentId(a.id) === requested);
+
+    let targetAgentId = requested;
+    let profileCwd: string | undefined;
+
+    if (profile?.runtime?.type === "acp" && profile.runtime.acp?.agent) {
+      targetAgentId = normalizeOptionalAgentId(profile.runtime.acp.agent) || requested;
+      profileCwd = profile.runtime.acp.cwd || profile.workspace;
+    } else if (profile?.workspace) {
+      profileCwd = profile.workspace;
+    }
+
+    return { ok: true, agentId: targetAgentId, profileCwd };
   }
 
   const configuredDefault = normalizeOptionalAgentId(params.cfg.acp?.defaultAgent);
   if (configuredDefault) {
-    return { ok: true, agentId: configuredDefault };
+    const defaultProfile = listAgentEntries(params.cfg).find(
+      (a) => normalizeAgentId(a.id) === configuredDefault,
+    );
+    let defaultAgentId = configuredDefault;
+    const defaultProfileCwd =
+      defaultProfile?.runtime?.type === "acp"
+        ? defaultProfile.runtime.acp?.cwd || defaultProfile.workspace
+        : defaultProfile?.workspace;
+    if (defaultProfile?.runtime?.type === "acp" && defaultProfile.runtime.acp?.agent) {
+      defaultAgentId =
+        normalizeOptionalAgentId(defaultProfile.runtime.acp.agent) || configuredDefault;
+    }
+    return { ok: true, agentId: defaultAgentId, profileCwd: defaultProfileCwd };
   }
 
   return {
@@ -523,6 +565,26 @@ function resolveConversationIdForThreadBinding(params: {
   if (genericConversationId) {
     return genericConversationId;
   }
+
+  const target = (params.groupId ?? params.to)?.trim() || "";
+  if (channelKey === "line") {
+    const prefixed = target.match(/^line:(?:(?:user|group|room):)?([UCR][a-f0-9]{32})$/i)?.[1];
+    if (prefixed) {
+      return prefixed;
+    }
+    if (/^[UCR][a-f0-9]{32}$/i.test(target)) {
+      return target;
+    }
+  }
+
+  // Strip channel prefix from numeric DM targets (e.g. "telegram:12345678" → "12345678")
+  if (channelKey && target.toLowerCase().startsWith(`${channelKey}:`)) {
+    const stripped = target.slice(channelKey.length + 1).trim();
+    if (stripped && /^\d+$/.test(stripped)) {
+      return stripped;
+    }
+  }
+
   return undefined;
 }
 
@@ -995,13 +1057,48 @@ export async function spawnAcpDirect(
     });
   }
 
+  // --- ACP bootstrap injection ---
+  let effectiveTask = params.task;
+  if (!params.resumeSessionId) {
+    const bootstrapWorkspace = params.cwd || resolveAgentWorkspaceDir(cfg, targetAgentId);
+    if (bootstrapWorkspace && cfg.acp?.injectBootstrap !== false) {
+      try {
+        const bootstrapFiles = await loadWorkspaceBootstrapFiles(bootstrapWorkspace);
+        const includedFiles = bootstrapFiles.filter(
+          (f) => !f.missing && f.content?.trim() && ACP_BOOTSTRAP_INCLUDE.has(f.name),
+        );
+        if (includedFiles.length > 0) {
+          const MAX_TOTAL_CHARS = 50_000;
+          let totalChars = 0;
+          const sections: string[] = [];
+          for (const file of includedFiles) {
+            const content = file.content!.trim();
+            if (totalChars + content.length > MAX_TOTAL_CHARS) {
+              break;
+            }
+            sections.push(`## ${file.name}\n\n${content}`);
+            totalChars += content.length;
+          }
+          if (sections.length > 0) {
+            const bootstrapBlock = sections.join("\n\n---\n\n");
+            effectiveTask = `[WORKSPACE CONTEXT]\nThe following files define your identity, operating instructions, and memory for this workspace. Follow them.\n\n${bootstrapBlock}\n\n[/WORKSPACE CONTEXT]\n\n${params.task}`;
+          }
+        }
+      } catch (err) {
+        log.warn(
+          `ACP bootstrap injection failed for workspace ${bootstrapWorkspace}: ${summarizeError(err)}`,
+        );
+      }
+    }
+  }
+
   const sessionKey = `agent:${targetAgentId}:acp:${crypto.randomUUID()}`;
   const runtimeMode = resolveAcpSessionMode(spawnMode);
   const resolvedCwd = resolveSpawnedWorkspaceInheritance({
     config: cfg,
     targetAgentId,
     requesterSessionKey: ctx.agentSessionKey,
-    explicitWorkspaceDir: params.cwd,
+    explicitWorkspaceDir: params.cwd || targetAgentResult.profileCwd,
   });
   let runtimeCwd: string | undefined;
   try {
@@ -1114,11 +1211,31 @@ export async function spawnAcpDirect(
       emitStartNotice: false,
     });
   }
+  // --- ACP session handback control injection ---
+  if (cfg.acp?.sessionHandback !== false && !params.resumeSessionId) {
+    const handbackBlock = [
+      "[ACP SESSION CONTROL]",
+      `Session key: ${sessionKey}`,
+      "",
+      "You can hand control back to the main agent by running this shell command:",
+      `  openclaw acp close-self --session-key "${sessionKey}" --message "your summary here"`,
+      "",
+      "Use close-self in these situations:",
+      "- The user explicitly asks you to hand back or delegate to the main agent.",
+      "- You have fully completed your assigned task — summarize results in --message, then close.",
+      "- The user asks about something clearly unrelated to your assigned task.",
+      "",
+      "Do NOT close-self for follow-up questions, clarifications, or while still working on the task.",
+      "[/ACP SESSION CONTROL]",
+    ].join("\n");
+    effectiveTask = `${effectiveTask}\n\n${handbackBlock}`;
+  }
+
   try {
     const response = await callGateway<{ runId?: string }>({
       method: "agent",
       params: {
-        message: params.task,
+        message: effectiveTask,
         sessionKey,
         channel: deliveryPlan.channel,
         to: deliveryPlan.to,

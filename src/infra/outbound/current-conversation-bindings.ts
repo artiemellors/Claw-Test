@@ -114,8 +114,9 @@ function pruneExpiredBinding(key: string): SessionBindingRecord | null {
     return record;
   }
   bindingsByConversationKey.delete(key);
+  maybeRestorePreviousBinding(key, record);
   void enqueuePersist();
-  return null;
+  return bindingsByConversationKey.get(key) ?? null;
 }
 
 function resolveChannelSupportsCurrentConversationBinding(channel: string): boolean {
@@ -183,6 +184,16 @@ export async function bindGenericCurrentConversation(
       ...existing?.metadata,
       ...input.metadata,
       lastActivityAt: now,
+      ...(existing && existing.targetSessionKey !== targetSessionKey
+        ? {
+            previousBinding: {
+              targetSessionKey: existing.targetSessionKey,
+              targetKind: existing.targetKind,
+              metadata: existing.metadata,
+              expiresAt: existing.expiresAt,
+            },
+          }
+        : {}),
     },
   };
   bindingsByConversationKey.set(key, record);
@@ -230,6 +241,39 @@ export function touchGenericCurrentConversationBinding(bindingId: string, at = D
   });
 }
 
+function maybeRestorePreviousBinding(key: string, removed: SessionBindingRecord): void {
+  const raw = removed.metadata?.previousBinding;
+  const prev =
+    raw != null &&
+    typeof raw === "object" &&
+    typeof (raw as Record<string, unknown>).targetSessionKey === "string"
+      ? (raw as {
+          targetSessionKey: string;
+          targetKind: string;
+          metadata?: Record<string, unknown>;
+          expiresAt?: number;
+        })
+      : undefined;
+  if (!prev?.targetSessionKey) {
+    return;
+  }
+  const now = Date.now();
+  bindingsByConversationKey.set(key, {
+    bindingId: buildBindingId(removed.conversation),
+    targetSessionKey: prev.targetSessionKey,
+    targetKind: prev.targetKind === "subagent" ? "subagent" : "session",
+    conversation: removed.conversation,
+    status: "active",
+    boundAt: now,
+    ...(typeof prev.expiresAt === "number" ? { expiresAt: prev.expiresAt } : {}),
+    metadata: {
+      ...prev.metadata,
+      lastActivityAt: now,
+      restoredFrom: removed.targetSessionKey,
+    },
+  });
+}
+
 export async function unbindGenericCurrentConversationBindings(
   input: SessionBindingUnbindInput,
 ): Promise<SessionBindingRecord[]> {
@@ -239,10 +283,21 @@ export async function unbindGenericCurrentConversationBindings(
   const normalizedTargetSessionKey = input.targetSessionKey?.trim();
   if (normalizedBindingId?.startsWith(CURRENT_BINDINGS_ID_PREFIX)) {
     const key = normalizedBindingId.slice(CURRENT_BINDINGS_ID_PREFIX.length);
+    // Snapshot the raw entry before pruning — pruneExpiredBinding may expire the
+    // binding and restore a previous one in place, so the post-prune map entry
+    // can differ from the original specialist binding we intend to remove.
+    const raw = bindingsByConversationKey.get(key);
     const record = pruneExpiredBinding(key);
     if (record) {
-      bindingsByConversationKey.delete(key);
-      removed.push(record);
+      // If pruneExpiredBinding already expired+restored, the live map entry is
+      // now the restored binding. Only delete+restore when the entry still
+      // belongs to the original specialist (i.e. was not already expired).
+      const alreadyExpired = raw != null && isBindingExpired(raw);
+      if (!alreadyExpired) {
+        bindingsByConversationKey.delete(key);
+        maybeRestorePreviousBinding(key, record);
+      }
+      removed.push(alreadyExpired ? raw : record);
       await enqueuePersist();
     }
     return removed;
@@ -251,12 +306,24 @@ export async function unbindGenericCurrentConversationBindings(
     return removed;
   }
   for (const key of bindingsByConversationKey.keys()) {
+    const raw = bindingsByConversationKey.get(key);
     const record = pruneExpiredBinding(key);
-    if (!record || record.targetSessionKey !== normalizedTargetSessionKey) {
+    if (!record) {
       continue;
     }
-    bindingsByConversationKey.delete(key);
-    removed.push(record);
+    // After pruning, the map entry may be a restored binding with a different
+    // targetSessionKey. Match against the pre-prune snapshot to decide whether
+    // this key's original binding targeted the session being unbound.
+    const target = raw ?? record;
+    if (target.targetSessionKey !== normalizedTargetSessionKey) {
+      continue;
+    }
+    const alreadyExpired = raw != null && isBindingExpired(raw);
+    if (!alreadyExpired) {
+      bindingsByConversationKey.delete(key);
+      maybeRestorePreviousBinding(key, record);
+    }
+    removed.push(alreadyExpired ? raw : record);
   }
   if (removed.length > 0) {
     await enqueuePersist();
