@@ -56,7 +56,9 @@ type AnthropicTransportModel = Model<"anthropic-messages"> & {
 };
 
 type AnthropicTransportOptions = AnthropicOptions &
-  Pick<SimpleStreamOptions, "reasoning" | "thinkingBudgets">;
+  Pick<SimpleStreamOptions, "reasoning" | "thinkingBudgets"> & {
+    maxTotalTokens?: number;
+  };
 
 type TransportContentBlock =
   | { type: "text"; text: string; index?: number }
@@ -131,6 +133,7 @@ function adjustMaxTokensForThinking(params: {
   modelMaxTokens: number;
   reasoningLevel: ThinkingLevel;
   customBudgets?: SimpleStreamOptions["thinkingBudgets"];
+  maxTotalTokens?: number;
 }): { maxTokens: number; thinkingBudget: number } {
   const budgets = {
     minimal: 1024,
@@ -142,7 +145,14 @@ function adjustMaxTokensForThinking(params: {
   const minOutputTokens = 1024;
   const level = clampReasoningLevel(params.reasoningLevel);
   let thinkingBudget = budgets[level];
-  const maxTokens = Math.min(params.baseMaxTokens + thinkingBudget, params.modelMaxTokens);
+  const baseMaxTokens = params.maxTotalTokens
+    ? Math.min(params.baseMaxTokens, params.maxTotalTokens)
+    : params.baseMaxTokens;
+  const maxTokens = Math.min(baseMaxTokens + thinkingBudget, params.modelMaxTokens);
+  if (params.maxTotalTokens && maxTokens > params.maxTotalTokens) {
+    thinkingBudget = Math.max(0, params.maxTotalTokens - minOutputTokens);
+    return { maxTokens: params.maxTotalTokens, thinkingBudget };
+  }
   if (maxTokens <= thinkingBudget) {
     thinkingBudget = Math.max(0, maxTokens - minOutputTokens);
   }
@@ -582,6 +592,7 @@ function resolveAnthropicTransportOptions(
     modelMaxTokens: model.maxTokens,
     reasoningLevel: options.reasoning,
     customBudgets: options.thinkingBudgets,
+    maxTotalTokens: options.maxTotalTokens,
   });
   resolved.maxTokens = adjusted.maxTokens;
   resolved.thinkingEnabled = true;

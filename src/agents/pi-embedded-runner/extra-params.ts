@@ -68,6 +68,20 @@ export function resolveExtraParams(params: {
       : undefined;
 
   const merged = Object.assign({}, defaultParams, globalParams, agentParams);
+  const resolvedMaxTotalTokens = resolveAliasedParamValue(
+    [defaultParams, globalParams, agentParams],
+    "max_total_tokens",
+    "maxTotalTokens",
+  );
+  if (resolvedMaxTotalTokens !== undefined) {
+    merged.maxTotalTokens = resolvedMaxTotalTokens;
+    delete merged.max_total_tokens;
+  } else {
+    const providerConfig = params.cfg?.models?.providers?.[params.provider];
+    if (providerConfig?.maxTotalTokens) {
+      merged.maxTotalTokens = providerConfig.maxTotalTokens;
+    }
+  }
   const resolvedParallelToolCalls = resolveAliasedParamValue(
     [defaultParams, globalParams, agentParams],
     "parallel_tool_calls",
@@ -107,6 +121,7 @@ type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
   cacheRetention?: "none" | "short" | "long";
   cachedContent?: string;
   openaiWsWarmup?: boolean;
+  maxTotalTokens?: number;
 };
 type SupportedTransport = Exclude<CacheRetentionStreamOptions["transport"], undefined>;
 
@@ -243,6 +258,9 @@ function createStreamFnWithExtraParams(
   }
   if (typeof extraParams.maxTokens === "number") {
     streamParams.maxTokens = extraParams.maxTokens;
+  }
+  if (typeof extraParams.maxTotalTokens === "number") {
+    streamParams.maxTotalTokens = extraParams.maxTotalTokens;
   }
   const transport = resolveSupportedTransport(extraParams.transport);
   if (transport) {

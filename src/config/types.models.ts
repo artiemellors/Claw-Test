@@ -81,6 +81,8 @@ export type ModelProviderConfig = {
   authHeader?: boolean;
   request?: ConfiguredModelProviderRequest;
   models: ModelDefinitionConfig[];
+  /** Maximum total tokens (output) allowed per request. Useful for billing limits. */
+  maxTotalTokens?: number;
 };
 
 export type BedrockDiscoveryConfig = {
