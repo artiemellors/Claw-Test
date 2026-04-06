@@ -43,7 +43,9 @@ export const AgentDefaultsSchema = z
     skipBootstrap: z.boolean().optional(),
     bootstrapMaxChars: z.number().int().positive().optional(),
     bootstrapTotalMaxChars: z.number().int().positive().optional(),
-    bootstrapTruncationWarnPct: z.number().min(0).max(1).optional(),
+    // Integer percentage 0–100; values >100 effectively disable warnings.
+    // Default: 10 (warn when ≥10% of a file's chars are removed).
+    bootstrapTruncationWarnPct: z.number().min(0).optional(),
     bootstrapPromptTruncationWarning: z
       .union([z.literal("off"), z.literal("once"), z.literal("always")])
       .optional(),
