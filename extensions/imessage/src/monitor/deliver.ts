@@ -28,10 +28,7 @@ export async function deliverReplies(params: {
 }) {
   const { replies, target, client, runtime, maxBytes, textLimit, accountId, sentMessageCache } =
     params;
-  // Scope must include the "imessage:" prefix to match buildIMessageEchoScope()
-  // in inbound-processing.ts, which builds keys as "accountId:imessage:sender".
-  // Without this prefix the echo cache lookup never matches sent messages.
-  const scope = `${accountId ?? ""}:imessage:${target}`;
+  const scope = `${accountId ?? ""}:${target}`;
   const cfg = loadConfig();
   const tableMode = resolveMarkdownTableMode({
     cfg,
