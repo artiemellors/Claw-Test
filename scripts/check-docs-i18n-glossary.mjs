@@ -5,8 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = process.cwd();
-const GLOSSARY_PATH = path.join(ROOT, "docs", ".i18n", "glossary.zh-CN.json");
-const DOC_FILE_RE = /^docs\/(?!zh-CN\/).+\.(md|mdx)$/i;
+const GLOSSARY_PATHS = [
+  path.join(ROOT, "docs", ".i18n", "glossary.zh-CN.json"),
+  path.join(ROOT, "docs", ".i18n", "glossary.ja-JP.json"),
+];
+const DOC_FILE_RE = /^docs\/(?!zh-CN\/|ja-JP\/).+\.(md|mdx)$/i;
 const LIST_ITEM_LINK_RE = /^\s*(?:[-*]|\d+\.)\s+\[([^\]]+)\]\((\/[^)]+)\)/;
 const MAX_TITLE_WORDS = 8;
 const MAX_LABEL_WORDS = 6;
@@ -80,10 +83,32 @@ function listChangedDocs(base, head) {
     .filter((line) => DOC_FILE_RE.test(line));
 }
 
-function loadGlossarySources() {
-  const data = fs.readFileSync(GLOSSARY_PATH, "utf8");
-  const entries = JSON.parse(data);
-  return new Set(entries.map((entry) => String(entry.source || "").trim()).filter(Boolean));
+/**
+ * Returns a Map from locale name to the Set of source terms in that locale's glossary.
+ * A term must be present in every locale's glossary to be considered fully covered.
+ * @returns {Map<string, Set<string>>}
+ */
+function loadGlossaryByLocale() {
+  /** @type {Map<string, Set<string>>} */
+  const byLocale = new Map();
+  for (const glossaryPath of GLOSSARY_PATHS) {
+    const locale = path.basename(glossaryPath, ".json").replace("glossary.", "");
+    if (!fs.existsSync(glossaryPath)) {
+      byLocale.set(locale, new Set());
+      continue;
+    }
+    const data = fs.readFileSync(glossaryPath, "utf8");
+    const entries = JSON.parse(data);
+    const sources = new Set();
+    for (const entry of entries) {
+      const source = String(entry.source || "").trim();
+      if (source) {
+        sources.add(source);
+      }
+    }
+    byLocale.set(locale, sources);
+  }
+  return byLocale;
 }
 
 function containsLatin(text) {
@@ -194,8 +219,11 @@ function main() {
     process.exit(0);
   }
 
-  const glossary = loadGlossarySources();
-  /** @type {TermMatch[]} */
+  const glossaryByLocale = loadGlossaryByLocale();
+  /**
+   * @typedef {{ match: TermMatch; missingLocales: string[] }} MissingEntry
+   * @type {MissingEntry[]}
+   */
   const missing = [];
 
   for (const relPath of changedDocs) {
@@ -211,10 +239,15 @@ function main() {
       if (baseTerms.has(term)) {
         continue;
       }
-      if (glossary.has(term)) {
-        continue;
+      const missingLocales = [];
+      for (const [locale, sources] of glossaryByLocale) {
+        if (!sources.has(term)) {
+          missingLocales.push(locale);
+        }
       }
-      missing.push(match);
+      if (missingLocales.length > 0) {
+        missing.push({ match, missingLocales });
+      }
     }
   }
 
@@ -222,13 +255,15 @@ function main() {
     process.exit(0);
   }
 
-  console.error("docs:check-i18n-glossary: missing zh-CN glossary entries for changed doc labels:");
-  for (const match of missing) {
-    console.error(`- ${match.file}:${match.line} ${match.kind} "${match.term}"`);
+  console.error("docs:check-i18n-glossary: missing i18n glossary entries for changed doc labels:");
+  for (const { match, missingLocales } of missing) {
+    console.error(
+      `- ${match.file}:${match.line} ${match.kind} "${match.term}" (missing in: ${missingLocales.join(", ")})`,
+    );
   }
   console.error("");
   console.error(
-    "Add exact source terms to docs/.i18n/glossary.zh-CN.json before rerunning docs-i18n.",
+    "Add exact source terms to the listed locale glossary files in docs/.i18n/ before rerunning docs-i18n.",
   );
   console.error(`Checked changed English docs relative to ${base}.`);
   process.exit(1);
