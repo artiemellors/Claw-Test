@@ -217,10 +217,10 @@ export function resolveIMessageInboundDecision(params: {
   // iMessage address (e.g. "bot@icloud.com"). See: #59845, #60014
   const destCallerId = params.message.destination_caller_id;
   const senderMatchesChatId =
+    chatIdentifier != null &&
     normalizeIMessageHandle(sender) === normalizeIMessageHandle(chatIdentifier);
   const isSelfChat =
     !isGroup &&
-    chatIdentifier != null &&
     senderMatchesChatId &&
     (!destCallerId ||
       normalizeIMessageHandle(destCallerId) === normalizeIMessageHandle(sender));
