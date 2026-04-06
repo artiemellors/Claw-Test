@@ -415,18 +415,7 @@ export async function runEmbeddedAttempt(
       previousSignature: params.bootstrapPromptWarningSignature,
     });
     // Emit user-visible channel warnings for files truncated beyond the threshold.
-    if (params.sessionKey) {
-      const truncationWarnPct = resolveBootstrapTruncationWarnPct(params.config);
-      for (const msg of buildBootstrapTruncationUserWarnings({
-        analysis: bootstrapAnalysis,
-        warnPct: truncationWarnPct,
-      })) {
-        enqueueSystemEvent(msg, { sessionKey: params.sessionKey });
-      }
-    }
-    // Emit user-visible channel warnings for files truncated beyond the threshold.
-    // Deduplicate across runs: reuse bootstrapPromptWarningSignaturesSeen so identical
-    // truncation state only fires once per session, not on every turn.
+    // Deduplicate across runs: only fire once per unique truncation state per session.
     if (params.sessionKey) {
       const truncationSig = buildBootstrapTruncationSignature(bootstrapAnalysis);
       const alreadyWarned =

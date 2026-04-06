@@ -313,10 +313,11 @@ export function buildBootstrapPromptWarning(params: {
   const hasSeenSignature = Boolean(signature && seenSignatures.includes(signature));
   const warningShown =
     params.mode !== "off" && Boolean(signature) && (params.mode === "always" || !hasSeenSignature);
-  const warningSignaturesSeen =
-    signature && params.mode !== "off"
-      ? appendSeenSignature(seenSignatures, signature)
-      : seenSignatures;
+  // Always track seen signatures regardless of mode so the user-visible channel
+  // warning deduplication works even when bootstrapPromptTruncationWarning is "off".
+  const warningSignaturesSeen = signature
+    ? appendSeenSignature(seenSignatures, signature)
+    : seenSignatures;
   return {
     signature,
     warningShown,
@@ -373,7 +374,7 @@ export function buildBootstrapTruncationUserWarnings(params: {
     ? Math.max(0, Math.floor(params.warnPct))
     : 10;
   const warnings: string[] = [];
-  const MAX_WARNINGS = 3;
+  const MAX_WARNINGS = 5;
   for (const file of params.analysis.truncatedFiles) {
     if (warnings.length >= MAX_WARNINGS) {
       const remaining = params.analysis.truncatedFiles.length - MAX_WARNINGS;
