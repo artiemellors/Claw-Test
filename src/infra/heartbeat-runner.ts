@@ -590,6 +590,7 @@ export async function runHeartbeatOnce(opts: {
   heartbeat?: HeartbeatConfig;
   reason?: string;
   deps?: HeartbeatDeps;
+  abortSignal?: AbortSignal;
 }): Promise<HeartbeatRunResult> {
   const cfg = opts.cfg ?? loadConfig();
   const explicitAgentId = typeof opts.agentId === "string" ? opts.agentId.trim() : "";
@@ -649,6 +650,46 @@ export async function runHeartbeatOnce(opts: {
       durationMs: Date.now() - startedAt,
     });
     return { status: "skipped", reason: "requests-in-flight" };
+  }
+
+  // Pre-hook gate: runs after preflight, before agent turn.
+  const preHookConfig = heartbeat?.preHook;
+  if (preHookConfig?.command) {
+    if (opts.abortSignal?.aborted) {
+      emitHeartbeatEvent({
+        status: "skipped",
+        reason: "aborted",
+        durationMs: Date.now() - startedAt,
+      });
+      return { status: "skipped", reason: "aborted" as const };
+    }
+    const { runPreHook } = await import("../cron/pre-hook.js");
+    const hookResult = await runPreHook(preHookConfig, opts.abortSignal);
+    log.info("heartbeat preHook completed", {
+      outcome: hookResult.outcome,
+      exitCode: hookResult.exitCode,
+      stdout: hookResult.stdout,
+      stderr: hookResult.stderr,
+    });
+    if (hookResult.outcome === "skip") {
+      emitHeartbeatEvent({
+        status: "skipped",
+        reason: "preHook-skip",
+        durationMs: Date.now() - startedAt,
+      });
+      return { status: "skipped", reason: "preHook-skip" as const };
+    }
+    if (hookResult.outcome === "error") {
+      emitHeartbeatEvent({
+        status: "failed",
+        reason: `preHook-error`,
+        durationMs: Date.now() - startedAt,
+      });
+      return {
+        status: "failed",
+        reason: `preHook failed: ${hookResult.error ?? `exit ${hookResult.exitCode}`}`,
+      };
+    }
   }
 
   const previousUpdatedAt = entry?.updatedAt;
