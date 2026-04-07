@@ -6,6 +6,7 @@ import { isSilentReplyPayloadText, SILENT_REPLY_TOKEN } from "../../../auto-repl
 import { formatToolAggregate } from "../../../auto-reply/tool-meta.js";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { isCronSessionKey } from "../../../routing/session-key.js";
+import { resolveAssistantPhase } from "../../assistant-phase.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
@@ -208,16 +209,20 @@ export function buildEmbeddedRunPayloads(params: {
     }
   }
 
+  const lastAssistantPhase = resolveAssistantPhase(params.lastAssistant);
   const reasoningText = suppressAssistantArtifacts
     ? ""
-    : params.lastAssistant && params.reasoningLevel === "on"
+    : params.lastAssistant && params.reasoningLevel === "on" && lastAssistantPhase !== "commentary"
       ? formatReasoningMessage(extractAssistantThinking(params.lastAssistant))
       : "";
   if (reasoningText) {
     replyItems.push({ text: reasoningText, isReasoning: true });
   }
 
-  const fallbackAnswerText = params.lastAssistant ? extractAssistantText(params.lastAssistant) : "";
+  const fallbackAnswerText =
+    params.lastAssistant && lastAssistantPhase !== "commentary"
+      ? extractAssistantText(params.lastAssistant)
+      : "";
   const shouldSuppressRawErrorText = (text: string) => {
     if (!lastAssistantErrored) {
       return false;
