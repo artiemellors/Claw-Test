@@ -36,6 +36,7 @@ export type ChatHost = {
   chatModelCatalog: ModelCatalogEntry[];
   sessionsResult?: SessionsListResult | null;
   chatAutostartPrompt?: string | null;
+  chatAutostartPromptSessionKey?: string | null;
   updateComplete?: Promise<unknown>;
   refreshSessionsAfterChat: Set<string>;
   /** Callback for slash-command side effects that need app-level access. */
@@ -192,6 +193,12 @@ async function maybeAutostartChat(
   if (!prompt) {
     return;
   }
+  // Preserve the originating session so a one-shot prompt cannot drift into a
+  // different session after a failed send or navigation away and back.
+  const targetSessionKey = host.chatAutostartPromptSessionKey ?? null;
+  if (targetSessionKey && targetSessionKey !== host.sessionKey) {
+    return;
+  }
   if (!historyLoaded) {
     return;
   }
@@ -200,6 +207,7 @@ async function maybeAutostartChat(
   }
   if (host.chatMessages.length > 0 || typeof host.chatStream === "string") {
     host.chatAutostartPrompt = null;
+    host.chatAutostartPromptSessionKey = null;
     return;
   }
 
@@ -209,8 +217,12 @@ async function maybeAutostartChat(
     localEcho: false,
   });
   if (!ok) {
+    // Restore the prompt; the session key is intentionally preserved so the
+    // next refresh cycle still validates the retry against the target session.
     host.chatAutostartPrompt = prompt;
+    return;
   }
+  host.chatAutostartPromptSessionKey = null;
 }
 
 async function flushChatQueue(host: ChatHost) {

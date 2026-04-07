@@ -486,6 +486,135 @@ describe("handleSendChat", () => {
     expect(host.sessionKey).toBe("secondary");
     expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
   });
+
+  it("skips autostart when the bound session differs from the current session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "secondary",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      chatAutostartPromptSessionKey: "main",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    // Prompt and session binding are preserved so returning to the target
+    // session still runs the one-shot autostart.
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatAutostartPromptSessionKey).toBe("main");
+  });
+
+  it("keeps session binding when the hidden send fails so a retry stays in the target session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        throw new Error("gateway rejected hidden send");
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      chatAutostartPromptSessionKey: "main",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatAutostartPromptSessionKey).toBe("main");
+  });
+
+  it("clears session binding after a successful hidden send", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      chatAutostartPromptSessionKey: "main",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(host.chatAutostartPrompt).toBeNull();
+    expect(host.chatAutostartPromptSessionKey).toBeNull();
+  });
 });
 
 afterAll(() => {

@@ -179,6 +179,7 @@ export class OpenClawApp extends LitElement {
   @state() chatManualRefreshInFlight = false;
   @state() navDrawerOpen = false;
   chatAutostartPrompt: string | null = null;
+  chatAutostartPromptSessionKey: string | null = null;
 
   onSlashAction?: (action: string) => void;
 
@@ -746,6 +747,9 @@ export class OpenClawApp extends LitElement {
     this.pendingChatAutostartPrompt = null;
     if (nextAutostartPrompt) {
       this.chatAutostartPrompt = nextAutostartPrompt;
+      // Bind the promoted prompt to the current session so subsequent refresh
+      // cycles cannot run the one-shot autostart against a different session.
+      this.chatAutostartPromptSessionKey = this.sessionKey || null;
     }
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,

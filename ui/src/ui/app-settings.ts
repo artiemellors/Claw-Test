@@ -72,6 +72,7 @@ type SettingsHost = {
   dreamDiaryContent: string | null;
   pendingChatAutostartPrompt?: string | null;
   chatAutostartPrompt?: string | null;
+  chatAutostartPromptSessionKey?: string | null;
 };
 
 export function applySettings(host: SettingsHost, next: UiSettings) {
@@ -188,6 +189,7 @@ export function applySettingsFromUrl(host: SettingsHost) {
       }
       if (autostartRaw == null) {
         host.chatAutostartPrompt = null;
+        host.chatAutostartPromptSessionKey = null;
         host.pendingChatAutostartPrompt = null;
       }
     } else {
@@ -205,13 +207,18 @@ export function applySettingsFromUrl(host: SettingsHost) {
     if (prompt) {
       if (gatewayUrlChanged) {
         host.chatAutostartPrompt = null;
+        host.chatAutostartPromptSessionKey = null;
         host.pendingChatAutostartPrompt = prompt;
       } else {
         host.chatAutostartPrompt = prompt;
+        // Remember the session that was active when this deep link arrived so a
+        // failed or deferred autostart cannot drift into a different session.
+        host.chatAutostartPromptSessionKey = host.sessionKey || null;
         host.pendingChatAutostartPrompt = null;
       }
     } else {
       host.chatAutostartPrompt = null;
+      host.chatAutostartPromptSessionKey = null;
       host.pendingChatAutostartPrompt = null;
     }
     params.delete("autostart");

@@ -76,6 +76,7 @@ type SettingsHost = {
   dreamDiaryContent: string | null;
   pendingChatAutostartPrompt?: string | null;
   chatAutostartPrompt?: string | null;
+  chatAutostartPromptSessionKey?: string | null;
 };
 
 function setTestWindowUrl(urlString: string) {
@@ -166,6 +167,7 @@ const createHost = (tab: Tab): SettingsHost => ({
   dreamDiaryContent: null,
   pendingChatAutostartPrompt: null,
   chatAutostartPrompt: null,
+  chatAutostartPromptSessionKey: null,
 });
 
 describe("setTabFromRoute", () => {
@@ -394,7 +396,18 @@ describe("applySettingsFromUrl", () => {
     applySettingsFromUrl(host);
 
     expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatAutostartPromptSessionKey).toBe(host.sessionKey);
     expect(window.location.search).toBe("");
+  });
+
+  it("binds the autostart prompt to the session that was active when the link arrived", () => {
+    setTestWindowUrl("https://control.example/chat?session=agent:foo&autostart=bootstrap");
+    const host = createHost("chat");
+
+    applySettingsFromUrl(host);
+
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatAutostartPromptSessionKey).toBe("agent:foo");
   });
 
   it("ignores custom autostart prompts and still strips them from the URL", () => {
