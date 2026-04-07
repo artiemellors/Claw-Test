@@ -34,7 +34,7 @@ function normalizeEchoTextKey(text: string | undefined): string | null {
   // Without this, the echo cache stores clean text but the reflected copy has
   // garbage prefixes, defeating text-based deduplication. See: #61312, #61821
   const normalized = text
-    .replace(/[\ufffd\ufffe\uffff\u0000-\u001f\u007f-\u009f]+/g, "")
+    .replace(/[\ufffd\ufffe\uffff\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]+/g, "")
     .replace(/\r\n?/g, "\n")
     .trim();
   return normalized ? normalized : null;
