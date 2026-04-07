@@ -1150,7 +1150,8 @@ export async function spawnAcpDirect(
   }
 
   if (effectiveStreamToParent && parentSessionKey) {
-    if (parentRelay && childRunId !== childIdem) {
+    const relayReachedTerminalState = parentRelay?.isTerminalStateReached() === true;
+    if (parentRelay && childRunId !== childIdem && !relayReachedTerminalState) {
       parentRelay.dispose();
       // Defensive fallback if gateway returns a runId that differs from idempotency key.
       parentRelay = startAcpSpawnParentStreamRelay({
@@ -1159,10 +1160,17 @@ export async function spawnAcpDirect(
         childSessionKey: sessionKey,
         agentId: targetAgentId,
         logPath: streamLogPath,
+        allowSessionKeyErrorFallback: false,
         emitStartNotice: false,
       });
+    } else if (!relayReachedTerminalState) {
+      // Once the gateway acknowledges the run, session-key fallback must stop so
+      // later turns on the same persistent session cannot terminate this relay.
+      parentRelay?.markRunIdResolved();
     }
-    parentRelay?.notifyStarted();
+    if (!relayReachedTerminalState) {
+      parentRelay?.notifyStarted();
+    }
     try {
       createRunningTaskRun({
         runtime: "acp",
