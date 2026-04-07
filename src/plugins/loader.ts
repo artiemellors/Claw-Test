@@ -653,10 +653,14 @@ function createPluginRecord(params: {
   origin: PluginRecord["origin"];
   workspaceDir?: string;
   enabled: boolean;
+  enabledByDefault?: boolean;
   activationState?: PluginActivationState;
   configSchema: boolean;
   contracts?: PluginManifestContracts;
 }): PluginRecord {
+  const mcpServerNames = Array.from(
+    new Set((params.contracts?.mcpServers ?? []).map((name) => name.trim()).filter(Boolean)),
+  );
   return {
     id: params.id,
     name: params.name ?? params.id,
@@ -670,6 +674,7 @@ function createPluginRecord(params: {
     origin: params.origin,
     workspaceDir: params.workspaceDir,
     enabled: params.enabled,
+    enabledByDefault: params.enabledByDefault,
     explicitlyEnabled: params.activationState?.explicitlyEnabled,
     activated: params.activationState?.activated,
     activationSource: params.activationState?.source,
@@ -689,6 +694,7 @@ function createPluginRecord(params: {
     musicGenerationProviderIds: [],
     webFetchProviderIds: [],
     webSearchProviderIds: [],
+    mcpServerNames,
     memoryEmbeddingProviderIds: [],
     gatewayMethods: [],
     cliCommands: [],
@@ -1300,6 +1306,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           origin: candidate.origin,
           workspaceDir: candidate.workspaceDir,
           enabled: false,
+          enabledByDefault: manifestRecord.enabledByDefault,
           activationState,
           configSchema: Boolean(manifestRecord.configSchema),
           contracts: manifestRecord.contracts,
@@ -1333,6 +1340,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         origin: candidate.origin,
         workspaceDir: candidate.workspaceDir,
         enabled: enableState.enabled,
+        enabledByDefault: manifestRecord.enabledByDefault,
         activationState,
         configSchema: Boolean(manifestRecord.configSchema),
         contracts: manifestRecord.contracts,
@@ -1892,6 +1900,7 @@ export async function loadOpenClawPluginCliRegistry(
         origin: candidate.origin,
         workspaceDir: candidate.workspaceDir,
         enabled: false,
+        enabledByDefault: manifestRecord.enabledByDefault,
         activationState,
         configSchema: Boolean(manifestRecord.configSchema),
         contracts: manifestRecord.contracts,
@@ -1925,6 +1934,7 @@ export async function loadOpenClawPluginCliRegistry(
       origin: candidate.origin,
       workspaceDir: candidate.workspaceDir,
       enabled: enableState.enabled,
+      enabledByDefault: manifestRecord.enabledByDefault,
       activationState,
       configSchema: Boolean(manifestRecord.configSchema),
       contracts: manifestRecord.contracts,

@@ -4,7 +4,6 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../api.js";
 import { compileMemoryWikiVault } from "./compile.js";
-import type { MemoryWikiPluginConfig } from "./config.js";
 import { renderWikiMarkdown } from "./markdown.js";
 import { getMemoryWikiPage, searchMemoryWiki } from "./query.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
@@ -28,6 +27,7 @@ vi.mock("openclaw/plugin-sdk/memory-host-core", () => ({
 }));
 
 const { createVault } = createMemoryWikiTestHarness();
+type CreateVaultOptions = NonNullable<Parameters<typeof createVault>[0]>;
 let suiteRoot = "";
 let caseIndex = 0;
 
@@ -49,7 +49,7 @@ afterAll(async () => {
 });
 
 async function createQueryVault(options?: {
-  config?: MemoryWikiPluginConfig;
+  config?: CreateVaultOptions["config"];
   initialize?: boolean;
 }) {
   return createVault({

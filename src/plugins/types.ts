@@ -175,6 +175,25 @@ export type OpenClawPluginToolOptions = {
   optional?: boolean;
 };
 
+export type OpenClawPluginMcpServerConfig = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string | number | boolean>;
+  cwd?: string;
+  workingDirectory?: string;
+  transport?: "stdio";
+  connectionTimeoutMs?: number;
+};
+
+export type OpenClawPluginMcpServerRegistration = {
+  pluginId: string;
+  pluginName?: string;
+  name: string;
+  server: OpenClawPluginMcpServerConfig;
+  source: string;
+  rootDir?: string;
+};
+
 export type OpenClawPluginHookOptions = {
   entry?: HookEntry;
   name?: string;
@@ -2136,6 +2155,8 @@ export type OpenClawPluginApi = {
     tool: AnyAgentTool | OpenClawPluginToolFactory,
     opts?: OpenClawPluginToolOptions,
   ) => void;
+  /** Register a managed MCP server launch definition for embedded Pi/OpenAI-backed runs. */
+  registerMcpServer: (name: string, server: OpenClawPluginMcpServerConfig) => void;
   registerHook: (
     events: string | string[],
     handler: InternalHookHandler,

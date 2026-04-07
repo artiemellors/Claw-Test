@@ -2344,6 +2344,67 @@ module.exports = { id: "throws-after-import", register() {} };`,
     );
   });
 
+  it("registers plugin MCP servers", () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "mcp-server-demo",
+      filename: "mcp-server-demo.cjs",
+      body: `module.exports = { id: "mcp-server-demo", register(api) {
+  api.registerMcpServer("helloWorld", { command: "node", args: ["server.mjs"] });
+} };`,
+    });
+
+    const registry = loadRegistryFromSinglePlugin({
+      plugin,
+      pluginConfig: { allow: ["mcp-server-demo"] },
+    });
+
+    const expectedPluginDir = fs.realpathSync(plugin.dir);
+    expect(registry.mcpServers).toEqual([
+      expect.objectContaining({
+        pluginId: "mcp-server-demo",
+        name: "helloWorld",
+        server: { command: "node", args: ["server.mjs"], cwd: expectedPluginDir },
+      }),
+    ]);
+  });
+
+  it("rejects plugin MCP servers that do not use managed stdio transport", () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "mcp-server-demo-invalid",
+      filename: "mcp-server-demo-invalid.cjs",
+      body: `module.exports = { id: "mcp-server-demo-invalid", register(api) {
+  api.registerMcpServer("helloWorld", { url: "http://127.0.0.1:8787/mcp" });
+  api.registerMcpServer("helloSse", { command: "node", transport: "sse" });
+} };`,
+    });
+
+    const registry = loadRegistryFromSinglePlugin({
+      plugin,
+      pluginConfig: { allow: ["mcp-server-demo-invalid"] },
+    });
+
+    expect(registry.mcpServers).toEqual([]);
+    expect(
+      registry.diagnostics.some(
+        (diag) =>
+          diag.level === "warn" &&
+          diag.pluginId === "mcp-server-demo-invalid" &&
+          diag.message ===
+            'MCP server "helloWorld" must use managed stdio transport, not URL transport',
+      ),
+    ).toBe(true);
+    expect(
+      registry.diagnostics.some(
+        (diag) =>
+          diag.level === "warn" &&
+          diag.pluginId === "mcp-server-demo-invalid" &&
+          diag.message === 'MCP server "helloSse" must use stdio transport (received sse)',
+      ),
+    ).toBe(true);
+  });
+
   it("rejects duplicate plugin registrations", () => {
     useNoBundledPlugins();
     const scenarios = [
@@ -2369,6 +2430,18 @@ module.exports = { id: "throws-after-import", register() {} };`,
         selectCount: (registry: ReturnType<typeof loadOpenClawPlugins>) =>
           registry.services.filter((entry) => entry.service.id === "shared-service").length,
         duplicateMessage: "service already registered: shared-service (service-owner-a)",
+        assert: expectDuplicateRegistrationResult,
+      },
+      {
+        label: "plugin MCP server names",
+        ownerA: "mcp-server-owner-a",
+        ownerB: "mcp-server-owner-b",
+        buildBody: (ownerId: string) => `module.exports = { id: "${ownerId}", register(api) {
+  api.registerMcpServer("shared-mcp-server", { command: "node", args: ["server.mjs"] });
+} };`,
+        selectCount: (registry: ReturnType<typeof loadOpenClawPlugins>) =>
+          registry.mcpServers.filter((entry) => entry.name === "shared-mcp-server").length,
+        duplicateMessage: "MCP server already registered: shared-mcp-server (mcp-server-owner-a)",
         assert: expectDuplicateRegistrationResult,
       },
       {
