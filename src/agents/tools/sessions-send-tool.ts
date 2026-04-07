@@ -32,9 +32,23 @@ import { buildAgentToAgentMessageContext, resolvePingPongTurns } from "./session
 import { runSessionsSendA2AFlow } from "./sessions-send-tool.a2a.js";
 
 const SessionsSendToolSchema = Type.Object({
-  sessionKey: Type.Optional(Type.String()),
-  label: Type.Optional(Type.String({ minLength: 1, maxLength: SESSION_LABEL_MAX_LENGTH })),
-  agentId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  sessionKey: Type.Optional(
+    Type.String({ description: "Target session key. If provided, label and agentId are ignored." }),
+  ),
+  label: Type.Optional(
+    Type.String({
+      minLength: 1,
+      maxLength: SESSION_LABEL_MAX_LENGTH,
+      description: "Fallback session label. Used only when sessionKey is not provided.",
+    }),
+  ),
+  agentId: Type.Optional(
+    Type.String({
+      minLength: 1,
+      maxLength: 64,
+      description: "Optional agent filter for label lookup. Ignored when sessionKey is provided.",
+    }),
+  ),
   message: Type.String(),
   timeoutSeconds: Type.Optional(Type.Number({ minimum: 0 })),
 });
@@ -100,15 +114,10 @@ export function createSessionsSendTool(opts?: {
       });
 
       const sessionKeyParam = readStringParam(params, "sessionKey");
-      const labelParam = readStringParam(params, "label")?.trim() || undefined;
+      const labelParam = sessionKeyParam
+        ? undefined
+        : readStringParam(params, "label")?.trim() || undefined;
       const labelAgentIdParam = readStringParam(params, "agentId")?.trim() || undefined;
-      if (sessionKeyParam && labelParam) {
-        return jsonResult({
-          runId: crypto.randomUUID(),
-          status: "error",
-          error: "Provide either sessionKey or label (not both).",
-        });
-      }
 
       let sessionKey = sessionKeyParam;
       if (!sessionKey && labelParam) {
