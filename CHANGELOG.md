@@ -64,6 +64,7 @@ Docs: https://docs.openclaw.ai
 - Tools/web search/Exa: show Exa Search in onboarding and configure provider pickers again by marking the bundled Exa provider as setup-visible. Thanks @vincentkoc.
 - Docs/i18n: relocalize final localized-page links after translation and remove the zh-CN homepage redirect override so localized Mintlify pages resolve to the correct language roots again. (#61796) Thanks @hxy91819.
 - Plugins/provider hooks: stop recursive provider snapshot loads from overflowing the stack during plugin initialization, while still preserving cached nested provider-hook results. (#61922, #61938, #61946, #61951)
+- Agents/exec: stop live exec tool updates from crashing foreground runs when the update callback throws after the run has already gone inactive, and add regression coverage for the `Agent listener invoked outside active run` path seen after idle-timeout stalls.
 - Exec/runtime events: mark background `notifyOnExit` summaries and ACP parent-stream relays as untrusted system events so lower-trust runtime output no longer re-enters later turns as trusted `System:` text.
 - Hooks/wake: queue direct and mapped wake-hook payloads as untrusted system events so external wake content no longer enters the main session as trusted input. (#62003)
 - Slack/thread mentions: add `channels.slack.thread.requireExplicitMention` so Slack channels that already require mentions can also require explicit `@bot` mentions inside bot-participated threads. (#58276) Thanks @praktika-engineer.
