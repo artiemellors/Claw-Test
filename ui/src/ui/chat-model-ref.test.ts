@@ -198,6 +198,18 @@ describe("chat-model-ref helpers", () => {
     ).toBe("nvidia/moonshotai/kimi-k2.5");
   });
 
+  it("uses the catalog-backed provider for slash-containing nested ids before stale provider fallback", () => {
+    expect(
+      resolvePreferredServerChatModelValue("moonshotai/kimi-k2.5", "zai", [
+        {
+          id: "moonshotai/kimi-k2.5",
+          name: "Kimi K2.5 (NVIDIA)",
+          provider: "nvidia",
+        },
+      ]),
+    ).toBe("nvidia/moonshotai/kimi-k2.5");
+  });
+
   it("falls back to the server-qualified value for slash-containing ids when the catalog is empty", () => {
     expect(resolvePreferredServerChatModelValue("moonshotai/kimi-k2.5", "nvidia", [])).toBe(
       "nvidia/moonshotai/kimi-k2.5",

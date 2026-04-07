@@ -52,24 +52,7 @@ export function normalizeChatModelOverrideValue(
     return trimmed;
   }
 
-  let matchedValue = "";
-  const normalizedTrimmed = normalizeLowercaseStringOrEmpty(trimmed);
-  for (const entry of catalog) {
-    if (normalizeLowercaseStringOrEmpty(entry.id) !== normalizedTrimmed) {
-      continue;
-    }
-    const candidate = buildQualifiedChatModelValue(entry.id, entry.provider);
-    if (!matchedValue) {
-      matchedValue = candidate;
-      continue;
-    }
-    if (
-      normalizeLowercaseStringOrEmpty(matchedValue) !== normalizeLowercaseStringOrEmpty(candidate)
-    ) {
-      return trimmed;
-    }
-  }
-  return matchedValue || trimmed;
+  return resolveUniqueCatalogValueById(trimmed, catalog) || trimmed;
 }
 
 export function resolveServerChatModelValue(
@@ -105,6 +88,30 @@ function hasCatalogQualifiedValue(catalog: ModelCatalogEntry[], value: string): 
   return catalog.some((entry) => createQualifiedCatalogKey(entry) === normalized);
 }
 
+function resolveUniqueCatalogValueById(model: string, catalog: ModelCatalogEntry[]): string {
+  const normalizedModel = model.trim().toLowerCase();
+  if (!normalizedModel) {
+    return "";
+  }
+
+  let matchedValue = "";
+  for (const entry of catalog) {
+    if (entry.id.trim().toLowerCase() !== normalizedModel) {
+      continue;
+    }
+    const candidate = buildQualifiedChatModelValue(entry.id, entry.provider);
+    if (!matchedValue) {
+      matchedValue = candidate;
+      continue;
+    }
+    if (matchedValue.toLowerCase() !== candidate.toLowerCase()) {
+      return "";
+    }
+  }
+
+  return matchedValue;
+}
+
 export function resolvePreferredServerChatModelValue(
   model: string | null | undefined,
   provider: string | null | undefined,
@@ -136,6 +143,11 @@ export function resolvePreferredServerChatModelValue(
 
   if (hasCatalogQualifiedValue(catalog, trimmedModel)) {
     return trimmedModel;
+  }
+
+  const matchedCatalogValue = resolveUniqueCatalogValueById(trimmedModel, catalog);
+  if (matchedCatalogValue) {
+    return matchedCatalogValue;
   }
 
   const qualifiedServerValue = buildQualifiedChatModelValue(trimmedModel, trimmedProvider);
