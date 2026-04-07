@@ -13,7 +13,9 @@ import { type OpenClawConfig, loadConfig } from "../../config/config.js";
 import { defaultRuntime } from "../../runtime.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { normalizeStringEntries } from "../../shared/string-normalization.js";
-import type { MsgContext } from "../templating.js";
+import { resolveCommandAuthorization } from "../command-auth.js";
+import type { MsgContext, TemplateContext } from "../templating.js";
+import type { TtsAutoMode } from "../../config/types.tts.js";
 import { normalizeVerboseLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
@@ -279,7 +281,19 @@ export async function getReplyFromConfig(
     isGroup,
     triggerBodyNormalized,
     bodyStripped,
+    persistedSessionMemory,
   } = sessionState;
+
+  // Apply persisted user preferences from previous session
+  if (persistedSessionMemory?.userPreferences) {
+    const prefs = persistedSessionMemory.userPreferences;
+    if (prefs.thinkingLevel) sessionEntry.thinkingLevel = prefs.thinkingLevel;
+    if (prefs.verboseLevel) sessionEntry.verboseLevel = prefs.verboseLevel;
+    if (prefs.reasoningLevel) sessionEntry.reasoningLevel = prefs.reasoningLevel;
+    if (prefs.ttsAuto) sessionEntry.ttsAuto = prefs.ttsAuto as TtsAutoMode;
+    if (prefs.modelOverride) sessionEntry.modelOverride = prefs.modelOverride;
+    if (prefs.providerOverride) sessionEntry.providerOverride = prefs.providerOverride;
+  }
 
   if (resetTriggered && normalizeOptionalString(bodyStripped)) {
     const { applyResetModelOverride } = await loadSessionResetModelRuntime();
