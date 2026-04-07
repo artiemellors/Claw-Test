@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { normalizeProviderId } from "../agents/provider-id.js";
-import { BUNDLED_PLUGIN_CONTRACT_SNAPSHOTS } from "./contracts/inventory/bundled-capability-metadata.js";
+import { listBundledPluginMetadata } from "./bundled-plugin-metadata.js";
 
 type SetupRegistryRuntimeModule = Pick<
   typeof import("./setup-registry.js"),
@@ -19,11 +19,11 @@ const SETUP_REGISTRY_RUNTIME_CANDIDATES = ["./setup-registry.js", "./setup-regis
 
 let setupRegistryRuntimeModule: SetupRegistryRuntimeModule | undefined;
 
-const BUNDLED_SETUP_CLI_BACKENDS = BUNDLED_PLUGIN_CONTRACT_SNAPSHOTS.flatMap((entry) =>
-  entry.cliBackendIds.map(
+const BUNDLED_SETUP_CLI_BACKENDS = listBundledPluginMetadata().flatMap((entry) =>
+  (entry.manifest.cliBackends ?? []).map(
     (backendId) =>
       ({
-        pluginId: entry.pluginId,
+        pluginId: entry.manifest.id,
         backend: { id: backendId },
       }) satisfies SetupCliBackendRuntimeEntry,
   ),
