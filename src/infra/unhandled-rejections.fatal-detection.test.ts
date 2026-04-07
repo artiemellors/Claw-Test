@@ -14,10 +14,11 @@ describe("installUnhandledRejectionHandler - fatal detection", () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
   let originalExit: typeof process.exit;
+  let uninstallUnhandledRejectionHandler: (() => void) | undefined;
 
   beforeAll(() => {
     originalExit = process.exit.bind(process);
-    installUnhandledRejectionHandler();
+    uninstallUnhandledRejectionHandler = installUnhandledRejectionHandler();
   });
 
   beforeEach(() => {
@@ -41,6 +42,7 @@ describe("installUnhandledRejectionHandler - fatal detection", () => {
   });
 
   afterAll(() => {
+    uninstallUnhandledRejectionHandler?.();
     process.exit = originalExit;
   });
 
@@ -173,6 +175,21 @@ describe("installUnhandledRejectionHandler - fatal detection", () => {
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         "[openclaw] Non-fatal unhandled rejection (continuing):",
         expect.stringContaining("unable to open database file"),
+      );
+    });
+
+    it("does not exit on known Baileys WhatsApp decrypt races", () => {
+      const err = new Error("Unsupported state or unable to authenticate data");
+      err.stack = [
+        "Error: Unsupported state or unable to authenticate data",
+        "    at aesDecryptGCM (file:///x/@whiskeysockets/baileys/src/Utils/crypto.ts:71:55)",
+        "    at decrypt (file:///x/@whiskeysockets/baileys/src/Utils/noise-handler.ts:49:18)",
+      ].join("\n");
+
+      expectExitCodeFromUnhandled(err, []);
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "[openclaw] Suppressed WhatsApp crypto rejection (continuing):",
+        expect.stringContaining("Unsupported state or unable to authenticate data"),
       );
     });
 

@@ -317,6 +317,54 @@ export function isTransientSqliteError(err: unknown): boolean {
   return false;
 }
 
+export function isLikelyWhatsAppCryptoError(reason: unknown): boolean {
+  const formatReason = (value: unknown): string => {
+    if (value == null) {
+      return "";
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (value instanceof Error) {
+      return `${value.message}\n${value.stack ?? ""}`;
+    }
+    if (typeof value === "object") {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return Object.prototype.toString.call(value);
+      }
+    }
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+      return String(value);
+    }
+    if (typeof value === "symbol") {
+      return value.description ?? value.toString();
+    }
+    if (typeof value === "function") {
+      return value.name ? `[function ${value.name}]` : "[function]";
+    }
+    return Object.prototype.toString.call(value);
+  };
+
+  const raw =
+    reason instanceof Error ? `${reason.message}\n${reason.stack ?? ""}` : formatReason(reason);
+  const haystack = raw.toLowerCase();
+  const hasAuthError =
+    haystack.includes("unsupported state or unable to authenticate data") ||
+    haystack.includes("bad mac");
+  if (!hasAuthError) {
+    return false;
+  }
+
+  return (
+    haystack.includes("@whiskeysockets/baileys") ||
+    haystack.includes("baileys") ||
+    haystack.includes("noise-handler") ||
+    haystack.includes("aesdecryptgcm")
+  );
+}
+
 export function isTransientUnhandledRejectionError(err: unknown): boolean {
   return isTransientNetworkError(err) || isTransientSqliteError(err);
 }
@@ -344,13 +392,13 @@ export function isUnhandledRejectionHandled(reason: unknown): boolean {
   return false;
 }
 
-export function installUnhandledRejectionHandler(): void {
+export function installUnhandledRejectionHandler(): () => void {
   const exitWithTerminalRestore = (reason: string) => {
     restoreTerminalState(reason, { resumeStdinIfPaused: false });
     process.exit(1);
   };
 
-  process.on("unhandledRejection", (reason, _promise) => {
+  const handleUnhandledRejection = (reason: unknown, _promise: Promise<unknown>) => {
     if (isUnhandledRejectionHandled(reason)) {
       return;
     }
@@ -374,6 +422,14 @@ export function installUnhandledRejectionHandler(): void {
       return;
     }
 
+    if (isLikelyWhatsAppCryptoError(reason)) {
+      console.warn(
+        "[openclaw] Suppressed WhatsApp crypto rejection (continuing):",
+        formatUncaughtError(reason),
+      );
+      return;
+    }
+
     if (isTransientUnhandledRejectionError(reason)) {
       console.warn(
         "[openclaw] Non-fatal unhandled rejection (continuing):",
@@ -384,5 +440,10 @@ export function installUnhandledRejectionHandler(): void {
 
     console.error("[openclaw] Unhandled promise rejection:", formatUncaughtError(reason));
     exitWithTerminalRestore("unhandled rejection");
-  });
+  };
+
+  process.on("unhandledRejection", handleUnhandledRejection);
+  return () => {
+    process.off("unhandledRejection", handleUnhandledRejection);
+  };
 }
