@@ -383,8 +383,12 @@ export async function handleSlackAction(
         const maxBytes = account.config?.mediaMaxMb
           ? account.config.mediaMaxMb * 1024 * 1024
           : 20 * 1024 * 1024;
+        // Explicit token needed: downloadSlackFile re-resolves via loadConfig() internally,
+        // which returns raw SecretRef dicts instead of the gateway's resolved strings.
+        const downloadToken = getTokenForOperation("read");
         const downloaded = await slackActionRuntime.downloadSlackFile(fileId, {
           ...readOpts,
+          ...(downloadToken ? { token: downloadToken } : {}),
           maxBytes,
           channelId,
           threadId: threadId ?? undefined,
