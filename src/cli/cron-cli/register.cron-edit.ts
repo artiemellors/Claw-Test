@@ -179,10 +179,26 @@ function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): 
   // Determine whether the main-session side-effect block will handle `delivery`
   // explicitly below. If so, skip `delivery` in the generic loop to avoid showing
   // a contradictory intermediate state that cron.update never persists.
-  const willClearDeliveryForMain =
+  //
+  // Mirror applyJobPatch semantics exactly: delivery is cleared only when
+  // sessionTarget is "main" AND the effective delivery mode is NOT "webhook".
+  // Webhook delivery is valid for any sessionTarget and must show in the diff.
+  const effectiveSessionTarget =
     typeof patch["sessionTarget"] === "string"
-      ? patch["sessionTarget"] === "main"
-      : existing.sessionTarget === "main";
+      ? patch["sessionTarget"]
+      : existing.sessionTarget;
+  const effectiveDeliveryForSkip =
+    "delivery" in patch
+      ? computeDisplayAfter("delivery", patch["delivery"], existing.delivery)
+      : existing.delivery;
+  const effectiveDeliveryMode =
+    effectiveDeliveryForSkip !== null &&
+    typeof effectiveDeliveryForSkip === "object" &&
+    !Array.isArray(effectiveDeliveryForSkip)
+      ? (effectiveDeliveryForSkip as Record<string, unknown>)["mode"]
+      : undefined;
+  const willClearDeliveryForMain =
+    effectiveSessionTarget === "main" && effectiveDeliveryMode !== "webhook";
 
   for (const [key, next] of Object.entries(patch)) {
     // Skip delivery here when the main-session side-effect block will handle it.

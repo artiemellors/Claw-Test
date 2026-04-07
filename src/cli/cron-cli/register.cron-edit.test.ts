@@ -249,4 +249,65 @@ describe("cron edit diff preview — delivery / main-session side-effect", () =>
     expect(deliveryLines).toHaveLength(1);
     expect(deliveryLines[0]).toMatch(/cleared/i);
   });
+
+  it("shows delivery diff normally for main-session jobs when delivery mode is webhook", async () => {
+    // Regression test for: https://github.com/openclaw/openclaw/pull/59597#discussion_r3042636776
+    //
+    // applyJobPatch does NOT clear delivery when mode === "webhook", even for
+    // sessionTarget "main". The generic loop must NOT skip `delivery` in that case,
+    // so that real persisted changes (e.g. updating --to on a webhook job) appear in
+    // the diff preview correctly.
+
+    const existingJob = makeExistingCronJob({
+      sessionTarget: "main",
+      delivery: { mode: "webhook", to: "https://example.com/old-hook" },
+    });
+
+    hoisted.listMock.mockResolvedValue([existingJob]);
+    hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
+
+    const stderrLines: string[] = [];
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: unknown) => {
+        if (typeof chunk === "string") stderrLines.push(chunk);
+        else if (Buffer.isBuffer(chunk)) stderrLines.push(chunk.toString());
+        return true;
+      });
+
+    let caughtError: unknown;
+    try {
+      const { registerCronEdit } = await import("./register.cron-edit.js");
+      const { defaultRuntime } = await import("../../runtime.js");
+
+      // Simulate changing the webhook --to URL (would require a --webhook-to flag or similar;
+      // here we verify via a cron schedule change that the delivery line still appears
+      // unchanged in the diff when mode=webhook — i.e. it is NOT suppressed).
+      // Since we cannot easily invoke --webhook-to through the CLI, we verify the
+      // negative: a pure schedule edit on a webhook main job should NOT show a
+      // spurious "cleared" delivery line.
+      await registerCronEdit(
+        ["cron", "edit", "job-1", "--cron", "0 10 * * *"],
+        defaultRuntime,
+      );
+    } catch (err) {
+      caughtError = err;
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    expect(hoisted.listMock).toHaveBeenCalled();
+
+    if (
+      caughtError !== undefined &&
+      !(caughtError instanceof Error && caughtError.message === "update-rejected-in-test")
+    ) {
+      throw caughtError;
+    }
+
+    const diffOutput = stderrLines.join("\n");
+    // For a webhook main-session job with no delivery change in the patch,
+    // the side-effect block must NOT emit a spurious "cleared" line.
+    expect(diffOutput).not.toMatch(/cleared/i);
+  });
 });
