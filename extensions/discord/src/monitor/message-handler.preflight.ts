@@ -104,6 +104,46 @@ function isPreflightAborted(abortSignal?: AbortSignal): boolean {
   return Boolean(abortSignal?.aborted);
 }
 
+function resolvePreflightTranscriptText(params: {
+  baseText: string;
+  messageText: string;
+  transcript?: string;
+  hasTypedText: boolean;
+}): { resolvedBaseText: string; resolvedMessageText: string } {
+  if (params.hasTypedText || !params.transcript) {
+    return {
+      resolvedBaseText: params.baseText,
+      resolvedMessageText: params.messageText,
+    };
+  }
+
+  if (!params.baseText) {
+    return {
+      resolvedBaseText: params.transcript,
+      resolvedMessageText: params.messageText || params.transcript,
+    };
+  }
+
+  if (params.messageText === params.baseText) {
+    return {
+      resolvedBaseText: params.transcript,
+      resolvedMessageText: params.transcript,
+    };
+  }
+
+  if (params.messageText.startsWith(`${params.baseText}\n`)) {
+    return {
+      resolvedBaseText: params.transcript,
+      resolvedMessageText: `${params.transcript}${params.messageText.slice(params.baseText.length)}`,
+    };
+  }
+
+  return {
+    resolvedBaseText: params.transcript,
+    resolvedMessageText: params.messageText.replace(params.baseText, params.transcript),
+  };
+}
+
 function isBoundThreadBotSystemMessage(params: {
   isBoundThreadSession: boolean;
   isBotAuthor: boolean;
@@ -873,18 +913,29 @@ export async function preflightDiscordMessage(
 
   // Only authorized guild senders should reach the expensive transcription path.
   const { resolveDiscordPreflightAudioMentionContext } = await loadPreflightAudioRuntime();
-  const { hasTypedText, transcript: preflightTranscript } =
-    await resolveDiscordPreflightAudioMentionContext({
-      message,
-      isDirectMessage,
-      shouldRequireMention,
-      mentionRegexes,
-      cfg: params.cfg,
-      abortSignal: params.abortSignal,
-    });
+  const {
+    hasTypedText,
+    transcript: preflightTranscript,
+    transcribedAttachmentIndex: preflightTranscribedAttachmentIndex,
+  } = await resolveDiscordPreflightAudioMentionContext({
+    message,
+    chatType: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
+    sessionKey: baseSessionKey,
+    shouldRequireMention,
+    mentionRegexes,
+    cfg: params.cfg,
+    abortSignal: params.abortSignal,
+  });
   if (isPreflightAborted(params.abortSignal)) {
     return null;
   }
+
+  const { resolvedBaseText, resolvedMessageText } = resolvePreflightTranscriptText({
+    baseText,
+    messageText,
+    transcript: preflightTranscript,
+    hasTypedText,
+  });
 
   const mentionText = hasTypedText ? baseText : "";
   const { implicitMention, wasMentioned } = resolveDiscordMentionState({
@@ -902,7 +953,7 @@ export async function preflightDiscordMessage(
   });
   if (shouldLogVerbose()) {
     logVerbose(
-      `discord: inbound id=${message.id} guild=${params.data.guild_id ?? "dm"} channel=${messageChannelId} mention=${wasMentioned ? "yes" : "no"} type=${isDirectMessage ? "dm" : isGroupDm ? "group-dm" : "guild"} content=${messageText ? "yes" : "no"}`,
+      `discord: inbound id=${message.id} guild=${params.data.guild_id ?? "dm"} channel=${messageChannelId} mention=${wasMentioned ? "yes" : "no"} type=${isDirectMessage ? "dm" : isGroupDm ? "group-dm" : "guild"} content=${resolvedMessageText ? "yes" : "no"}`,
     );
   }
 
@@ -1078,8 +1129,10 @@ export async function preflightDiscordMessage(
     isDirectMessage,
     isGroupDm,
     commandAuthorized,
-    baseText,
-    messageText,
+    baseText: resolvedBaseText,
+    messageText: resolvedMessageText,
+    preflightTranscript,
+    preflightTranscribedAttachmentIndex,
     wasMentioned,
     route: effectiveRoute,
     threadBinding,

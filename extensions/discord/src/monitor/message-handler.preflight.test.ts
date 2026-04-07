@@ -2,11 +2,13 @@ import { ChannelType } from "@buape/carbon";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const transcribeFirstAudioMock = vi.hoisted(() => vi.fn());
+const transcribeFirstAudioResultMock = vi.hoisted(() => vi.fn());
 const resolveDiscordDmCommandAccessMock = vi.hoisted(() => vi.fn());
 const handleDiscordDmCommandDecisionMock = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("./preflight-audio.runtime.js", () => ({
   transcribeFirstAudio: transcribeFirstAudioMock,
+  transcribeFirstAudioResult: transcribeFirstAudioResultMock,
 }));
 vi.mock("./dm-command-auth.js", () => ({
   resolveDiscordDmCommandAccess: resolveDiscordDmCommandAccessMock,
@@ -269,6 +271,7 @@ describe("preflightDiscordMessage", () => {
   beforeEach(() => {
     sessionBindingTesting.resetSessionBindingAdaptersForTests();
     transcribeFirstAudioMock.mockReset();
+    transcribeFirstAudioResultMock.mockReset();
     resolveDiscordDmCommandAccessMock.mockReset();
     resolveDiscordDmCommandAccessMock.mockResolvedValue({
       commandAuthorized: true,
@@ -842,7 +845,10 @@ describe("preflightDiscordMessage", () => {
   });
 
   it("uses attachment content_type for guild audio preflight mention detection", async () => {
-    transcribeFirstAudioMock.mockResolvedValue("hey openclaw");
+    transcribeFirstAudioResultMock.mockResolvedValue({
+      transcript: "hey openclaw",
+      attachmentIndex: 0,
+    });
 
     const channelId = "channel-audio-1";
     const client = createGuildTextClient(channelId);
@@ -897,8 +903,8 @@ describe("preflightDiscordMessage", () => {
       },
     });
 
-    expect(transcribeFirstAudioMock).toHaveBeenCalledTimes(1);
-    expect(transcribeFirstAudioMock).toHaveBeenCalledWith(
+    expect(transcribeFirstAudioResultMock).toHaveBeenCalledTimes(1);
+    expect(transcribeFirstAudioResultMock).toHaveBeenCalledWith(
       expect.objectContaining({
         ctx: expect.objectContaining({
           MediaUrls: ["https://cdn.discordapp.com/attachments/voice.ogg"],
@@ -1055,6 +1061,52 @@ describe("preflightDiscordMessage", () => {
       routeSpy.mockRestore();
       ensureSpy.mockRestore();
     }
+  });
+
+  it("transcribes DM voice notes via preflight (not only guilds)", async () => {
+    const channelId = "dm-channel-voice";
+    transcribeFirstAudioResultMock.mockReset();
+    transcribeFirstAudioResultMock.mockResolvedValueOnce({
+      transcript: "hello from discord voice",
+      attachmentIndex: 0,
+    });
+    resolveDiscordDmCommandAccessMock.mockResolvedValue({
+      commandAuthorized: true,
+      decision: "allow",
+      allowMatch: { allowed: true, matchedBy: "allowFrom", value: "42" },
+    });
+
+    const message = createDiscordMessage({
+      id: "voice-dm-1",
+      channelId,
+      content: "",
+      author: { id: "42", bot: false, username: "user" },
+      attachments: [
+        {
+          content_type: "audio/ogg",
+          url: "https://cdn.discordapp.com/attachments/voice.ogg",
+          filename: "voice-message.ogg",
+        },
+      ],
+    });
+    const client = createDmClient(channelId);
+    const data: DiscordMessageEvent = {
+      channel_id: channelId,
+      author: { id: "42", bot: false, username: "user" },
+      message,
+    } as unknown as DiscordMessageEvent;
+
+    const result = await preflightDiscordMessage(
+      createPreflightArgs({
+        cfg: DEFAULT_PREFLIGHT_CFG,
+        discordConfig: {},
+        data,
+        client,
+      }),
+    );
+
+    expect(transcribeFirstAudioResultMock).toHaveBeenCalledTimes(1);
+    expect(result).not.toBeNull();
   });
 });
 

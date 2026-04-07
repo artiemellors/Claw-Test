@@ -379,6 +379,8 @@ Docs: https://docs.openclaw.ai
 - Gateway/attachments: offload large inbound images without leaking `media://` markers into text-only runs, preserve mixed attachment order for model input/transcripts, and fail closed when model image capability cannot be resolved. (#55513) Thanks @Syysean.
 - Telegram/outbound chunking: use static markdown chunking when Telegram runtime state is unavailable so long outbound Telegram messages still split correctly after cold starts. (#57816) Thanks @ForestDengHK.
 
+- Discord: restore DM voice-note preflight transcription so direct-message audio stops arriving as raw `<media:document>` placeholders. (#61314) Thanks @affsantos.
+
 ## 2026.4.2
 
 ### Breaking

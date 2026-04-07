@@ -6,13 +6,19 @@ type DiscordAudioAttachment = {
   url?: string;
 };
 
+type IndexedDiscordAudioAttachment = DiscordAudioAttachment & {
+  attachmentIndex: number;
+};
+
 function collectAudioAttachments(
   attachments: DiscordAudioAttachment[] | undefined,
-): DiscordAudioAttachment[] {
+): IndexedDiscordAudioAttachment[] {
   if (!Array.isArray(attachments)) {
     return [];
   }
-  return attachments.filter((att) => att.content_type?.startsWith("audio/"));
+  return attachments.flatMap((att, attachmentIndex) =>
+    att.content_type?.startsWith("audio/") ? [{ ...att, attachmentIndex }] : [],
+  );
 }
 
 export async function resolveDiscordPreflightAudioMentionContext(params: {
@@ -20,7 +26,8 @@ export async function resolveDiscordPreflightAudioMentionContext(params: {
     attachments?: DiscordAudioAttachment[];
     content?: string;
   };
-  isDirectMessage: boolean;
+  chatType: "direct" | "group" | "channel";
+  sessionKey?: string;
   shouldRequireMention: boolean;
   mentionRegexes: RegExp[];
   cfg: OpenClawConfig;
@@ -29,19 +36,20 @@ export async function resolveDiscordPreflightAudioMentionContext(params: {
   hasAudioAttachment: boolean;
   hasTypedText: boolean;
   transcript?: string;
+  transcribedAttachmentIndex?: number;
 }> {
   const audioAttachments = collectAudioAttachments(params.message.attachments);
   const hasAudioAttachment = audioAttachments.length > 0;
   const hasTypedText = Boolean(params.message.content?.trim());
   const needsPreflightTranscription =
-    !params.isDirectMessage &&
-    params.shouldRequireMention &&
     hasAudioAttachment &&
     // `baseText` includes media placeholders; gate on typed text only.
     !hasTypedText &&
-    params.mentionRegexes.length > 0;
+    (params.chatType === "direct" ||
+      (params.shouldRequireMention && params.mentionRegexes.length > 0));
 
   let transcript: string | undefined;
+  let transcribedAttachmentIndex: number | undefined;
   if (needsPreflightTranscription) {
     if (params.abortSignal?.aborted) {
       return {
@@ -50,29 +58,40 @@ export async function resolveDiscordPreflightAudioMentionContext(params: {
       };
     }
     try {
-      const { transcribeFirstAudio } = await import("./preflight-audio.runtime.js");
+      const { transcribeFirstAudioResult } = await import("./preflight-audio.runtime.js");
       if (params.abortSignal?.aborted) {
         return {
           hasAudioAttachment,
           hasTypedText,
         };
       }
-      const audioUrls = audioAttachments
-        .map((att) => att.url)
-        .filter((url): url is string => typeof url === "string" && url.length > 0);
-      if (audioUrls.length > 0) {
-        transcript = await transcribeFirstAudio({
+      const transcriptionCandidates = audioAttachments.filter(
+        (att): att is IndexedDiscordAudioAttachment & { url: string } =>
+          typeof att.url === "string" && att.url.length > 0,
+      );
+      if (transcriptionCandidates.length > 0) {
+        const result = await transcribeFirstAudioResult({
           ctx: {
-            MediaUrls: audioUrls,
-            MediaTypes: audioAttachments
+            MediaUrls: transcriptionCandidates.map((att) => att.url),
+            MediaTypes: transcriptionCandidates
               .map((att) => att.content_type)
               .filter((contentType): contentType is string => Boolean(contentType)),
+            ChatType: params.chatType,
+            SessionKey: params.sessionKey,
+            Surface: "discord",
+            Provider: "discord",
           },
           cfg: params.cfg,
           agentDir: undefined,
         });
+        transcript = result.transcript;
         if (params.abortSignal?.aborted) {
           transcript = undefined;
+        } else if (typeof result.attachmentIndex === "number") {
+          // Map the candidate-local index back to the original Discord
+          // attachment position so downstream pruning targets the right item.
+          const candidate = transcriptionCandidates[result.attachmentIndex];
+          transcribedAttachmentIndex = candidate?.attachmentIndex;
         }
       }
     } catch (err) {
@@ -84,5 +103,6 @@ export async function resolveDiscordPreflightAudioMentionContext(params: {
     hasAudioAttachment,
     hasTypedText,
     transcript,
+    transcribedAttachmentIndex,
   };
 }
