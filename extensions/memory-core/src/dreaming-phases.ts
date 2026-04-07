@@ -39,7 +39,7 @@ type ManagedCronJobCreate = {
   enabled: boolean;
   schedule: CronSchedule;
   sessionTarget: "main";
-  wakeMode: "next-heartbeat";
+  wakeMode: "now";
   payload: CronPayload;
 };
 
@@ -49,7 +49,7 @@ type ManagedCronJobPatch = {
   enabled?: boolean;
   schedule?: CronSchedule;
   sessionTarget?: "main";
-  wakeMode?: "next-heartbeat";
+  wakeMode?: "now";
   payload?: CronPayload;
 };
 
@@ -157,7 +157,7 @@ function buildManagedCronJob(params: {
       ...(params.timezone ? { tz: params.timezone } : {}),
     },
     sessionTarget: "main",
-    wakeMode: "next-heartbeat",
+    wakeMode: "now",
     payload: {
       kind: "systemEvent",
       text: params.payloadText,
@@ -209,8 +209,8 @@ function buildManagedPhasePatch(
   if (normalizeTrimmedString(job.sessionTarget)?.toLowerCase() !== "main") {
     patch.sessionTarget = "main";
   }
-  if (normalizeTrimmedString(job.wakeMode)?.toLowerCase() !== "next-heartbeat") {
-    patch.wakeMode = "next-heartbeat";
+  if (normalizeTrimmedString(job.wakeMode)?.toLowerCase() !== "now") {
+    patch.wakeMode = "now";
   }
   const payloadKind = normalizeTrimmedString(job.payload?.kind)?.toLowerCase();
   const payloadText = normalizeTrimmedString(job.payload?.text);

@@ -368,7 +368,7 @@ describe("short-term dreaming cron reconciliation", () => {
     expect(harness.addCalls[0]).toMatchObject({
       name: constants.MANAGED_DREAMING_CRON_NAME,
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: {
         kind: "systemEvent",
         text: constants.DREAMING_SYSTEM_EVENT_TEXT,
@@ -401,7 +401,7 @@ describe("short-term dreaming cron reconciliation", () => {
       enabled: false,
       schedule: { kind: "cron", expr: "0 9 * * *" },
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: {
         kind: "systemEvent",
         text: "stale-text",
@@ -420,7 +420,7 @@ describe("short-term dreaming cron reconciliation", () => {
       enabled: true,
       schedule: { kind: "cron", expr: "0 8 * * *" },
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: { kind: "systemEvent", text: "hello" },
       createdAtMs: 3,
     };
@@ -455,7 +455,7 @@ describe("short-term dreaming cron reconciliation", () => {
       enabled: true,
       schedule: { kind: "cron", expr: "0 3 * * *" },
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: { kind: "systemEvent", text: constants.DREAMING_SYSTEM_EVENT_TEXT },
       createdAtMs: 10,
     };
@@ -466,7 +466,7 @@ describe("short-term dreaming cron reconciliation", () => {
       enabled: true,
       schedule: { kind: "cron", expr: "0 7 * * *" },
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: { kind: "systemEvent", text: "report" },
       createdAtMs: 11,
     };
@@ -558,7 +558,7 @@ describe("short-term dreaming cron reconciliation", () => {
       enabled: true,
       schedule: { kind: "cron", expr: "0 3 * * *" },
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: { kind: "systemEvent", text: constants.DREAMING_SYSTEM_EVENT_TEXT },
       createdAtMs: 10,
     };
@@ -592,7 +592,7 @@ describe("short-term dreaming cron reconciliation", () => {
       enabled: true,
       schedule: { kind: "cron", expr: "0 3 * * *" },
       sessionTarget: "main",
-      wakeMode: "next-heartbeat",
+      wakeMode: "now",
       payload: { kind: "systemEvent", text: constants.DREAMING_SYSTEM_EVENT_TEXT },
       createdAtMs: 10,
     };
