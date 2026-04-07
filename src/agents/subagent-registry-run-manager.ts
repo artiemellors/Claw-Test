@@ -57,6 +57,7 @@ export function createSubagentRunManager(params: {
     reason: "completed" | "deleted" | "released";
     workspaceDir?: string;
   }): Promise<void>;
+  closeTrackedBrowserTabsForSessions(sessionKeys: string[]): Promise<number | void>;
   completeCleanupBookkeeping(args: {
     runId: string;
     entry: SubagentRunRecord;
@@ -73,6 +74,20 @@ export function createSubagentRunManager(params: {
     triggerCleanup: boolean;
   }): Promise<void>;
 }) {
+  const closeTrackedBrowserTabsForSessionBestEffort = (entry?: SubagentRunRecord) => {
+    const sessionKey = entry?.childSessionKey?.trim();
+    if (!sessionKey) {
+      return;
+    }
+    void params.closeTrackedBrowserTabsForSessions([sessionKey]).catch((err) => {
+      log.warn("failed to close tracked browser tabs for subagent session", {
+        err,
+        runId: entry?.runId,
+        childSessionKey: sessionKey,
+      });
+    });
+  };
+
   const waitForSubagentCompletion = async (runId: string, waitTimeoutMs: number) => {
     try {
       const wait = await waitForAgentRun({
@@ -350,6 +365,7 @@ export function createSubagentRunManager(params: {
     params.clearPendingLifecycleError(runId);
     const entry = params.runs.get(runId);
     if (entry) {
+      closeTrackedBrowserTabsForSessionBestEffort(entry);
       if (shouldDeleteAttachments(entry)) {
         void safeRemoveAttachmentsDir(entry);
       }
@@ -415,6 +431,7 @@ export function createSubagentRunManager(params: {
     if (updated > 0) {
       params.persist();
       for (const entry of entriesByChildSessionKey.values()) {
+        closeTrackedBrowserTabsForSessionBestEffort(entry);
         void persistSubagentSessionTiming(entry).catch((err) => {
           log.warn("failed to persist killed subagent session timing", {
             err,
