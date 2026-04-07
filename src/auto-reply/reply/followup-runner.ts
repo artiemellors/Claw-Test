@@ -27,7 +27,7 @@ import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { runPreflightCompactionIfNeeded } from "./agent-runner-memory.js";
 import { resolveRunAuthProfile } from "./agent-runner-utils.js";
 import { resolveFollowupDeliveryPayloads } from "./followup-delivery.js";
-import { resolveOriginMessageProvider } from "./origin-routing.js";
+import { resolveOriginAccountId, resolveOriginMessageProvider } from "./origin-routing.js";
 import { refreshQueuedFollowupSession, type FollowupRun } from "./queue.js";
 import { createReplyOperation } from "./reply-run-registry.js";
 import { isRoutableChannel, routeReply } from "./route-reply.js";
@@ -220,8 +220,14 @@ export function createFollowupRunner(params: {
                       bootstrapPromptWarningSignaturesSeen[
                         bootstrapPromptWarningSignaturesSeen.length - 1
                       ],
-                    messageProvider: queued.run.messageProvider,
-                    agentAccountId: queued.run.agentAccountId,
+                    messageProvider: resolveOriginMessageProvider({
+                      originatingChannel: queued.originatingChannel,
+                      provider: queued.run.messageProvider,
+                    }),
+                    agentAccountId: resolveOriginAccountId({
+                      originatingAccountId: queued.originatingAccountId,
+                      accountId: queued.run.agentAccountId,
+                    }),
                   });
                 const cliResult = await runCliFollowup(cliSessionBinding?.sessionId).catch(
                   async (err) => {

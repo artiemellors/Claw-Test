@@ -913,6 +913,59 @@ describe("createFollowupRunner CLI backend dispatch", () => {
     expect(store.main?.claudeCliSessionId).toBeUndefined();
     expect(onBlockReply).not.toHaveBeenCalled();
   });
+
+  it("uses originating channel and account for CLI MCP context in mixed-origin queues", async () => {
+    const onBlockReply = vi.fn(async () => {});
+    runCliAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "cli reply" }],
+      meta: {
+        agentMeta: {
+          sessionId: "cli-session",
+          provider: "claude-cli",
+          model: "opus",
+          cliSessionBinding: { sessionId: "cli-session" },
+        },
+      },
+    });
+
+    const runner = createFollowupRunner({
+      opts: { onBlockReply },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionKey: "main",
+      defaultModel: "claude-cli/opus",
+    });
+
+    const queued = createQueuedRun({
+      originatingChannel: "discord",
+      originatingAccountId: "work-bot",
+      originatingTo: "channel:C1",
+      run: {
+        config: {
+          agents: {
+            defaults: {
+              cliBackends: {
+                "claude-cli": { command: "claude" },
+              },
+            },
+          },
+        },
+        provider: "claude-cli",
+        model: "opus",
+        messageProvider: "whatsapp",
+        agentAccountId: "primary",
+      },
+    });
+
+    await runner(queued);
+
+    expect(runCliAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageProvider: "discord",
+        agentAccountId: "work-bot",
+      }),
+    );
+  });
 });
 
 describe("createFollowupRunner bootstrap warning dedupe", () => {
