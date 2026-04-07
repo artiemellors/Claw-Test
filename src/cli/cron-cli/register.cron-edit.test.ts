@@ -179,3 +179,74 @@ describe("cron edit diff preview — stagger synthesis", () => {
     expect(staggerDiffLine).toBeUndefined();
   });
 });
+
+describe("cron edit diff preview — delivery / main-session side-effect", () => {
+  beforeEach(() => {
+    hoisted.listMock.mockReset();
+    hoisted.updateMock.mockReset();
+  });
+
+  it("shows delivery exactly once (as cleared) when switching to --session main with existing delivery", async () => {
+    // Regression test for: https://github.com/openclaw/openclaw/pull/59597
+    // chatgpt-codex-connector comment 3035375844
+    //
+    // Before fix: when `patch.delivery` was present AND sessionTarget became "main",
+    // buildCronPatchDiff emitted two delivery lines:
+    //   1. generic loop: delivery: <old> → <patch-value>   (intermediate, never persisted)
+    //   2. side-effect block: delivery: <patch-value> → (cleared)
+    // This was contradictory and confusing.
+    //
+    // After fix: the generic loop skips `delivery` when the main-session side-effect
+    // block will handle it, so only the final (cleared) line is shown.
+
+    const existingJob = makeExistingCronJob({
+      sessionTarget: "isolated",
+      delivery: { mode: "announce", channel: "telegram" },
+    });
+
+    hoisted.listMock.mockResolvedValue([existingJob]);
+    hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
+
+    const stderrLines: string[] = [];
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: unknown) => {
+        if (typeof chunk === "string") stderrLines.push(chunk);
+        else if (Buffer.isBuffer(chunk)) stderrLines.push(chunk.toString());
+        return true;
+      });
+
+    let caughtError: unknown;
+    try {
+      const { registerCronEdit } = await import("./register.cron-edit.js");
+      const { defaultRuntime } = await import("../../runtime.js");
+
+      await registerCronEdit(
+        ["cron", "edit", "job-1", "--session", "main", "--announce"],
+        defaultRuntime,
+      );
+    } catch (err) {
+      caughtError = err;
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    expect(hoisted.listMock).toHaveBeenCalled();
+
+    if (
+      caughtError !== undefined &&
+      !(caughtError instanceof Error && caughtError.message === "update-rejected-in-test")
+    ) {
+      throw caughtError;
+    }
+
+    const diffOutput = stderrLines.join("\n");
+    const deliveryLines = diffOutput
+      .split("\n")
+      .filter((l) => l.includes("delivery:") && l.includes("→"));
+
+    // Must show exactly one delivery line, and it must be the "cleared" final state.
+    expect(deliveryLines).toHaveLength(1);
+    expect(deliveryLines[0]).toMatch(/cleared/i);
+  });
+});

@@ -175,7 +175,20 @@ function computeDisplayAfter(
 
 function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): string[] {
   const lines: string[] = [];
+
+  // Determine whether the main-session side-effect block will handle `delivery`
+  // explicitly below. If so, skip `delivery` in the generic loop to avoid showing
+  // a contradictory intermediate state that cron.update never persists.
+  const willClearDeliveryForMain =
+    typeof patch["sessionTarget"] === "string"
+      ? patch["sessionTarget"] === "main"
+      : existing.sessionTarget === "main";
+
   for (const [key, next] of Object.entries(patch)) {
+    // Skip delivery here when the main-session side-effect block will handle it.
+    if (key === "delivery" && willClearDeliveryForMain) {
+      continue;
+    }
     const prev = (existing as Record<string, unknown>)[key];
     const displayAfter = computeDisplayAfter(key, next, prev);
     const prevStr = formatPatchValue(prev);
