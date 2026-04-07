@@ -580,8 +580,13 @@ export async function runExecProcess(opts: {
   };
   addSession(session);
 
+  let updatesEnabled = true;
+  const disableUpdates = () => {
+    updatesEnabled = false;
+  };
+
   const emitUpdate = () => {
-    if (!opts.onUpdate) {
+    if (!opts.onUpdate || !updatesEnabled) {
       return;
     }
     if (session.backgrounded || session.exited) {
@@ -589,17 +594,22 @@ export async function runExecProcess(opts: {
     }
     const tailText = session.tail || session.aggregated;
     const warningText = opts.warnings.length ? `${opts.warnings.join("\n")}\n\n` : "";
-    opts.onUpdate({
-      content: [{ type: "text", text: warningText + (tailText || "") }],
-      details: {
-        status: "running",
-        sessionId,
-        pid: session.pid ?? undefined,
-        startedAt,
-        cwd: session.cwd,
-        tail: session.tail,
-      },
-    });
+    try {
+      opts.onUpdate({
+        content: [{ type: "text", text: warningText + (tailText || "") }],
+        details: {
+          status: "running",
+          sessionId,
+          pid: session.pid ?? undefined,
+          startedAt,
+          cwd: session.cwd,
+          tail: session.tail,
+        },
+      });
+    } catch (error) {
+      disableUpdates();
+      logWarn(`exec: disabling live updates for session ${sessionId}: ${String(error)}`);
+    }
   };
 
   const handleStdout = (data: string) => {
@@ -776,6 +786,7 @@ export async function runExecProcess(opts: {
   const promise = managedRun
     .wait()
     .then(async (exit): Promise<ExecProcessOutcome> => {
+      disableUpdates();
       const durationMs = Date.now() - startedAt;
       const outcome = buildExecExitOutcome({
         exit,
@@ -800,6 +811,7 @@ export async function runExecProcess(opts: {
       return outcome;
     })
     .catch((err): ExecProcessOutcome => {
+      disableUpdates();
       markExited(session, null, null, "failed");
       maybeNotifyOnExit(session, "failed");
       return buildExecRuntimeErrorOutcome({
