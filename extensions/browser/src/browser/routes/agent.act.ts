@@ -539,6 +539,7 @@ export function registerBrowserAgentActRoutes(
               cdpUrl,
               targetId: tab.targetId,
               doubleClick,
+              signal: req.signal,
             };
             if (ref) {
               clickRequest.ref = ref;
@@ -616,6 +617,7 @@ export function registerBrowserAgentActRoutes(
               text,
               submit,
               slowly,
+              signal: req.signal,
             };
             if (ref) {
               typeRequest.ref = ref;
@@ -656,6 +658,7 @@ export function registerBrowserAgentActRoutes(
               targetId: tab.targetId,
               key,
               delayMs: delayMs ?? undefined,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId });
           }
@@ -699,6 +702,7 @@ export function registerBrowserAgentActRoutes(
               ref,
               selector,
               timeoutMs: timeoutMs ?? undefined,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId });
           }
@@ -740,6 +744,7 @@ export function registerBrowserAgentActRoutes(
             const scrollRequest: Parameters<typeof pw.scrollIntoViewViaPlaywright>[0] = {
               cdpUrl,
               targetId: tab.targetId,
+              signal: req.signal,
             };
             if (ref) {
               scrollRequest.ref = ref;
@@ -801,6 +806,7 @@ export function registerBrowserAgentActRoutes(
               endRef,
               endSelector,
               timeoutMs: timeoutMs ?? undefined,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId });
           }
@@ -854,6 +860,7 @@ export function registerBrowserAgentActRoutes(
               selector,
               values,
               timeoutMs: timeoutMs ?? undefined,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId });
           }
@@ -899,6 +906,7 @@ export function registerBrowserAgentActRoutes(
               targetId: tab.targetId,
               fields,
               timeoutMs: timeoutMs ?? undefined,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId });
           }
@@ -927,6 +935,7 @@ export function registerBrowserAgentActRoutes(
               targetId: tab.targetId,
               width,
               height,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId, url: tab.url });
           }
@@ -1001,6 +1010,7 @@ export function registerBrowserAgentActRoutes(
               loadState,
               fn,
               timeoutMs,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId });
           }
@@ -1067,7 +1077,11 @@ export function registerBrowserAgentActRoutes(
             if (!pw) {
               return;
             }
-            await pw.closePageViaPlaywright({ cdpUrl, targetId: tab.targetId });
+            await pw.closePageViaPlaywright({
+              cdpUrl,
+              targetId: tab.targetId,
+              signal: req.signal,
+            });
             return res.json({ ok: true, targetId: tab.targetId });
           }
           case "batch": {
@@ -1105,6 +1119,7 @@ export function registerBrowserAgentActRoutes(
               actions,
               stopOnError,
               evaluateEnabled,
+              signal: req.signal,
             });
             return res.json({ ok: true, targetId: tab.targetId, results: result.results });
           }
