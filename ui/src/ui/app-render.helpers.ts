@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { t } from "../i18n/index.ts";
-import { refreshChat } from "./app-chat.ts";
+import { refreshChat, refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
 import type { AppViewState } from "./app-view-state.ts";
 import { OpenClawApp } from "./app.ts";
@@ -57,6 +57,7 @@ function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string)
     sessionKey,
     lastActiveSessionKey: sessionKey,
   });
+  void refreshChatAvatar(state as unknown as Parameters<typeof refreshChatAvatar>[0]);
 }
 
 export function renderTab(state: AppViewState, tab: Tab, opts?: { collapsed?: boolean }) {
@@ -505,6 +506,7 @@ export function renderChatMobileToggle(state: AppViewState) {
 export function switchChatSession(state: AppViewState, nextSessionKey: string) {
   state.sessionKey = nextSessionKey;
   state.chatMessage = "";
+  state.chatMessages = [];
   state.chatStream = null;
   // P1: Clear queued chat items from the previous session
   (state as unknown as { chatQueue: unknown[] }).chatQueue = [];
@@ -518,6 +520,7 @@ export function switchChatSession(state: AppViewState, nextSessionKey: string) {
     lastActiveSessionKey: nextSessionKey,
   });
   void state.loadAssistantIdentity();
+  void refreshChatAvatar(state as unknown as Parameters<typeof refreshChatAvatar>[0]);
   syncUrlWithSessionKey(
     state as unknown as Parameters<typeof syncUrlWithSessionKey>[0],
     nextSessionKey,
