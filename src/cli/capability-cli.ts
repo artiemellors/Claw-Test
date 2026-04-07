@@ -16,6 +16,7 @@ import { resolveMemorySearchConfig } from "../agents/memory-search.js";
 import { loadModelCatalog } from "../agents/model-catalog.js";
 import { modelsAuthLoginCommand, modelsStatusCommand } from "../commands/models.js";
 import { loadConfig } from "../config/config.js";
+import { resolveAgentModelPrimaryValue } from "../config/model-input.js";
 import { callGateway, randomIdempotencyKey } from "../gateway/call.js";
 import { buildGatewayConnectionDetailsWithResolvers } from "../gateway/connection-details.js";
 import { isLoopbackHost } from "../gateway/net.js";
@@ -34,6 +35,7 @@ import {
   registerMemoryEmbeddingProvider,
 } from "../plugins/memory-embedding-providers.js";
 import { writeRuntimeJson, defaultRuntime, type RuntimeEnv } from "../runtime.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { theme } from "../terminal/theme.js";
 import { canonicalizeSpeechProviderId, listSpeechProviders } from "../tts/provider-registry.js";
@@ -581,7 +583,7 @@ async function buildModelProviders() {
   const cfg = loadConfig();
   const catalog = await loadModelCatalog({ config: cfg });
   const selectedProvider = resolveSelectedProviderFromModelRef(
-    cfg.agents?.defaults?.model?.primary,
+    resolveAgentModelPrimaryValue(cfg.agents?.defaults?.model),
   );
   const grouped = new Map<
     string,
@@ -619,7 +621,7 @@ async function runModelAuthStatus() {
     {
       log: (...args) => captured.push(args.join(" ")),
       error: (message) => {
-        throw new Error(message);
+        throw message instanceof Error ? message : new Error(String(message));
       },
       exit: (code) => {
         throw new Error(`exit ${code}`);
@@ -715,7 +717,7 @@ async function runImageGenerate(params: {
         outputCount: result.images.length,
         subdir: "generated",
       });
-      const metadata = await getImageMetadata(written.path).catch(() => undefined);
+      const metadata = await getImageMetadata(image.buffer).catch(() => undefined);
       return {
         ...written,
         width: metadata?.width,
@@ -1183,7 +1185,7 @@ export function registerCapabilityCli(program: Command) {
     .addHelpText(
       "after",
       () =>
-        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/capability", "docs.openclaw.ai/cli/capability")}\n`,
+        `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/infer", "docs.openclaw.ai/cli/infer")}\n`,
     );
 
   registerCapabilityListAndInspect(capability);
@@ -1392,7 +1394,7 @@ export function registerCapabilityCli(program: Command) {
       await runCommandWithRuntime(defaultRuntime, async () => {
         const cfg = loadConfig();
         const selectedProvider = resolveSelectedProviderFromModelRef(
-          cfg.agents?.defaults?.imageGenerationModel?.primary,
+          resolveAgentModelPrimaryValue(cfg.agents?.defaults?.imageGenerationModel),
         );
         const result = listRuntimeImageGenerationProviders({ config: cfg }).map((provider) => ({
           available: true,
@@ -1645,7 +1647,7 @@ export function registerCapabilityCli(program: Command) {
       await runCommandWithRuntime(defaultRuntime, async () => {
         const cfg = loadConfig();
         const selectedGenerationProvider = resolveSelectedProviderFromModelRef(
-          cfg.agents?.defaults?.videoGenerationModel?.primary,
+          resolveAgentModelPrimaryValue(cfg.agents?.defaults?.videoGenerationModel),
         );
         const result = {
           generation: listRuntimeVideoGenerationProviders({ config: cfg }).map((provider) => ({
@@ -1724,11 +1726,11 @@ export function registerCapabilityCli(program: Command) {
         const cfg = loadConfig();
         const selectedSearchProvider =
           typeof cfg.tools?.web?.search?.provider === "string"
-            ? cfg.tools.web.search.provider.trim().toLowerCase()
+            ? normalizeLowercaseStringOrEmpty(cfg.tools.web.search.provider)
             : "";
         const selectedFetchProvider =
           typeof cfg.tools?.web?.fetch?.provider === "string"
-            ? cfg.tools.web.fetch.provider.trim().toLowerCase()
+            ? normalizeLowercaseStringOrEmpty(cfg.tools.web.fetch.provider)
             : "";
         const result = {
           search: listWebSearchProviders({ config: cfg }).map((provider) => ({
