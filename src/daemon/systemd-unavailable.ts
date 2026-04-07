@@ -22,6 +22,9 @@ export function isSystemctlMissingDetail(detail?: string): boolean {
 
 export function isSystemdUserBusUnavailableDetail(detail?: string): boolean {
   const normalized = normalizeDetail(detail);
+  if (normalized.includes("permission denied") || normalized.includes("access denied")) {
+    return false;
+  }
   return (
     normalized.includes("failed to connect to bus") ||
     normalized.includes("failed to connect to user scope bus") ||
