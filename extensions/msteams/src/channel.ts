@@ -317,28 +317,33 @@ function describeMSTeamsMessageTool({
 }: Parameters<
   NonNullable<ChannelMessageActionAdapter["describeMessageTool"]>
 >[0]): ChannelMessageToolDiscovery {
-  const enabled =
-    cfg.channels?.msteams?.enabled !== false &&
-    Boolean(resolveMSTeamsCredentials(cfg.channels?.msteams));
+  const msteamsCfg = cfg.channels?.msteams;
+  const enabled = msteamsCfg?.enabled !== false && Boolean(resolveMSTeamsCredentials(msteamsCfg));
+  const delegatedEnabled = msteamsCfg?.delegatedAuth?.enabled === true;
+  // "react" requires Delegated permissions; only advertise when delegated auth is enabled.
+  // "reactions" (list) is read-only (GET) and works with Application auth.
+  const actions: ChannelMessageActionName[] = enabled
+    ? [
+        "upload-file",
+        "poll",
+        "edit",
+        "delete",
+        "pin",
+        "unpin",
+        "list-pins",
+        "read",
+        "reactions",
+        "search",
+        "member-info",
+        "channel-list",
+        "channel-info",
+      ]
+    : [];
+  if (enabled && delegatedEnabled) {
+    actions.push("react");
+  }
   return {
-    actions: enabled
-      ? ([
-          "upload-file",
-          "poll",
-          "edit",
-          "delete",
-          "pin",
-          "unpin",
-          "list-pins",
-          "read",
-          "react",
-          "reactions",
-          "search",
-          "member-info",
-          "channel-list",
-          "channel-info",
-        ] satisfies ChannelMessageActionName[])
-      : [],
+    actions,
     capabilities: enabled ? ["cards"] : [],
     schema: enabled
       ? {
