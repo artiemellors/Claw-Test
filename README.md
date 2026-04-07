@@ -89,6 +89,10 @@ New install? Start here: [Getting started](https://docs.openclaw.ai/start/gettin
 
 - **[OpenAI](https://openai.com/)** (ChatGPT/Codex)
 
+**Free model providers:**
+
+- **[Gemini AI Cloud](https://github.com/Rocket-Hosting/gemini-ai-cloud)** by Rocket-Hosting — Gemini and Gemma models; free evaluation keys and dedicated access available via [Discord](https://discord.gg/F6mBjR8Jnt)
+
 Model note: while many providers/models are supported, for the best experience and lower prompt-injection risk use the strongest latest-generation model available to you. See [Onboarding](https://docs.openclaw.ai/start/onboarding).
 
 ## Models (selection + auth)
