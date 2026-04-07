@@ -31,9 +31,13 @@ export function resolveSignalQuoteContext(params: {
     accountId: params.accountId,
   });
   const quoteText = params.dataMessage?.quote?.text?.trim() ?? "";
+  const quoteAuthor = params.dataMessage?.quote?.author;
   const quoteSender = resolveSignalSender({
-    sourceNumber: params.dataMessage?.quote?.author ?? null,
-    sourceUuid: params.dataMessage?.quote?.authorUuid ?? null,
+    sourceNumber: typeof quoteAuthor === "string" ? quoteAuthor : (quoteAuthor?.number ?? null),
+    sourceUuid:
+      (typeof quoteAuthor === "object" && quoteAuthor ? quoteAuthor.uuid : null) ??
+      params.dataMessage?.quote?.authorUuid ??
+      null,
   });
   const quoteSenderAllowed =
     !params.isGroup || params.effectiveGroupAllow.length === 0
@@ -53,6 +57,12 @@ export function resolveSignalQuoteContext(params: {
     quoteSenderAllowed,
     visibleQuoteText: decision.include ? quoteText : "",
     visibleQuoteSender:
-      decision.include && quoteSender ? formatSignalSenderDisplay(quoteSender) : undefined,
+      !decision.include
+        ? undefined
+        : typeof quoteAuthor === "object" && quoteAuthor?.name?.trim()
+          ? quoteAuthor.name.trim()
+          : quoteSender
+            ? formatSignalSenderDisplay(quoteSender)
+            : undefined,
   };
 }
