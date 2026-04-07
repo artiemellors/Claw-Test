@@ -161,9 +161,9 @@ function missingUiHtml() {
 </html>`;
 }
 
-function resolveUiDistDir(overrideDir?: string | null) {
+function resolveUiDistDir(overrideDir?: string) {
   if (overrideDir?.trim()) {
-    return overrideDir;
+    return path.resolve(overrideDir);
   }
   const candidates = [
     fileURLToPath(new URL("../web/dist", import.meta.url)),
@@ -387,8 +387,8 @@ function proxyUpgradeRequest(params: {
   params.socket.on("close", closeBoth);
 }
 
-function tryResolveUiAsset(pathname: string, overrideDir?: string | null): string | null {
-  const distDir = resolveUiDistDir(overrideDir);
+function tryResolveUiAsset(pathname: string, overrideDistDir?: string): string | null {
+  const distDir = resolveUiDistDir(overrideDistDir);
   if (!fs.existsSync(distDir)) {
     return null;
   }
