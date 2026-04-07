@@ -123,6 +123,7 @@ describe("resolveMattermostReplyRootId with block streaming payloads", () => {
     // mode, the deliver callback should still use the existing threadRootId.
     expect(
       resolveMattermostReplyRootId({
+        kind: "channel",
         threadRootId: "thread-root-1",
         replyToId: "streamed-reply-id",
       }),
@@ -134,6 +135,7 @@ describe("resolveMattermostReplyRootId with block streaming payloads", () => {
     // inbound post id as replyToId from the "all" threading mode.
     expect(
       resolveMattermostReplyRootId({
+        kind: "channel",
         replyToId: "inbound-post-for-threading",
       }),
     ).toBe("inbound-post-for-threading");
@@ -144,6 +146,7 @@ describe("resolveMattermostReplyRootId", () => {
   it("uses replyToId for top-level replies", () => {
     expect(
       resolveMattermostReplyRootId({
+        kind: "channel",
         replyToId: "inbound-post-123",
       }),
     ).toBe("inbound-post-123");
@@ -152,6 +155,7 @@ describe("resolveMattermostReplyRootId", () => {
   it("keeps the thread root when replying inside an existing thread", () => {
     expect(
       resolveMattermostReplyRootId({
+        kind: "channel",
         threadRootId: "thread-root-456",
         replyToId: "child-post-789",
       }),
@@ -159,7 +163,28 @@ describe("resolveMattermostReplyRootId", () => {
   });
 
   it("falls back to undefined when neither reply target is available", () => {
-    expect(resolveMattermostReplyRootId({})).toBeUndefined();
+    expect(resolveMattermostReplyRootId({ kind: "channel" })).toBeUndefined();
+  });
+
+  it("returns undefined for direct messages regardless of replyToId", () => {
+    // DMs must never be threaded even if a downstream payload carries replyToId.
+    // Fixes: DM replies created threads despite replyToMode always being "off" for DMs.
+    expect(
+      resolveMattermostReplyRootId({
+        kind: "direct",
+        replyToId: "triggering-post-id",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for direct messages regardless of threadRootId", () => {
+    expect(
+      resolveMattermostReplyRootId({
+        kind: "direct",
+        threadRootId: "some-thread-root",
+        replyToId: "some-post",
+      }),
+    ).toBeUndefined();
   });
 });
 
