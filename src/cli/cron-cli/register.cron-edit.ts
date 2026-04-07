@@ -15,7 +15,6 @@ import {
 import { getCronChannelOptions, parseDurationMs, warnIfCronSchedulerDisabled } from "./shared.js";
 import { resolveDefaultCronStaggerMs } from "../../cron/stagger.js";
 import {
-  normalizeOptionalText,
   normalizeRequiredName,
 } from "../../cron/service/normalize.js";
 import { theme } from "../../terminal/theme.js";
@@ -151,8 +150,8 @@ function computeDisplayAfter(
   }
   if (key === "description") {
     if (typeof patchVal === "string") {
-      const normalized = normalizeOptionalText(patchVal);
-      // normalizeOptionalText returns undefined when the value is blank/whitespace-only,
+      const normalized = normalizeOptionalString(patchVal);
+      // normalizeOptionalString returns undefined when the value is blank/whitespace-only,
       // which means the real update will clear the field. Return null here so
       // formatPatchValue renders "(cleared)" instead of the misleading "(unchanged)".
       return normalized === undefined ? null : normalized;
@@ -219,10 +218,6 @@ function buildCronPatchDiff(existing: CronJob, patch: Record<string, unknown>): 
   // Mirror the side-effect in applyJobPatch: when sessionTarget becomes "main",
   // any non-webhook delivery config is silently cleared by the real update path.
   // Show this as an explicit delivery → (cleared) line so the preview is accurate.
-  const effectiveSessionTarget =
-    typeof patch["sessionTarget"] === "string"
-      ? patch["sessionTarget"]
-      : existing.sessionTarget;
   if (effectiveSessionTarget === "main") {
     const effectiveDelivery =
       "delivery" in patch
