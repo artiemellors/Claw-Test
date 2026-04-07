@@ -92,5 +92,23 @@ describe("readProviderBaseUrl", () => {
         "http://localhost:11434/",
       );
     });
+
+    it("ignores prototype pollution for baseUrl (CWE-1321)", () => {
+      const provider = { models: [] } as { baseUrl?: string; models: unknown[] };
+      // Simulate prototype pollution
+      Object.setPrototypeOf(provider, { baseUrl: "http://malicious:11434" });
+      expect(readProviderBaseUrl(provider)).toBeUndefined();
+      Object.setPrototypeOf(provider, null); // Cleanup
+    });
+
+    it("ignores prototype pollution for baseURL (CWE-1321)", () => {
+      const provider = { models: [] } as unknown as { baseUrl?: string; models: unknown[] } & {
+        baseURL?: string;
+      };
+      // Simulate prototype pollution
+      Object.setPrototypeOf(provider, { baseURL: "http://malicious:11434" });
+      expect(readProviderBaseUrl(provider)).toBeUndefined();
+      Object.setPrototypeOf(provider, null); // Cleanup
+    });
   });
 });

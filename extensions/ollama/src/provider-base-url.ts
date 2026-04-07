@@ -17,14 +17,23 @@ export function readProviderBaseUrl(provider: ModelProviderConfig | undefined): 
   }
 
   // Prefer canonical baseUrl (lowercase)
-  if (typeof provider.baseUrl === "string" && provider.baseUrl.trim()) {
+  // Use Object.hasOwn to avoid prototype pollution (CWE-1321)
+  if (
+    Object.hasOwn(provider, "baseUrl") &&
+    typeof provider.baseUrl === "string" &&
+    provider.baseUrl.trim()
+  ) {
     return provider.baseUrl.trim();
   }
 
   // Fall back to baseURL (uppercase, OpenAI SDK convention)
-  // Cast to access the alternate spelling
-  const providerWithAlternate = provider as ModelProviderConfig & { baseURL?: string };
-  if (typeof providerWithAlternate.baseURL === "string" && providerWithAlternate.baseURL.trim()) {
+  // Use Object.hasOwn to avoid prototype pollution (CWE-1321)
+  const providerWithAlternate = provider as ModelProviderConfig & { baseURL?: unknown };
+  if (
+    Object.hasOwn(providerWithAlternate, "baseURL") &&
+    typeof providerWithAlternate.baseURL === "string" &&
+    providerWithAlternate.baseURL.trim()
+  ) {
     return providerWithAlternate.baseURL.trim();
   }
 
