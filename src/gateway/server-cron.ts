@@ -29,7 +29,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { runHeartbeatOnce } from "../infra/heartbeat-runner.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
-import { SsrFBlockedError } from "../infra/net/ssrf.js";
+import { SsrFBlockedError, type SsrFPolicy } from "../infra/net/ssrf.js";
 import { deliverOutboundPayloads } from "../infra/outbound/deliver.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
@@ -43,6 +43,10 @@ export type GatewayCronState = {
 };
 
 const CRON_WEBHOOK_TIMEOUT_MS = 10_000;
+
+function resolveCronWebhookPolicy(cfg: ReturnType<typeof loadConfig>): SsrFPolicy | undefined {
+  return cfg.cron?.webhookAllowPrivateNetwork === true ? { allowPrivateNetwork: true } : undefined;
+}
 
 function trimToOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -105,6 +109,7 @@ async function postCronWebhook(params: {
   blockedLog: string;
   failedLog: string;
   logger: ReturnType<typeof getChildLogger>;
+  policy?: SsrFPolicy;
 }): Promise<void> {
   const abortController = new AbortController();
   const timeout = setTimeout(() => {
@@ -120,6 +125,7 @@ async function postCronWebhook(params: {
         body: JSON.stringify(params.payload),
         signal: abortController.signal,
       },
+      policy: params.policy,
     });
     await result.release();
   } catch (err) {
@@ -315,6 +321,7 @@ export function buildGatewayCronService(params: {
     sendCronFailureAlert: async ({ job, text, channel, to, mode, accountId }) => {
       const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
       const webhookToken = trimToOptionalString(params.cfg.cron?.webhookToken);
+      const webhookPolicy = resolveCronWebhookPolicy(params.cfg);
 
       // Webhook mode requires a URL - fail closed if missing
       if (mode === "webhook" && !to) {
@@ -340,6 +347,7 @@ export function buildGatewayCronService(params: {
             blockedLog: "cron: failure alert webhook blocked by SSRF guard",
             failedLog: "cron: failure alert webhook failed",
             logger: cronLogger,
+            policy: webhookPolicy,
           });
         } else {
           cronLogger.warn(
@@ -376,6 +384,7 @@ export function buildGatewayCronService(params: {
       params.broadcast("cron", evt, { dropIfSlow: true });
       if (evt.action === "finished") {
         const webhookToken = trimToOptionalString(params.cfg.cron?.webhookToken);
+        const webhookPolicy = resolveCronWebhookPolicy(params.cfg);
         const legacyWebhook = trimToOptionalString(params.cfg.cron?.webhook);
         const job = cron.getJob(evt.jobId);
         const legacyNotify = (job as { notify?: unknown } | undefined)?.notify === true;
@@ -419,6 +428,7 @@ export function buildGatewayCronService(params: {
               blockedLog: "cron: webhook delivery blocked by SSRF guard",
               failedLog: "cron: webhook delivery failed",
               logger: cronLogger,
+              policy: webhookPolicy,
             });
           })();
         }
@@ -454,6 +464,7 @@ export function buildGatewayCronService(params: {
                       blockedLog: "cron: failure destination webhook blocked by SSRF guard",
                       failedLog: "cron: failure destination webhook failed",
                       logger: cronLogger,
+                      policy: webhookPolicy,
                     });
                   })();
                 } else {
