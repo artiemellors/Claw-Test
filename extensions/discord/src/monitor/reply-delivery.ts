@@ -2,6 +2,7 @@ import type { RequestClient } from "@buape/carbon";
 import { resolveAgentAvatar } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import type { MarkdownTableMode, ReplyToMode } from "openclaw/plugin-sdk/config-runtime";
+import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import type { ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import {
@@ -17,6 +18,7 @@ import {
   type RetryRunner,
 } from "openclaw/plugin-sdk/retry-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-runtime";
 import { resolveDiscordAccount } from "../accounts.js";
 import { chunkDiscordTextWithMode } from "../chunk.js";
@@ -402,8 +404,35 @@ export async function deliverDiscordReply(params: {
   const request: RetryRunner | undefined = channelId
     ? createDiscordRetryRunner({ configRetry: account.config.retry })
     : undefined;
+  const hookRunner = getGlobalHookRunner();
+  const hasMessageSendingHooks = hookRunner?.hasHooks("message_sending") ?? false;
   let deliveredAny = false;
-  for (const payload of params.replies) {
+  for (let payload of params.replies) {
+    // Run message_sending plugin hook (may cancel or transform delivery)
+    if (hasMessageSendingHooks) {
+      const hookResult = await hookRunner?.runMessageSending(
+        {
+          to: params.target,
+          content: payload.text || "",
+          metadata: {
+            channel: "discord",
+            accountId: params.accountId,
+          },
+        },
+        {
+          channelId: "discord",
+          accountId: params.accountId,
+        },
+      );
+      if (hookResult?.cancel) {
+        logVerbose(`Discord outbound to ${params.target} cancelled by message_sending hook`);
+        continue;
+      }
+      if (typeof hookResult?.content === "string" && hookResult.content !== (payload.text || "")) {
+        payload = { ...payload, text: hookResult.content };
+      }
+    }
+
     const resolvePayloadReplyTo = createPayloadReplyToResolver({
       payload,
       replyToMode,

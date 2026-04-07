@@ -1,4 +1,5 @@
 import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-runtime";
+import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
@@ -43,12 +44,42 @@ export async function deliverWebReply(params: {
   skipLog?: boolean;
   tableMode?: MarkdownTableMode;
 }) {
-  const { replyResult, msg, maxMediaBytes, textLimit, replyLogger, connectionId, skipLog } = params;
+  let { replyResult } = params;
+  const { msg, maxMediaBytes, textLimit, replyLogger, connectionId, skipLog } = params;
   const replyStarted = Date.now();
   if (shouldSuppressReasoningReply(replyResult)) {
     whatsappOutboundLog.debug(`Suppressed reasoning payload to ${msg.from}`);
     return;
   }
+
+  // Run message_sending plugin hook (may cancel delivery)
+  const hookRunner = getGlobalHookRunner();
+  if (hookRunner?.hasHooks("message_sending")) {
+    const hookResult = await hookRunner.runMessageSending(
+      {
+        to: msg.from ?? "",
+        content: replyResult.text || "",
+        metadata: {
+          channel: "whatsapp",
+          mediaUrls: resolveOutboundMediaUrls(replyResult),
+        },
+      },
+      {
+        channelId: "whatsapp",
+      },
+    );
+    if (hookResult?.cancel) {
+      whatsappOutboundLog.info(`Outbound to ${msg.from} cancelled by message_sending hook`);
+      return;
+    }
+    if (
+      typeof hookResult?.content === "string" &&
+      hookResult.content !== (replyResult.text || "")
+    ) {
+      replyResult = { ...replyResult, text: hookResult.content };
+    }
+  }
+
   const tableMode = params.tableMode ?? "code";
   const chunkMode = params.chunkMode ?? "length";
   const convertedText = markdownToWhatsApp(
