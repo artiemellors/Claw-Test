@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
 import { t } from "../i18n/index.ts";
-import { refreshChat } from "./app-chat.ts";
+import { refreshChat, refreshChatAvatar } from "./app-chat.ts";
 import { syncUrlWithSessionKey } from "./app-settings.ts";
 import type { AppViewState } from "./app-view-state.ts";
 import { OpenClawApp } from "./app.ts";
@@ -525,6 +525,7 @@ export function switchChatSession(state: AppViewState, nextSessionKey: string) {
     true,
   );
   void loadChatHistory(state as unknown as ChatState);
+  void refreshChatAvatar(state);
   void refreshSessionOptions(state);
 }
 
