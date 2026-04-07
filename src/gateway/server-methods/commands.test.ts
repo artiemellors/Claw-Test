@@ -49,7 +49,7 @@ const mockChatCommands: ChatCommandDefinition[] = [
     description: "Run code review",
     textAliases: [],
     acceptsArgs: true,
-    scope: "native",
+    scope: "both",
     category: "tools",
   },
   {
