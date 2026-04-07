@@ -13,9 +13,21 @@ import {
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeOptionalString, readStringValue } from "../../shared/string-coerce.js";
+import {
+  createPluginActivationSource,
+  normalizePluginsConfig,
+  resolvePluginActivationState,
+} from "../../plugins/config-state.js";
+import { loadPluginManifestRegistry } from "../../plugins/manifest-registry.js";
+import { collectEnabledInsecureOrDangerousFlags } from "../../security/dangerous-config-flags.js";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agent-scope.js";
 import { stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
-import { callGatewayTool, readGatewayCallOptions } from "./gateway.js";
+import {
+  callGatewayTool,
+  isRemoteGatewayTargetForAgentTools,
+  readGatewayCallOptions,
+} from "./gateway.js";
 
 const log = createSubsystemLogger("gateway-tool");
 
@@ -93,9 +105,252 @@ function getValueAtPath(config: Record<string, unknown>, path: string): unknown 
   return getValueAtCanonicalPath(config, path.replace(/^tools\.exec\./, "tools.bash."));
 }
 
+function resolvePluginIdFromDangerousFlag(
+  flag: string,
+  config: Record<string, unknown>,
+): string | undefined {
+  // Use actual plugin entry keys so dotted IDs are handled correctly.
+  // Take the longest matching prefix to avoid shorter IDs shadowing longer ones
+  // when IDs share a prefix shape (e.g. "foo" and "foo.bar").
+  const pluginEntries = (config as { plugins?: { entries?: Record<string, unknown> } }).plugins
+    ?.entries;
+  if (!pluginEntries) {
+    return undefined;
+  }
+  let best: string | undefined;
+  for (const id of Object.keys(pluginEntries)) {
+    if (
+      flag.startsWith(`plugins.entries.${id}.config.`) &&
+      (best === undefined || id.length > best.length)
+    ) {
+      best = id;
+    }
+  }
+  return best;
+}
+
+function isPluginEntryDangerousFlag(
+  flag: string,
+  config: Record<string, unknown>,
+): flag is `plugins.entries.${string}.config.${string}` {
+  return resolvePluginIdFromDangerousFlag(flag, config) !== undefined;
+}
+
+function getPluginIdFromDangerousFlag(
+  flag: `plugins.entries.${string}.config.${string}`,
+  config: Record<string, unknown>,
+): string {
+  return resolvePluginIdFromDangerousFlag(flag, config) ?? flag.split(".")[2] ?? "";
+}
+
+function isPluginDangerousFlagActive(
+  config: Record<string, unknown>,
+  flag: `plugins.entries.${string}.config.${string}`,
+): boolean {
+  const rootConfig = config as OpenClawConfig;
+  const pluginId = getPluginIdFromDangerousFlag(flag, config);
+  const pluginEntry = (rootConfig.plugins as { entries?: Record<string, unknown> } | undefined)
+    ?.entries?.[pluginId];
+  if (!pluginEntry || typeof pluginEntry !== "object" || Array.isArray(pluginEntry)) {
+    return false;
+  }
+  const workspaceDir = resolveAgentWorkspaceDir(rootConfig, resolveDefaultAgentId(rootConfig));
+  const manifestRecord = loadPluginManifestRegistry({
+    config: rootConfig,
+    workspaceDir,
+    env: process.env,
+    cache: true,
+  }).plugins.find((plugin) => plugin.id === pluginId);
+  if (!manifestRecord) {
+    return (pluginEntry as { enabled?: unknown }).enabled !== false;
+  }
+
+  const normalizedPlugins = normalizePluginsConfig(rootConfig.plugins);
+  const activationSource = createPluginActivationSource({
+    config: rootConfig,
+    plugins: normalizedPlugins,
+  });
+  return resolvePluginActivationState({
+    id: pluginId,
+    origin: manifestRecord.origin,
+    config: normalizedPlugins,
+    rootConfig,
+    enabledByDefault: manifestRecord.enabledByDefault,
+    activationSource,
+  }).activated;
+}
+
+type DangerousFlagToken = {
+  fingerprintIdentity?: string;
+  legacyMappingIdentity?: string;
+  idIdentity?: string;
+  identities: string[];
+  renderedFlag: string;
+};
+
+function toStableJsonWithoutKeys(value: unknown, keysToOmit: ReadonlySet<string>): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => toStableJsonWithoutKeys(entry, keysToOmit));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record)
+      .filter((key) => !keysToOmit.has(key))
+      .toSorted()
+      .map((key) => [key, toStableJsonWithoutKeys(record[key], keysToOmit)]),
+  );
+}
+
+const HOOK_MAPPING_FINGERPRINT_OMIT_KEYS = new Set<string>(["id"]);
+const HOOK_MAPPING_LEGACY_IDENTITY_OMIT_KEYS = new Set<string>([
+  // Omit id so that gaining an id (or changing an existing id) does not shift the legacy
+  // identity of an already-dangerous mapping. The id-match step in takeMatchingDangerousFlag
+  // takes precedence for id-vs-id comparisons, so omitting id here does not enable a bypass.
+  "id",
+  "allowUnsafeExternalContent",
+  "deliver",
+  "messageTemplate",
+  "name",
+  "textTemplate",
+  "thinking",
+  "timeoutSeconds",
+]);
+
+function createDangerousConfigFlagToken(
+  flag: string,
+  config: Record<string, unknown>,
+): DangerousFlagToken {
+  const hookMatch = /^hooks\.mappings\[(\d+)\]\.(.+)$/.exec(flag);
+  if (!hookMatch) {
+    return { identities: [flag], renderedFlag: flag };
+  }
+
+  const [, indexStr, suffix] = hookMatch;
+  const index = parseInt(indexStr, 10);
+  const mappings = (config as { hooks?: { mappings?: unknown[] } }).hooks?.mappings;
+  const identities = [`hooks.mappings[index=${index}].${suffix}`];
+  if (!Array.isArray(mappings)) {
+    return { identities, renderedFlag: flag };
+  }
+
+  const mapping = mappings[index];
+  if (!mapping || typeof mapping !== "object") {
+    return { identities, renderedFlag: flag };
+  }
+
+  let idIdentity: string | undefined;
+  const id = (mapping as Record<string, unknown>).id;
+  if (typeof id === "string" && id.trim()) {
+    idIdentity = `hooks.mappings[id=${id}].${suffix}`;
+    identities.unshift(idIdentity);
+  }
+  // Always compute legacyMappingIdentity for all hook mappings, not only id-less ones.
+  // When a legacy (id-less) mapping gains an id in the same write that also changes a
+  // non-routing field (e.g. textTemplate), the old token has legacyMappingIdentity but no
+  // idIdentity, and the new token has idIdentity. Without legacyMappingIdentity on the new
+  // token, neither the id-match nor the legacy-match steps in takeMatchingDangerousFlag fire;
+  // fingerprint matching then fails (textTemplate changed), and the write is incorrectly
+  // blocked as a newly enabled dangerous flag.
+  const legacyMappingIdentity = `hooks.mappings[legacy=${JSON.stringify(toStableJsonWithoutKeys(mapping, HOOK_MAPPING_LEGACY_IDENTITY_OMIT_KEYS))}].${suffix}`;
+  identities.push(legacyMappingIdentity);
+  const fingerprintIdentity = `hooks.mappings[fingerprint=${JSON.stringify(toStableJsonWithoutKeys(mapping, HOOK_MAPPING_FINGERPRINT_OMIT_KEYS))}].${suffix}`;
+  identities.unshift(fingerprintIdentity);
+  return { fingerprintIdentity, legacyMappingIdentity, idIdentity, identities, renderedFlag: flag };
+}
+
+function takeMatchingDangerousFlag(
+  remainingCurrentTokens: DangerousFlagToken[],
+  nextToken: DangerousFlagToken,
+): boolean {
+  const matchIndex = remainingCurrentTokens.findIndex((currentToken) => {
+    if (currentToken.idIdentity && nextToken.idIdentity) {
+      return currentToken.idIdentity === nextToken.idIdentity;
+    }
+    if (currentToken.legacyMappingIdentity && nextToken.legacyMappingIdentity) {
+      return currentToken.legacyMappingIdentity === nextToken.legacyMappingIdentity;
+    }
+    // When both tokens have a fingerprint (the mapping object existed in the config at tokenization
+    // time), match by fingerprint only — not by index. This prevents a swap of one dangerous
+    // mapping for a *different* dangerous mapping at the same array index from being treated as
+    // "already present" just because the index-based identity strings overlap.
+    if (currentToken.fingerprintIdentity && nextToken.fingerprintIdentity) {
+      return currentToken.fingerprintIdentity === nextToken.fingerprintIdentity;
+    }
+    // Fallback for index-only tokens (mapping object was absent from config at tokenization time).
+    return currentToken.identities.some((identity) => nextToken.identities.includes(identity));
+  });
+  if (matchIndex < 0) {
+    return false;
+  }
+  remainingCurrentTokens.splice(matchIndex, 1);
+  return true;
+}
+
+function collectNewlyEnabledDangerousConfigFlags(
+  currentConfig: Record<string, unknown>,
+  nextConfig: Record<string, unknown>,
+): string[] {
+  const currentFlags = collectEnabledInsecureOrDangerousFlags(currentConfig as OpenClawConfig);
+  const remainingCurrentTokens = currentFlags.map((flag) =>
+    createDangerousConfigFlagToken(flag, currentConfig),
+  );
+  // Honor the legacy tools.bash.applyPatch.workspaceOnly alias in the baseline so that
+  // canonicalizing an already-dangerous legacy config to tools.exec.* is not treated as
+  // a newly enabled dangerous flag.
+  if (getValueAtPath(currentConfig, "tools.exec.applyPatch.workspaceOnly") === false) {
+    const key = "tools.exec.applyPatch.workspaceOnly=false";
+    if (
+      !remainingCurrentTokens.some((token) =>
+        token.identities.includes("tools.exec.applyPatch.workspaceOnly=false"),
+      )
+    ) {
+      remainingCurrentTokens.push(createDangerousConfigFlagToken(key, currentConfig));
+    }
+  }
+  const nextFlags = collectEnabledInsecureOrDangerousFlags(nextConfig as OpenClawConfig);
+  const newlyEnabledFlags = nextFlags.filter(
+    (flag) =>
+      !takeMatchingDangerousFlag(
+        remainingCurrentTokens,
+        createDangerousConfigFlagToken(flag, nextConfig),
+      ),
+  );
+  const currentActivePluginFlags = new Set(
+    currentFlags.filter(
+      (flag): flag is `plugins.entries.${string}.config.${string}` =>
+        isPluginEntryDangerousFlag(flag, currentConfig) &&
+        isPluginDangerousFlagActive(currentConfig, flag),
+    ),
+  );
+  for (const flag of nextFlags) {
+    if (
+      !isPluginEntryDangerousFlag(flag, nextConfig) ||
+      !isPluginDangerousFlagActive(nextConfig, flag)
+    ) {
+      continue;
+    }
+    if (currentActivePluginFlags.has(flag) || newlyEnabledFlags.includes(flag)) {
+      continue;
+    }
+    newlyEnabledFlags.push(flag);
+  }
+  if (
+    getValueAtPath(currentConfig, "tools.exec.applyPatch.workspaceOnly") !== false &&
+    getValueAtPath(nextConfig, "tools.exec.applyPatch.workspaceOnly") === false &&
+    !newlyEnabledFlags.includes("tools.exec.applyPatch.workspaceOnly=false")
+  ) {
+    newlyEnabledFlags.push("tools.exec.applyPatch.workspaceOnly=false");
+  }
+  return newlyEnabledFlags;
+}
+
 function assertGatewayConfigMutationAllowed(params: {
   action: "config.apply" | "config.patch";
   currentConfig: Record<string, unknown>;
+  gatewayUrl?: string;
   raw: string;
 }): void {
   const parsed = parseGatewayConfigMutationRaw(params.raw, params.action);
@@ -112,11 +367,50 @@ function assertGatewayConfigMutationAllowed(params: {
         getValueAtPath(nextConfig, path),
       ),
   );
-  if (changedProtectedPaths.length === 0) {
+  if (changedProtectedPaths.length > 0) {
+    throw new Error(
+      `gateway ${params.action} cannot change protected config paths: ${changedProtectedPaths.join(", ")}`,
+    );
+  }
+  // Load config fresh (not captured opts.config) so gateway.mode changes during a session are seen.
+  if (isRemoteGatewayTargetForAgentTools({ gatewayUrl: params.gatewayUrl })) {
+    // Check all plugin activation-related paths: entries, global enabled, allow/deny lists.
+    // Any of these can activate plugins with dangerous host-specific config on a remote gateway.
+    const REMOTE_PLUGIN_ACTIVATION_PATHS = [
+      "plugins.entries",
+      "plugins.enabled",
+      "plugins.allow",
+      "plugins.deny",
+      "plugins.slots",
+      // plugins.load.paths introduces new plugin manifests on the remote host; local contract
+      // discovery cannot evaluate their dangerous flags, so block load-path changes remotely.
+      "plugins.load",
+      // channels.<id>.enabled activates bundled channel plugins via isBundledChannelEnabledByChannelConfig;
+      // block channel config changes on remote gateways to close this activation path.
+      "channels",
+    ] as const;
+    const changedActivationPaths = REMOTE_PLUGIN_ACTIVATION_PATHS.filter(
+      (path) =>
+        !isDeepStrictEqual(
+          getValueAtCanonicalPath(params.currentConfig, path),
+          getValueAtCanonicalPath(nextConfig, path),
+        ),
+    );
+    if (changedActivationPaths.length > 0) {
+      throw new Error(
+        `gateway ${params.action} cannot change plugin config on remote gateways because dangerous plugin flags are host-specific`,
+      );
+    }
+  }
+  const newlyEnabledDangerousFlags = collectNewlyEnabledDangerousConfigFlags(
+    params.currentConfig,
+    nextConfig,
+  );
+  if (newlyEnabledDangerousFlags.length === 0) {
     return;
   }
   throw new Error(
-    `gateway ${params.action} cannot change protected config paths: ${changedProtectedPaths.join(", ")}`,
+    `gateway ${params.action} cannot enable dangerous config flags: ${newlyEnabledDangerousFlags.join(", ")}`,
   );
 }
 
@@ -274,6 +568,7 @@ export function createGatewayTool(opts?: {
         assertGatewayConfigMutationAllowed({
           action: "config.apply",
           currentConfig: snapshotConfig,
+          gatewayUrl: gatewayOpts.gatewayUrl,
           raw,
         });
         const result = await callGatewayTool("config.apply", gatewayOpts, {
@@ -291,6 +586,7 @@ export function createGatewayTool(opts?: {
         assertGatewayConfigMutationAllowed({
           action: "config.patch",
           currentConfig: snapshotConfig,
+          gatewayUrl: gatewayOpts.gatewayUrl,
           raw,
         });
         const result = await callGatewayTool("config.patch", gatewayOpts, {
