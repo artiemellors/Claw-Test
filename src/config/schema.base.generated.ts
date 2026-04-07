@@ -6998,6 +6998,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                   description:
                     "Optional runtime descriptor for this agent. Use embedded for default OpenClaw execution or acp for external ACP harness defaults.",
                 },
+                lane: {
+                  type: "string",
+                },
+                laneConcurrency: {
+                  type: "integer",
+                  exclusiveMinimum: 0,
+                  maximum: 9007199254740991,
+                },
               },
               required: ["id"],
               additionalProperties: false,
@@ -26316,6 +26324,16 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Agent Sandbox Docker Allow Container Namespace Join",
       help: "Per-agent DANGEROUS override for container namespace joins in sandbox Docker network mode.",
       tags: ["security", "access", "storage", "advanced"],
+    },
+    "agents.list[].lane": {
+      label: "Agent Queue Lane",
+      help: 'Custom global queue lane name for this agent\'s inbound runs. Agents with different lanes process messages in parallel instead of sharing the "main" lane. Example: "agent-one-lane".',
+      tags: ["advanced"],
+    },
+    "agents.list[].laneConcurrency": {
+      label: "Agent Lane Concurrency",
+      help: "Concurrency cap for this agent's custom lane. Defaults to agents.defaults.maxConcurrent when omitted.",
+      tags: ["performance"],
     },
     "discovery.mdns.mode": {
       label: "mDNS Discovery Mode",
