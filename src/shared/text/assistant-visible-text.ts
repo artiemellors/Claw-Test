@@ -587,9 +587,9 @@ function stripLeakedReasoningPreamble(text: string): string {
 // Structural contamination detector
 // ---------------------------------------------------------------------------
 
-// Match leaked metadata envelopes: handles fenced schema blocks with optional trailing debris
+// Match leaked metadata envelopes: preamble, fenced schema, metadata objects, trailing garbage fence
 const CONTAM_ENVELOPE_RE =
-  /(?:Conversation info[^\n]*\n)?```json[\s\S]*?"schema"[\s\S]*?```(?:[\s\S]*?```[^\n]*```)?/gs;
+  /(?:Conversation info[^\n]*\n)?```json[\s\S]*?"schema"[\s\S]*?```[\s\S]*?\{\s*"(?:message_id|sender_id|label|name|username)"[^}]*\}(?:[\s\S]*?```[^\n]*```)?/gs;
 const CONTAM_CSS_RE = /(?:^|\n)\s*(?:[\w.-]+\s*\{\s*)?(?:[a-z-]+\s*:\s*[^;]+;\s*){2,}(?:\}\s*)?(?:\n|$)/gm;
 const CONTAM_FENCE_RE = /```\s*```/g;
 const CONTAM_CODE_DEBRIS_RE = /(?:^|\n)\s*\.\w+\([^)]*\)\)?;?/gm;
