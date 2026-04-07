@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { routeReply } from "../auto-reply/reply/route-reply.js";
+import { loadCombinedSessionStoreForGateway } from "../gateway/session-utils.js";
 import { analyzeShellCommand } from "../infra/exec-approvals-analysis.js";
 import {
   type ExecHost,
@@ -15,8 +17,9 @@ import {
   getShellPathFromLoginShell,
   resolveShellEnvFallbackTimeoutMs,
 } from "../infra/shell-env.js";
-import { logInfo } from "../logger.js";
+import { logInfo, logWarn } from "../logger.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
+import { runRubberBandCheck } from "../security/rubberband.js";
 import { splitShellArgs } from "../utils/shell-argv.js";
 import { markBackgrounded } from "./bash-process-registry.js";
 import { processGatewayAllowlist } from "./bash-tools.exec-host-gateway.js";
@@ -33,6 +36,7 @@ import {
   normalizeExecTarget,
   normalizePathPrepend,
   resolveExecTarget,
+  emitExecSystemEvent,
   resolveApprovalRunningNoticeMs,
   runExecProcess,
   execSchema,
@@ -1226,6 +1230,33 @@ function rejectExecApprovalShellCommand(command: string): void {
   }
 }
 
+async function notifyUserChannel(
+  text: string,
+  opts: { sessionKey?: string; cfg: Parameters<typeof routeReply>[0]["cfg"] },
+) {
+  const sessionKey = opts.sessionKey?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  try {
+    const { store } = loadCombinedSessionStoreForGateway(opts.cfg);
+    const session = store[sessionKey];
+    if (!session?.lastChannel || !session?.lastTo) {
+      return;
+    }
+    await routeReply({
+      payload: { text },
+      channel: session.lastChannel,
+      to: session.lastTo,
+      sessionKey,
+      accountId: session.lastAccountId,
+      cfg: opts.cfg,
+    });
+  } catch (err) {
+    logWarn(`rubberband: failed to notify channel: ${String(err)}`);
+  }
+}
+
 /**
  * Show the exact approved token in hints. Absolute paths stay absolute so the
  * hint cannot imply an equivalent PATH lookup that resolves to a different binary.
@@ -1332,6 +1363,35 @@ export function createExecTool(
   const notifyOnExitEmptySuccess = defaults?.notifyOnExitEmptySuccess === true;
   const notifySessionKey = defaults?.sessionKey?.trim() || undefined;
   const approvalRunningNoticeMs = resolveApprovalRunningNoticeMs(defaults?.approvalRunningNoticeMs);
+  // RubberBand config from defaults (only include defined values)
+  const rbConfig: Partial<{
+    enabled: boolean;
+    mode: "block" | "alert" | "log" | "off" | "shadow";
+    thresholds: { alert: number; block: number };
+    allowedDestinations: string[];
+    notifyChannel: boolean;
+  }> = {};
+  if (defaults?.rubberband) {
+    if (defaults.rubberband.enabled !== undefined) {
+      rbConfig.enabled = defaults.rubberband.enabled;
+    }
+    if (defaults.rubberband.mode !== undefined) {
+      rbConfig.mode = defaults.rubberband.mode;
+    }
+    if (defaults.rubberband.thresholds) {
+      rbConfig.thresholds = {
+        alert: defaults.rubberband.thresholds.alert ?? 40,
+        block: defaults.rubberband.thresholds.block ?? 60,
+      };
+    }
+    if (defaults.rubberband.allowedDestinations) {
+      rbConfig.allowedDestinations = defaults.rubberband.allowedDestinations;
+    }
+    if (defaults.rubberband.notifyChannel !== undefined) {
+      rbConfig.notifyChannel = defaults.rubberband.notifyChannel;
+    }
+  }
+  const rbNotifyCfg = defaults?.cfg;
   // Derive agentId only when sessionKey is an agent session key.
   const parsedAgentSession = parseAgentSessionKey(defaults?.sessionKey);
   const agentId =
@@ -1579,6 +1639,18 @@ export function createExecTool(
       } else {
         applyPathPrepend(env, defaultPathPrepend);
       }
+
+      // === RUBBERBAND CHECK (before execution) ===
+      await runRubberBandCheck({
+        command: params.command,
+        rbConfig,
+        warnings,
+        notifySessionKey,
+        rbNotifyCfg,
+        emitExecSystemEvent,
+        notifyUserChannel,
+      });
+      // === END RUBBERBAND ===
 
       if (host === "node") {
         return executeNodeHostCommand({
