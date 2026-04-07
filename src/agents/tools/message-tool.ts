@@ -48,8 +48,18 @@ function actionNeedsExplicitTarget(action: ChannelMessageActionName): boolean {
 }
 function buildRoutingSchema() {
   return {
-    channel: Type.Optional(Type.String()),
-    target: Type.Optional(channelTargetSchema({ description: "Target channel/user id or name." })),
+    channel: Type.Optional(
+      Type.String({
+        description:
+          "Message provider to use (for example discord, slack, telegram). Do not put a Discord channel id here; use target.",
+      }),
+    ),
+    target: Type.Optional(
+      channelTargetSchema({
+        description:
+          "Target channel/user/thread id or name within the selected/current provider. Use this for Discord channel ids.",
+      }),
+    ),
     targets: Type.Optional(channelTargetsSchema()),
     accountId: Type.Optional(Type.String()),
     dryRun: Type.Optional(Type.Boolean()),
@@ -168,6 +178,12 @@ function buildFetchSchema() {
     limit: Type.Optional(Type.Number()),
     pageSize: Type.Optional(Type.Number()),
     pageToken: Type.Optional(Type.String()),
+    detail: Type.Optional(
+      stringEnum(["compact", "raw"], {
+        description:
+          "Read payload detail level. compact is the safe default for Discord history; raw keeps the full normalized payload.",
+      }),
+    ),
     before: Type.Optional(Type.String()),
     after: Type.Optional(Type.String()),
     around: Type.Optional(Type.String()),
@@ -567,7 +583,8 @@ function buildMessageToolDescription(options?: {
   agentId?: string;
   requesterSenderId?: string;
 }): string {
-  const baseDescription = "Send, delete, and manage messages via channel plugins.";
+  const baseDescription =
+    "Send, delete, and manage messages via channel plugins. Use `target` for channel/user/thread ids or names; `channel` selects the provider.";
   const resolvedOptions = options ?? {};
   const currentChannel = normalizeMessageChannel(resolvedOptions.currentChannel);
 
@@ -747,8 +764,6 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
       if (requireExplicitTarget && actionNeedsExplicitTarget(action)) {
         const explicitTarget =
           (typeof params.target === "string" && params.target.trim().length > 0) ||
-          (typeof params.to === "string" && params.to.trim().length > 0) ||
-          (typeof params.channelId === "string" && params.channelId.trim().length > 0) ||
           (Array.isArray(params.targets) &&
             params.targets.some((value) => typeof value === "string" && value.trim().length > 0));
         if (!explicitTarget) {
