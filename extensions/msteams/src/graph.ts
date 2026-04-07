@@ -83,6 +83,29 @@ export async function fetchGraphJson<T>(params: {
   return (await res.json()) as T;
 }
 
+/**
+ * Fetch JSON from an absolute Graph API URL (e.g. @odata.nextLink pagination URLs).
+ * Unlike {@link fetchGraphJson}, this does not prepend GRAPH_ROOT.
+ */
+export async function fetchGraphAbsoluteUrl<T>(params: {
+  token: string;
+  url: string;
+  headers?: Record<string, string>;
+}): Promise<T> {
+  const res = await fetch(params.url, {
+    headers: {
+      "User-Agent": buildUserAgent(),
+      Authorization: `Bearer ${params.token}`,
+      ...params.headers,
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Graph ${params.url} failed (${res.status}): ${text || "unknown error"}`);
+  }
+  return (await res.json()) as T;
+}
+
 export async function resolveGraphToken(cfg: unknown): Promise<string> {
   const creds = resolveMSTeamsCredentials(
     (cfg as { channels?: { msteams?: unknown } })?.channels?.msteams as MSTeamsConfig | undefined,
@@ -137,6 +160,32 @@ export async function postGraphBetaJson<T>(params: {
     errorPrefix: "Graph beta POST",
   });
   return readOptionalGraphJson<T>(res);
+}
+
+export async function postGraphBetaJson<T>(params: {
+  token: string;
+  path: string;
+  body?: unknown;
+}): Promise<T> {
+  const res = await fetch(`${GRAPH_BETA}${params.path}`, {
+    method: "POST",
+    headers: {
+      "User-Agent": buildUserAgent(),
+      Authorization: `Bearer ${params.token}`,
+      "Content-Type": "application/json",
+    },
+    body: params.body !== undefined ? JSON.stringify(params.body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Graph beta POST ${params.path} failed (${res.status}): ${text || "unknown error"}`,
+    );
+  }
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
+  return (await res.json()) as T;
 }
 
 export async function deleteGraphRequest(params: { token: string; path: string }): Promise<void> {
