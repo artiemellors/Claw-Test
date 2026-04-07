@@ -156,39 +156,84 @@ export default definePluginEntry({
       }
     }
 
-    let runtimePromise: Promise<VoiceCallRuntime> | null = null;
-    let runtime: VoiceCallRuntime | null = null;
+    const VOICE_RUNTIME_KEY = Symbol.for("openclaw.voice.runtime");
+    const VOICE_RUNTIME_PROMISE_KEY = Symbol.for("openclaw.voice.runtimePromise");
+    const VOICE_RUNTIME_STOP_PROMISE_KEY = Symbol.for("openclaw.voice.runtimeStopPromise");
 
-    const ensureRuntime = async () => {
+    const globalState = globalThis as typeof globalThis & {
+      [VOICE_RUNTIME_KEY]?: VoiceCallRuntime | null;
+      [VOICE_RUNTIME_PROMISE_KEY]?: Promise<VoiceCallRuntime> | null;
+      [VOICE_RUNTIME_STOP_PROMISE_KEY]?: Promise<void> | null;
+    };
+
+    globalState[VOICE_RUNTIME_KEY] ??= null;
+    globalState[VOICE_RUNTIME_PROMISE_KEY] ??= null;
+    globalState[VOICE_RUNTIME_STOP_PROMISE_KEY] ??= null;
+    const RETRY_ENSURE_RUNTIME = Symbol("voice-call.ensureRuntime.retry");
+
+    const ensureRuntime = async (): Promise<VoiceCallRuntime> => {
       if (!config.enabled) {
         throw new Error("Voice call disabled in plugin config");
       }
       if (!validation.valid) {
         throw new Error(validation.errors.join("; "));
       }
-      if (runtime) {
-        return runtime;
+
+      while (true) {
+        if (globalState[VOICE_RUNTIME_STOP_PROMISE_KEY]) {
+          await globalState[VOICE_RUNTIME_STOP_PROMISE_KEY];
+          continue;
+        }
+
+        if (globalState[VOICE_RUNTIME_KEY]) {
+          return globalState[VOICE_RUNTIME_KEY];
+        }
+
+        let runtimePromise = globalState[VOICE_RUNTIME_PROMISE_KEY];
+        if (!runtimePromise) {
+          runtimePromise = createVoiceCallRuntime({
+            config,
+            coreConfig: api.config as CoreConfig,
+            fullConfig: api.config,
+            agentRuntime: api.runtime.agent,
+            ttsRuntime: api.runtime.tts,
+            logger: api.logger,
+          });
+          globalState[VOICE_RUNTIME_PROMISE_KEY] = runtimePromise;
+        }
+
+        try {
+          const runtime = await runtimePromise;
+          const stopPromise: Promise<void> | null =
+            globalState[VOICE_RUNTIME_STOP_PROMISE_KEY] ?? null;
+          if (stopPromise !== null) {
+            await Promise.resolve(stopPromise);
+            if (globalState[VOICE_RUNTIME_KEY]) {
+              return globalState[VOICE_RUNTIME_KEY];
+            }
+            throw RETRY_ENSURE_RUNTIME;
+          }
+          if (globalState[VOICE_RUNTIME_PROMISE_KEY] !== runtimePromise) {
+            if (globalState[VOICE_RUNTIME_KEY]) {
+              return globalState[VOICE_RUNTIME_KEY];
+            }
+            throw RETRY_ENSURE_RUNTIME;
+          }
+          globalState[VOICE_RUNTIME_KEY] = runtime;
+          return runtime;
+        } catch (err) {
+          if (err === RETRY_ENSURE_RUNTIME) {
+            continue;
+          }
+          if (globalState[VOICE_RUNTIME_PROMISE_KEY] === runtimePromise) {
+            // Reset shared state so the next call can retry instead of caching a
+            // rejected promise or stale runtime across plugin contexts.
+            globalState[VOICE_RUNTIME_PROMISE_KEY] = null;
+            globalState[VOICE_RUNTIME_KEY] = null;
+          }
+          throw err;
+        }
       }
-      if (!runtimePromise) {
-        runtimePromise = createVoiceCallRuntime({
-          config,
-          coreConfig: api.config as CoreConfig,
-          fullConfig: api.config,
-          agentRuntime: api.runtime.agent,
-          ttsRuntime: api.runtime.tts,
-          logger: api.logger,
-        });
-      }
-      try {
-        runtime = await runtimePromise;
-      } catch (err) {
-        // Reset so the next call can retry instead of caching the
-        // rejected promise forever (which also leaves the port orphaned
-        // if the server started before the failure).  See: #32387
-        runtimePromise = null;
-        throw err;
-      }
-      return runtime;
     };
 
     const sendError = (respond: (ok: boolean, payload?: unknown) => void, err: unknown) => {
@@ -537,15 +582,29 @@ export default definePluginEntry({
         }
       },
       stop: async () => {
-        if (!runtimePromise) {
+        if (globalState[VOICE_RUNTIME_STOP_PROMISE_KEY]) {
+          await globalState[VOICE_RUNTIME_STOP_PROMISE_KEY];
           return;
         }
-        try {
-          const rt = await runtimePromise;
+        // Claim shared state before awaiting so only one plugin context performs teardown.
+        const capturedPromise = globalState[VOICE_RUNTIME_PROMISE_KEY];
+        const capturedRuntime = globalState[VOICE_RUNTIME_KEY];
+        if (!capturedPromise && !capturedRuntime) {
+          return;
+        }
+        globalState[VOICE_RUNTIME_PROMISE_KEY] = null;
+        globalState[VOICE_RUNTIME_KEY] = null;
+        const stopPromise = (async () => {
+          const rt = capturedRuntime ?? (await capturedPromise!);
           await rt.stop();
+        })();
+        globalState[VOICE_RUNTIME_STOP_PROMISE_KEY] = stopPromise;
+        try {
+          await stopPromise;
         } finally {
-          runtimePromise = null;
-          runtime = null;
+          if (globalState[VOICE_RUNTIME_STOP_PROMISE_KEY] === stopPromise) {
+            globalState[VOICE_RUNTIME_STOP_PROMISE_KEY] = null;
+          }
         }
       },
     });
