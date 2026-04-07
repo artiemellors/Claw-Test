@@ -568,3 +568,23 @@ export function registerCronEditCommand(cron: Command) {
   );
 }
 
+
+/**
+ * Test-only thin wrapper: runs the cron-edit command with the given argv and runtime.
+ *
+ * Builds a minimal Commander program, registers the cron-edit subcommand, and
+ * drives it with `program.parseAsync`. Designed for unit tests that need to
+ * exercise the action handler directly without constructing a full CLI program.
+ *
+ * @internal
+ */
+export async function registerCronEdit(
+  args: string[],
+  _runtime: typeof defaultRuntime,
+): Promise<void> {
+  const { Command } = await import("commander");
+  const program = new Command("openclaw").exitOverride();
+  const cron = program.command("cron").exitOverride();
+  registerCronEditCommand(cron);
+  await program.parseAsync(args, { from: "user" });
+}
