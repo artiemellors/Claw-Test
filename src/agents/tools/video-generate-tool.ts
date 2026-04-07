@@ -360,6 +360,8 @@ function validateVideoGenerationCapabilities(params: {
     !resolveVideoGenerationSupportedDurations({
       provider,
       model: params.model,
+      inputImageCount: params.inputImageCount,
+      inputVideoCount: params.inputVideoCount,
     }) &&
     typeof caps.maxDurationSeconds === "number" &&
     params.durationSeconds > caps.maxDurationSeconds
