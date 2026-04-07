@@ -7,6 +7,4 @@ services:
    ports: ["3000:3000"]
    environment:
      REDIS_URL: redis://redis:6379
-     RATE_LIMIT_WINDOW_SEC: 60
-     RATE_LIMIT_MAX_REQUESTS: 100
    depends_on: [redis]

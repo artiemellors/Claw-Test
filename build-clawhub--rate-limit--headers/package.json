@@ -1,0 +1,14 @@
+{
+ "name": "clawhub-rate-limit-visibility",
+ "version": "1.0.0",
+ "description": "Rate limit visibility for Clawhub APIs",
+ "main": "src/server.js",
+ "scripts": {
+   "start": "node src/server.js",
+   "dev": "node --watch src/server.js"
+ },
+ "dependencies": {
+   "express": "^4.21.0",
+   "ioredis": "^5.4.1"
+ }
+}
