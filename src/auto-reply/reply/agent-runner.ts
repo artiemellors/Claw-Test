@@ -311,7 +311,7 @@ export async function runReplyAgent(params: {
       replyOperation,
     });
 
-    activeSessionEntry = await runMemoryFlushIfNeeded({
+    const memoryFlushResult = await runMemoryFlushIfNeeded({
       cfg,
       followupRun,
       promptForEstimate: followupRun.prompt,
@@ -327,6 +327,8 @@ export async function runReplyAgent(params: {
       isHeartbeat,
       replyOperation,
     });
+    activeSessionEntry = memoryFlushResult.sessionEntry;
+    const didPerformMemoryFlush = memoryFlushResult.performedMemoryFlush;
 
     runFollowupTurn = createFollowupRunner({
       opts,
