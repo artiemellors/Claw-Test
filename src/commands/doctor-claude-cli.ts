@@ -14,6 +14,7 @@ import { readClaudeCliCredentialsCached } from "../agents/cli-credentials.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveExecutablePath } from "../infra/executable-path.js";
+import { normalizeOptionalString, resolvePrimaryStringValue } from "../shared/string-coerce.js";
 import { note } from "../terminal/note.js";
 import { shortenHomePath } from "../utils.js";
 
@@ -27,26 +28,8 @@ type ClaudeCliReadableCredential =
 
 type ClaudeCliDirHealth = "present" | "missing" | "not_directory" | "unreadable" | "readonly";
 
-function resolveConfiguredPrimaryModelRef(
-  value: string | { primary?: string; fallbacks?: string[] } | undefined,
-): string | undefined {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed || undefined;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  const primary = value.primary;
-  if (typeof primary !== "string") {
-    return undefined;
-  }
-  const trimmed = primary.trim();
-  return trimmed || undefined;
-}
-
 function usesClaudeCliModelSelection(cfg: OpenClawConfig): boolean {
-  const primary = resolveConfiguredPrimaryModelRef(
+  const primary = resolvePrimaryStringValue(
     cfg.agents?.defaults?.model as string | { primary?: string; fallbacks?: string[] } | undefined,
   );
   if (primary?.trim().toLowerCase().startsWith(`${CLAUDE_CLI_PROVIDER}/`)) {
@@ -83,7 +66,7 @@ function resolveClaudeCliCommand(cfg: OpenClawConfig): string {
     if (key.trim().toLowerCase() !== CLAUDE_CLI_PROVIDER) {
       continue;
     }
-    const command = entry?.command?.trim();
+    const command = normalizeOptionalString(entry?.command);
     if (command) {
       return command;
     }
@@ -120,7 +103,7 @@ export function resolveClaudeCliProjectDirForWorkspace(params: {
   workspaceDir: string;
   homeDir?: string;
 }): string {
-  const homeDir = params.homeDir?.trim() || process.env.HOME || os.homedir();
+  const homeDir = normalizeOptionalString(params.homeDir) || process.env.HOME || os.homedir();
   const canonicalWorkspaceDir = canonicalizeWorkspaceDir(params.workspaceDir);
   return path.join(
     homeDir,
