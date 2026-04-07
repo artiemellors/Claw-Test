@@ -1,3 +1,4 @@
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
   definePluginEntry,
   type ProviderAuthContext,
@@ -23,6 +24,7 @@ import {
   minimaxMediaUnderstandingProvider,
   minimaxPortalMediaUnderstandingProvider,
 } from "./media-understanding-provider.js";
+import { buildMinimaxMusicGenerationProvider } from "./music-generation-provider.js";
 import type { MiniMaxRegion } from "./oauth.js";
 import { applyMinimaxApiConfig, applyMinimaxApiConfigCn } from "./onboard.js";
 import { buildMinimaxPortalProvider, buildMinimaxProvider } from "./provider-catalog.js";
@@ -168,7 +170,7 @@ function createOAuthHandler(region: MiniMaxRegion) {
         ],
       });
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
+      const errorMsg = formatErrorMessage(err);
       progress.stop(`MiniMax OAuth failed: ${errorMsg}`);
       await ctx.prompter.note(
         "If OAuth fails, verify your MiniMax account has portal access and try again.",
@@ -314,6 +316,7 @@ export default definePluginEntry({
     });
     api.registerImageGenerationProvider(buildMinimaxImageGenerationProvider());
     api.registerImageGenerationProvider(buildMinimaxPortalImageGenerationProvider());
+    api.registerMusicGenerationProvider(buildMinimaxMusicGenerationProvider());
     api.registerVideoGenerationProvider(buildMinimaxVideoGenerationProvider());
     api.registerSpeechProvider(buildMinimaxSpeechProvider());
     api.registerWebSearchProvider(createMiniMaxWebSearchProvider());

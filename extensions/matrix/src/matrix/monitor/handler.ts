@@ -6,8 +6,15 @@ import {
 } from "openclaw/plugin-sdk/config-runtime";
 import { getSessionBindingService } from "openclaw/plugin-sdk/conversation-runtime";
 import { evaluateSupplementalContextVisibility } from "openclaw/plugin-sdk/security-runtime";
-import type { CoreConfig, MatrixRoomConfig, ReplyToMode } from "../../types.js";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
+import type {
+  CoreConfig,
+  MatrixRoomConfig,
+  MatrixStreamingMode,
+  ReplyToMode,
+} from "../../types.js";
 import { createMatrixDraftStream } from "../draft-stream.js";
+import { formatMatrixErrorMessage } from "../errors.js";
 import { isMatrixMediaSizeLimitError } from "../media-errors.js";
 import {
   formatMatrixMediaTooLargeText,
@@ -31,6 +38,7 @@ import {
   sendReadReceiptMatrix,
   sendTypingMatrix,
 } from "../send.js";
+import { MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY } from "../send/types.js";
 import { resolveMatrixStoredSessionMeta } from "../session-store-metadata.js";
 import { resolveMatrixMonitorAccessState } from "./access-state.js";
 import { resolveMatrixAckReactionConfig } from "./ack-config.js";
@@ -76,6 +84,18 @@ const MAX_TRACKED_PAIRING_REPLY_SENDERS = 512;
 const MAX_TRACKED_SHARED_DM_CONTEXT_NOTICES = 512;
 type MatrixAllowBotsMode = "off" | "mentions" | "all";
 
+async function redactMatrixDraftEvent(
+  client: MatrixClient,
+  roomId: string,
+  draftEventId: string,
+): Promise<void> {
+  await client.redactEvent(roomId, draftEventId).catch(() => {});
+}
+
+function buildMatrixFinalizedPreviewContent(): Record<string, unknown> {
+  return { [MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY]: true };
+}
+
 export type MatrixMonitorHandlerParams = {
   client: MatrixClient;
   core: PluginRuntime;
@@ -96,7 +116,7 @@ export type MatrixMonitorHandlerParams = {
   dmThreadReplies?: "off" | "inbound" | "always";
   /** DM session grouping behavior. */
   dmSessionScope?: "per-user" | "per-room";
-  streaming: "partial" | "off";
+  streaming: MatrixStreamingMode;
   blockStreamingEnabled: boolean;
   dmEnabled: boolean;
   dmPolicy: "open" | "pairing" | "allowlist" | "disabled";
@@ -888,7 +908,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
             if (isMatrixMediaSizeLimitError(err)) {
               mediaSizeLimitExceeded = true;
             }
-            const errorText = err instanceof Error ? err.message : String(err);
+            const errorText = formatMatrixErrorMessage(err);
             logVerboseMessage(
               `matrix: media download failed room=${roomId} id=${event.event_id ?? "unknown"} type=${content.msgtype} error=${errorText}`,
             );
@@ -1128,7 +1148,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         envelope: envelopeOptions,
         body: textWithId,
       });
-      const groupSystemPrompt = roomConfig?.systemPrompt?.trim() || undefined;
+      const groupSystemPrompt = normalizeOptionalString(roomConfig?.systemPrompt);
       const ctxPayload = core.channel.reply.finalizeInboundContext({
         Body: body,
         RawBody: bodyText,
@@ -1280,14 +1300,15 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           });
         },
       });
-      const draftStreamingEnabled = streaming === "partial";
+      const draftStreamingEnabled = streaming !== "off";
+      const quietDraftStreaming = streaming === "quiet";
       const draftReplyToId = replyToMode !== "off" && !threadTarget ? _messageId : undefined;
-      let currentDraftReplyToId = draftReplyToId;
       const draftStream = draftStreamingEnabled
         ? createMatrixDraftStream({
             roomId,
             client,
             cfg,
+            mode: quietDraftStreaming ? "quiet" : "partial",
             threadId: threadTarget,
             replyToId: draftReplyToId,
             preserveReplyId: replyToMode === "all",
@@ -1308,6 +1329,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
       let latestDraftFullText = "";
       const pendingDraftBoundaries: PendingDraftBoundary[] = [];
       const latestQueuedDraftBoundaryOffsets = new Map<number, number>();
+      let currentDraftReplyToId = draftReplyToId;
       // Set after the first final payload consumes the draft event so
       // subsequent finals go through normal delivery.
       let draftConsumed = false;
@@ -1380,9 +1402,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
               const hasMedia = Boolean(payload.mediaUrl) || (payload.mediaUrls?.length ?? 0) > 0;
 
               await draftStream.stop();
+              const draftEventId = draftStream.eventId();
 
-              // After the first final payload consumes the draft, subsequent
-              // finals must go through normal delivery to avoid overwriting.
               if (draftConsumed) {
                 await deliverMatrixReplies({
                   cfg,
@@ -1400,17 +1421,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 return;
               }
 
-              // Read event id after stop() — flush may have created the
-              // initial message while draining pending text.
-              const draftEventId = draftStream.eventId();
-
-              // If the payload carries a reply target that differs from the
-              // draft's, fall through to normal delivery — Matrix edits
-              // cannot change the reply relation on an existing event.
-              // Skip when replyToMode is "off" (replies stripped anyway)
-              // or when threadTarget is set (thread relations take
-              // precedence over replyToId in deliverMatrixReplies).
-              const payloadReplyToId = payload.replyToId?.trim() || undefined;
+              const payloadReplyToId = normalizeOptionalString(payload.replyToId);
               const payloadReplyMismatch =
                 replyToMode !== "off" &&
                 !threadTarget &&
@@ -1424,58 +1435,61 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 !payloadReplyMismatch &&
                 !mustDeliverFinalNormally
               ) {
-                // Text-only: final edit of the draft message.  Skip if
-                // stop() already flushed identical text to avoid a
-                // redundant API call that wastes rate-limit budget.
-                if (payload.text !== draftStream.lastSentText()) {
-                  try {
+                try {
+                  const requiresFinalEdit =
+                    quietDraftStreaming || !draftStream.matchesPreparedText(payload.text);
+                  if (requiresFinalEdit) {
                     await editMessageMatrix(roomId, draftEventId, payload.text, {
                       client,
                       cfg,
                       threadId: threadTarget,
                       accountId: _route.accountId,
-                    });
-                  } catch {
-                    // Edit failed (rate limit, server error) — redact the
-                    // stale draft and fall back to normal delivery so the
-                    // user still gets the final answer.
-                    await client.redactEvent(roomId, draftEventId).catch(() => {});
-                    await deliverMatrixReplies({
-                      cfg,
-                      replies: [payload],
-                      roomId,
-                      client,
-                      runtime,
-                      textLimit,
-                      replyToMode,
-                      threadId: threadTarget,
-                      accountId: _route.accountId,
-                      mediaLocalRoots,
-                      tableMode,
+                      extraContent: quietDraftStreaming
+                        ? buildMatrixFinalizedPreviewContent()
+                        : undefined,
                     });
                   }
+                } catch {
+                  await redactMatrixDraftEvent(client, roomId, draftEventId);
+                  await deliverMatrixReplies({
+                    cfg,
+                    replies: [payload],
+                    roomId,
+                    client,
+                    runtime,
+                    textLimit,
+                    replyToMode,
+                    threadId: threadTarget,
+                    accountId: _route.accountId,
+                    mediaLocalRoots,
+                    tableMode,
+                  });
                 }
                 draftConsumed = true;
               } else if (draftEventId && hasMedia && !payloadReplyMismatch) {
-                // Media payload: finalize draft text, send media separately.
                 let textEditOk = !mustDeliverFinalNormally;
-                if (textEditOk && payload.text && payload.text !== draftStream.lastSentText()) {
-                  textEditOk = await editMessageMatrix(roomId, draftEventId, payload.text, {
+                const payloadText = payload.text;
+                const requiresFinalTextEdit =
+                  quietDraftStreaming ||
+                  (typeof payloadText === "string" &&
+                    !draftStream.matchesPreparedText(payloadText));
+                if (textEditOk && payloadText && requiresFinalTextEdit) {
+                  textEditOk = await editMessageMatrix(roomId, draftEventId, payloadText, {
                     client,
                     cfg,
                     threadId: threadTarget,
                     accountId: _route.accountId,
+                    extraContent: quietDraftStreaming
+                      ? buildMatrixFinalizedPreviewContent()
+                      : undefined,
                   }).then(
                     () => true,
                     () => false,
                   );
                 }
                 const reusesDraftAsFinalText = Boolean(payload.text?.trim()) && textEditOk;
-                // If the text edit failed, or there is no final text to reuse
-                // the preview, redact the stale draft and include text in media
-                // delivery so the final caption is not lost.
                 if (!reusesDraftAsFinalText) {
-                  await client.redactEvent(roomId, draftEventId).catch(() => {});
+                  await redactMatrixDraftEvent(client, roomId, draftEventId);
                 }
                 await deliverMatrixReplies({
                   cfg,
@@ -1494,11 +1508,8 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 });
                 draftConsumed = true;
               } else {
-                // Redact stale draft when the final delivery will create a
-                // new message (reply-target mismatch, preview overflow, or no
-                // usable draft).
                 if (draftEventId && (payloadReplyMismatch || mustDeliverFinalNormally)) {
-                  await client.redactEvent(roomId, draftEventId).catch(() => {});
+                  await redactMatrixDraftEvent(client, roomId, draftEventId);
                 }
                 await deliverMatrixReplies({
                   cfg,
@@ -1515,9 +1526,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 });
               }
 
-              // Only reset for intermediate blocks — after the final delivery
-              // the stream must stay stopped so late async callbacks cannot
-              // create ghost messages.
               if (info.kind === "block") {
                 draftConsumed = false;
                 advanceDraftBlockBoundary({ fallbackToLatestEnd: true });
