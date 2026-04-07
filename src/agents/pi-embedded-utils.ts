@@ -18,7 +18,7 @@ export function isAssistantMessage(msg: AgentMessage | undefined): msg is Assist
  */
 export function stripMinimaxToolCallXml(text: string): string {
   if (!text) {
-    return "";
+    return text;
   }
   if (!/minimax:tool_call/i.test(text)) {
     return text;
@@ -50,7 +50,7 @@ const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
 
 export function stripModelSpecialTokens(text: string): string {
   if (!text) {
-    return "";
+    return text;
   }
   if (!MODEL_SPECIAL_TOKEN_RE.test(text)) {
     return text;
@@ -67,7 +67,7 @@ export function stripModelSpecialTokens(text: string): string {
  */
 export function stripDowngradedToolCallText(text: string): string {
   if (!text) {
-    return "";
+    return text;
   }
   if (!/\[Tool (?:Call|Result)/i.test(text) && !/\[Historical context/i.test(text)) {
     return text;
