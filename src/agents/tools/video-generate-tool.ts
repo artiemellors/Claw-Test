@@ -11,6 +11,7 @@ import {
   resolveVideoGenerationMode,
   resolveVideoGenerationModeCapabilities,
 } from "../../video-generation/capabilities.js";
+import { resolveVideoGenerationSupportedDurations } from "../../video-generation/duration-support.js";
 import { parseVideoGenerationModelRef } from "../../video-generation/model-ref.js";
 import {
   generateVideo,
