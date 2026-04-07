@@ -75,7 +75,27 @@ vi.mock("./queue.js", () => ({
 const TEST_AGENT_DIR = "/tmp/agent";
 const OPENAI_DATE_PROFILE_ID = "20251001";
 
-type ApiKeyProfile = { type: "api_key"; provider: string; key: string };
+type TestProfile =
+  | { type: "api_key"; provider: string; key: string }
+  | {
+      type: "oauth";
+      provider: string;
+      access: string;
+      refresh: string;
+      expires: number;
+    };
+
+function createOAuthAccessToken(planType: string) {
+  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      "https://api.openai.com/auth": {
+        chatgpt_plan_type: planType,
+      },
+    }),
+  ).toString("base64url");
+  return `${header}.${payload}.sig`;
+}
 
 function baseAliasIndex(): ModelAliasIndex {
   return { byAlias: new Map(), byKey: new Map() };
@@ -112,7 +132,7 @@ afterEach(() => {
   clearRuntimeAuthProfileStoreSnapshots();
 });
 
-function setAuthProfiles(profiles: Record<string, ApiKeyProfile>) {
+function setAuthProfiles(profiles: Record<string, TestProfile>) {
   replaceRuntimeAuthProfileStoreSnapshots([
     {
       agentDir: TEST_AGENT_DIR,
@@ -128,7 +148,7 @@ function createDateAuthProfiles(provider: string, id = OPENAI_DATE_PROFILE_ID) {
       provider,
       key: "sk-test",
     },
-  } satisfies Record<string, ApiKeyProfile>;
+  } satisfies Record<string, TestProfile>;
 }
 
 function createGptAliasIndex(): ModelAliasIndex {
@@ -158,7 +178,7 @@ function resolveModelSelectionForCommand(params: {
 
 async function persistModelDirectiveForTest(params: {
   command: string;
-  profiles?: Record<string, ApiKeyProfile>;
+  profiles?: Record<string, TestProfile>;
   aliasIndex?: ModelAliasIndex;
   allowedModelKeys: string[];
   sessionEntry?: SessionEntry;
@@ -386,6 +406,94 @@ describe("/model chat UX", () => {
     expect(resolved.profileOverride).toBe(OPENAI_DATE_PROFILE_ID);
   });
 
+  it("uses the current auth profile path for bare model switches", () => {
+    setAuthProfiles({
+      "openai-codex:default": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: createOAuthAccessToken("pro"),
+        refresh: "rt-test",
+        expires: Date.now() + 60_000,
+      },
+    });
+
+    const resolved = resolveModelSelectionFromDirective({
+      directives: parseInlineDirectives("/model spark"),
+      cfg: { commands: { text: true } } as unknown as OpenClawConfig,
+      agentDir: TEST_AGENT_DIR,
+      defaultProvider: "openai-codex",
+      defaultModel: "gpt-5.4",
+      aliasIndex: {
+        byAlias: new Map([
+          [
+            "spark",
+            { alias: "spark", ref: { provider: "openai-codex", model: "gpt-5.3-codex-spark" } },
+          ],
+        ]),
+        byKey: new Map([["openai-codex/gpt-5.3-codex-spark", ["spark"]]]),
+      },
+      allowedModelKeys: new Set(["openai-codex/gpt-5.3-codex-spark", "openai-codex/gpt-5.4"]),
+      allowedModelCatalog: [],
+      provider: "openai-codex",
+      sessionEntry: {
+        authProfileOverride: "openai-codex:default",
+        authProfileOverrideSource: "auto",
+      },
+    });
+
+    expect(resolved.errorText).toBeUndefined();
+    expect(resolved.modelSelection).toEqual({
+      provider: "openai-codex",
+      model: "gpt-5.3-codex-spark",
+      isDefault: false,
+      alias: "spark",
+    });
+    expect(resolved.profileOverride).toBe("openai-codex:default");
+    expect(resolved.profileOverrideSource).toBe("auto");
+  });
+
+  it("rejects spark on a plus auth profile and leaves the selection unchanged", () => {
+    setAuthProfiles({
+      "openai-codex:plus": {
+        type: "oauth",
+        provider: "openai-codex",
+        access: createOAuthAccessToken("plus"),
+        refresh: "rt-test",
+        expires: Date.now() + 60_000,
+      },
+    });
+
+    const resolved = resolveModelSelectionFromDirective({
+      directives: parseInlineDirectives("/model spark"),
+      cfg: { commands: { text: true } } as unknown as OpenClawConfig,
+      agentDir: TEST_AGENT_DIR,
+      defaultProvider: "openai-codex",
+      defaultModel: "gpt-5.4",
+      aliasIndex: {
+        byAlias: new Map([
+          [
+            "spark",
+            { alias: "spark", ref: { provider: "openai-codex", model: "gpt-5.3-codex-spark" } },
+          ],
+        ]),
+        byKey: new Map([["openai-codex/gpt-5.3-codex-spark", ["spark"]]]),
+      },
+      allowedModelKeys: new Set(["openai-codex/gpt-5.3-codex-spark", "openai-codex/gpt-5.4"]),
+      allowedModelCatalog: [],
+      provider: "openai-codex",
+      sessionEntry: {
+        authProfileOverride: "openai-codex:plus",
+        authProfileOverrideSource: "user",
+      },
+    });
+
+    expect(resolved.modelSelection).toBeUndefined();
+    expect(resolved.errorText).toContain(
+      'Spark is not supported on auth profile "openai-codex:plus" (Plus plan).',
+    );
+    expect(resolved.errorText).toContain("Model/auth unchanged.");
+  });
+
   it("keeps @YYYYMMDD as part of the model when the stored numeric profile is for another provider", () => {
     setAuthProfiles(createDateAuthProfiles("anthropic"));
 
@@ -457,6 +565,16 @@ describe("/model chat UX", () => {
     expect(sessionEntry.providerOverride).toBe("custom");
     expect(sessionEntry.modelOverride).toBe(`vertex-ai_claude-haiku-4-5@${OPENAI_DATE_PROFILE_ID}`);
     expect(sessionEntry.authProfileOverride).toBe("work");
+  });
+
+  it("persists an explicit default-model selection", async () => {
+    const { sessionEntry } = await persistModelDirectiveForTest({
+      command: "/model claude-opus-4-5",
+      allowedModelKeys: ["anthropic/claude-opus-4-5", "openai/gpt-4o"],
+    });
+
+    expect(sessionEntry.providerOverride).toBe("anthropic");
+    expect(sessionEntry.modelOverride).toBe("claude-opus-4-5");
   });
 
   it("ignores invalid mixed-content model directives during persistence", async () => {
