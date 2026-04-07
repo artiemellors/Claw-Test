@@ -169,6 +169,27 @@ describe("systemd availability", () => {
 
     await expect(isSystemdUserServiceAvailable({ USER: "debian" })).resolves.toBe(true);
   });
+
+  it("falls back to --user when sudo machine scope fails with permission denied", async () => {
+    execFileMock
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        // Under sudo, first attempt is --machine which fails
+        expect(args).toEqual(["--machine", "ai@", "--user", "status"]);
+        const err = createExecFileError("Failed to connect to bus: Permission denied", {
+          stderr: "Failed to connect to bus: Permission denied",
+        });
+        cb(err, "", "");
+      })
+      .mockImplementationOnce((_cmd, args, _opts, cb) => {
+        // Falls back to direct --user which succeeds
+        expect(args).toEqual(["--user", "status"]);
+        cb(null, "", "");
+      });
+
+    await expect(isSystemdUserServiceAvailable({ SUDO_USER: "ai", USER: "ai" })).resolves.toBe(
+      true,
+    );
+  });
 });
 
 describe("isSystemdServiceEnabled", () => {
