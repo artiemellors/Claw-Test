@@ -1473,6 +1473,7 @@ export function renderApp(state: AppViewState) {
                 onWorkspaceSelectFile: (path) => {
                   state.workspaceSelectedFile = path;
                   state.workspaceEditedContent = null;
+                  state.workspaceFileContent = null;
                   if (resolvedAgentId && path) {
                     const requestedPath = path;
                     void state.client
