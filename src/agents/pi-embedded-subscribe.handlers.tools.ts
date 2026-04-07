@@ -430,6 +430,7 @@ async function emitToolResultOutput(params: {
     if (!ctx.params.onToolResult) {
       return;
     }
+    ctx.state.deterministicApprovalPromptPending = true;
     try {
       await ctx.params.onToolResult(
         buildExecApprovalPendingReplyPayload({
@@ -446,7 +447,9 @@ async function emitToolResultOutput(params: {
       );
       ctx.state.deterministicApprovalPromptSent = true;
     } catch {
-      // ignore delivery failures
+      ctx.state.deterministicApprovalPromptSent = false;
+    } finally {
+      ctx.state.deterministicApprovalPromptPending = false;
     }
     return;
   }
@@ -456,6 +459,7 @@ async function emitToolResultOutput(params: {
     if (!ctx.params.onToolResult) {
       return;
     }
+    ctx.state.deterministicApprovalPromptPending = true;
     try {
       await ctx.params.onToolResult?.(
         buildExecApprovalUnavailableReplyPayload({
@@ -469,7 +473,9 @@ async function emitToolResultOutput(params: {
       );
       ctx.state.deterministicApprovalPromptSent = true;
     } catch {
-      // ignore delivery failures
+      ctx.state.deterministicApprovalPromptSent = false;
+    } finally {
+      ctx.state.deterministicApprovalPromptPending = false;
     }
     return;
   }
