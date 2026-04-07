@@ -170,6 +170,15 @@ export async function createGatewayRuntimeState(params: {
           "Host-header origin fallback weakens origin checks and should only be used as break-glass.",
       );
     }
+    // Create WebSocketServer first (with noServer: true) so we can attach upgrade handlers
+    // before HTTP servers start listening. This prevents a race condition where connections
+    // arrive before the upgrade handler is attached, which causes silent 1006 errors.
+    const wss = new WebSocketServer({
+      noServer: true,
+      maxPayload: MAX_PREAUTH_PAYLOAD_BYTES,
+    });
+    const preauthConnectionBudget = createPreauthConnectionBudget();
+
     const httpServers: HttpServer[] = [];
     const httpBindHosts: string[] = [];
     for (const host of bindHosts) {
@@ -192,6 +201,17 @@ export async function createGatewayRuntimeState(params: {
         getReadiness: params.getReadiness,
         tlsOptions: params.gatewayTls?.enabled ? params.gatewayTls.tlsOptions : undefined,
       });
+      // Attach upgrade handler BEFORE listening to prevent race condition
+      attachGatewayUpgradeHandler({
+        httpServer,
+        wss,
+        canvasHost,
+        clients,
+        preauthConnectionBudget,
+        resolvedAuth: params.resolvedAuth,
+        rateLimiter: params.rateLimiter,
+        log: params.log,
+      });
       try {
         await listenGatewayHttpServer({
           httpServer,
@@ -212,23 +232,6 @@ export async function createGatewayRuntimeState(params: {
     const httpServer = httpServers[0];
     if (!httpServer) {
       throw new Error("Gateway HTTP server failed to start");
-    }
-
-    const wss = new WebSocketServer({
-      noServer: true,
-      maxPayload: MAX_PREAUTH_PAYLOAD_BYTES,
-    });
-    const preauthConnectionBudget = createPreauthConnectionBudget();
-    for (const server of httpServers) {
-      attachGatewayUpgradeHandler({
-        httpServer: server,
-        wss,
-        canvasHost,
-        clients,
-        preauthConnectionBudget,
-        resolvedAuth: params.resolvedAuth,
-        rateLimiter: params.rateLimiter,
-      });
     }
 
     const agentRunSeq = new Map<string, number>();
