@@ -1605,6 +1605,7 @@ export function renderApp(state: AppViewState) {
                                 return;
                               }
                               state.workspaceEntries = result?.entries ?? null;
+                              state.workspaceError = null;
                             });
                         }
                       })
