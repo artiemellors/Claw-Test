@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildFullSuiteVitestRunPlans,
   buildVitestRunPlans,
@@ -194,10 +194,13 @@ describe("scripts/test-projects changed-target routing", () => {
 });
 
 describe("scripts/test-projects full-suite sharding", () => {
-  it("splits untargeted runs into fixed shard configs", () => {
+  beforeEach(() => {
     delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+    delete process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
     delete process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD;
+  });
 
+  it("splits untargeted runs into fixed shard configs", () => {
     expect(buildFullSuiteVitestRunPlans([], process.cwd()).map((plan) => plan.config)).toEqual([
       "vitest.full-core-unit-fast.config.ts",
       "vitest.full-core-unit-src.config.ts",
@@ -210,7 +213,15 @@ describe("scripts/test-projects full-suite sharding", () => {
       "vitest.full-core-runtime.config.ts",
       "vitest.full-agentic.config.ts",
       "vitest.full-auto-reply.config.ts",
-      "vitest.full-extensions.config.ts",
+      "vitest.full-extension-channel-roots.config.ts",
+      "vitest.full-extension-browser.config.ts",
+      "vitest.full-extension-providers.config.ts",
+      "vitest.full-extension-web-search.config.ts",
+      "vitest.full-extension-media-tools.config.ts",
+      "vitest.full-extension-qa-channel.config.ts",
+      "vitest.full-extension-qa-lab-core.config.ts",
+      "vitest.full-extension-qa-lab-runtime.config.ts",
+      "vitest.full-extension-dev-tools.config.ts",
     ]);
   });
 
@@ -295,12 +306,18 @@ describe("scripts/test-projects full-suite sharding", () => {
       "vitest.extension-memory.config.ts",
       "vitest.extension-messaging.config.ts",
       "vitest.extension-msteams.config.ts",
-      "vitest.extension-providers.config.ts",
       "vitest.extension-telegram.config.ts",
       "vitest.extension-voice-call.config.ts",
       "vitest.extension-whatsapp.config.ts",
       "vitest.extension-zalo.config.ts",
-      "vitest.extensions.config.ts",
+      "vitest.extension-browser.config.ts",
+      "vitest.extension-providers.config.ts",
+      "vitest.extension-web-search.config.ts",
+      "vitest.extension-media-tools.config.ts",
+      "vitest.extension-qa-channel.config.ts",
+      "vitest.extension-qa-lab-core.config.ts",
+      "vitest.extension-qa-lab-runtime.config.ts",
+      "vitest.extension-dev-tools.config.ts",
     ]);
     expect(plans).toEqual(
       plans.map((plan) => ({

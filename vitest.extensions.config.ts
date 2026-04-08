@@ -2,17 +2,22 @@ import { BUNDLED_PLUGIN_TEST_GLOB } from "./vitest.bundled-plugin-paths.ts";
 import { extensionExcludedChannelTestGlobs } from "./vitest.channel-paths.mjs";
 import { acpxExtensionTestRoots } from "./vitest.extension-acpx-paths.mjs";
 import { blueBubblesExtensionTestRoots } from "./vitest.extension-bluebubbles-paths.mjs";
+import { browserExtensionTestRoots } from "./vitest.extension-browser-paths.mjs";
+import { devToolsExtensionTestRoots } from "./vitest.extension-dev-tools-paths.mjs";
 import { diffsExtensionTestRoots } from "./vitest.extension-diffs-paths.mjs";
 import { feishuExtensionTestRoots } from "./vitest.extension-feishu-paths.mjs";
 import { ircExtensionTestRoots } from "./vitest.extension-irc-paths.mjs";
 import { matrixExtensionTestRoots } from "./vitest.extension-matrix-paths.mjs";
 import { mattermostExtensionTestRoots } from "./vitest.extension-mattermost-paths.mjs";
+import { mediaToolsExtensionTestRoots } from "./vitest.extension-media-tools-paths.mjs";
 import { memoryExtensionTestRoots } from "./vitest.extension-memory-paths.mjs";
 import { messagingExtensionTestRoots } from "./vitest.extension-messaging-paths.mjs";
 import { msTeamsExtensionTestRoots } from "./vitest.extension-msteams-paths.mjs";
 import { providerExtensionTestRoots } from "./vitest.extension-provider-paths.mjs";
+import { qaToolsExtensionTestRoots } from "./vitest.extension-qa-tools-paths.mjs";
 import { telegramExtensionTestRoots } from "./vitest.extension-telegram-paths.mjs";
 import { voiceCallExtensionTestRoots } from "./vitest.extension-voice-call-paths.mjs";
+import { webSearchExtensionTestRoots } from "./vitest.extension-web-search-paths.mjs";
 import { whatsAppExtensionTestRoots } from "./vitest.extension-whatsapp-paths.mjs";
 import { zaloExtensionTestRoots } from "./vitest.extension-zalo-paths.mjs";
 import { loadPatternListFromEnv } from "./vitest.pattern-file.ts";
@@ -39,17 +44,22 @@ export function createExtensionsVitestConfig(
       ...extensionExcludedChannelTestGlobs,
       ...acpxExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...blueBubblesExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
+      ...browserExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
+      ...devToolsExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...diffsExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...feishuExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...ircExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...matrixExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...mattermostExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
+      ...mediaToolsExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...memoryExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...messagingExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...msTeamsExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...providerExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
+      ...qaToolsExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...telegramExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...voiceCallExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
+      ...webSearchExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...whatsAppExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
       ...zaloExtensionTestRoots.map((root) => `${root.replace(/^extensions\//u, "")}/**`),
     ],
