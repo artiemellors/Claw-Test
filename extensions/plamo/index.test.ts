@@ -1,10 +1,13 @@
-import { once } from "node:events";
-import { createServer } from "node:http";
 import { streamSimple } from "@mariozechner/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOpenAICompletionsTransportStreamFn } from "../../src/agents/openai-transport-stream.js";
 import { resolveEmbeddedAgentStreamFn } from "../../src/agents/pi-embedded-runner/stream-resolution.js";
+import {
+  installPinnedHostnameTestHooks,
+  resolveRequestUrl,
+} from "../../src/media-understanding/audio.test-helpers.ts";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
+import { withFetchPreconnect } from "../../src/test-utils/fetch-mock.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
 import { normalizePlamoToolMarkupInMessage } from "./stream.js";
@@ -30,6 +33,67 @@ function createFakeStream(params: {
       })();
     },
   };
+}
+
+installPinnedHostnameTestHooks();
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+const PLAMO_TEST_BASE_URL = "https://api.platform.preferredai.example/v1";
+
+function createTextStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
+function createSseResponse(chunks: string[]): Response {
+  return new Response(createTextStream(chunks), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+function stubPlamoSseFetch(chunks: string[]) {
+  let seenUrl: string | null = null;
+  let seenInit: RequestInit | undefined;
+  const fetchMock = withFetchPreconnect(
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      seenUrl = resolveRequestUrl(input);
+      seenInit = init;
+      return createSseResponse(chunks);
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return {
+    fetchMock,
+    getRequest: () => ({ url: seenUrl, init: seenInit }),
+  };
+}
+
+function toRequestBody(init: RequestInit | undefined): Record<string, unknown> {
+  return JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
+}
+
+function formatSseEvent(event: Record<string, unknown>): string {
+  return `data: ${JSON.stringify(event)}\n\n`;
+}
+
+function splitEvery(text: string, size: number): string[] {
+  const out: string[] = [];
+  for (let index = 0; index < text.length; index += size) {
+    out.push(text.slice(index, index + size));
+  }
+  return out;
 }
 
 async function loadPlamoCatalog() {
@@ -120,47 +184,18 @@ describe("plamo provider plugin", () => {
 
   it("drops replayed assistant thinking blocks before sending follow-up turns", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-
-    let resolveRequest: ((value: { body: Record<string, unknown> }) => void) | null = null;
-    const requestSeen = new Promise<{
-      body: Record<string, unknown>;
-    }>((resolve) => {
-      resolveRequest = resolve;
-    });
-
-    const server = createServer((req, res) => {
-      const chunks: string[] = [];
-      req.setEncoding("utf8");
-      req.on("data", (chunk) => chunks.push(chunk));
-      req.on("end", () => {
-        resolveRequest?.({
-          body: JSON.parse(chunks.join("")) as Record<string, unknown>,
-        });
-        res.writeHead(200, { "Content-Type": "text/event-stream" });
-        res.write(
-          `data: ${JSON.stringify({
-            id: "chatcmpl-stream-test",
-            choices: [{ index: 0, delta: { content: "ok" } }],
-          })}\n\n`,
-        );
-        res.write(
-          `data: ${JSON.stringify({
-            id: "chatcmpl-stream-test",
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          })}\n\n`,
-        );
-        res.end("data: [DONE]\n\n");
-      });
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+    const { getRequest } = stubPlamoSseFetch([
+      formatSseEvent({
+        id: "chatcmpl-stream-test",
+        choices: [{ index: 0, delta: { content: "ok" } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-stream-test",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+      "data: [DONE]\n\n",
+    ]);
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
@@ -170,7 +205,7 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -195,83 +230,38 @@ describe("plamo provider plugin", () => {
       } as never,
     );
 
-    try {
-      for await (const _event of stream) {
-        // Drain the stream so the request completes.
-      }
-      await stream.result();
-    } finally {
-      server.close();
+    for await (const _event of stream) {
+      // Drain the stream so the request completes.
     }
+    await stream.result();
 
-    const request = await requestSeen;
-    expect(request.body.max_tokens).toBe(20_000);
-    expect(request.body.messages).toEqual([
+    const request = getRequest();
+    const body = toRequestBody(request.init);
+    expect(body.max_tokens).toBe(20_000);
+    expect(body.messages).toEqual([
       { role: "system", content: "system prompt" },
       { role: "assistant", content: "前回の回答です。" },
       { role: "user", content: "続けて" },
     ]);
-    expect((request.body.messages as Array<Record<string, unknown>>)[1]).not.toHaveProperty(
+    expect((body.messages as Array<Record<string, unknown>>)[1]).not.toHaveProperty(
       "reasoning_content",
     );
   });
 
   it("sends the documented streaming payload and auth headers on the wire", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-
-    let resolveRequest:
-      | ((value: {
-          method: string | undefined;
-          url: string | undefined;
-          headers: Record<string, string | string[] | undefined>;
-          body: Record<string, unknown>;
-        }) => void)
-      | null = null;
-    const requestSeen = new Promise<{
-      method: string | undefined;
-      url: string | undefined;
-      headers: Record<string, string | string[] | undefined>;
-      body: Record<string, unknown>;
-    }>((resolve) => {
-      resolveRequest = resolve;
-    });
-
-    const server = createServer((req, res) => {
-      const chunks: string[] = [];
-      req.setEncoding("utf8");
-      req.on("data", (chunk) => chunks.push(chunk));
-      req.on("end", () => {
-        resolveRequest?.({
-          method: req.method,
-          url: req.url,
-          headers: req.headers,
-          body: JSON.parse(chunks.join("")) as Record<string, unknown>,
-        });
-        res.writeHead(200, { "Content-Type": "text/event-stream" });
-        res.write(
-          `data: ${JSON.stringify({
-            id: "chatcmpl-stream-test",
-            choices: [{ index: 0, delta: { content: "ok" } }],
-          })}\n\n`,
-        );
-        res.write(
-          `data: ${JSON.stringify({
-            id: "chatcmpl-stream-test",
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          })}\n\n`,
-        );
-        res.end("data: [DONE]\n\n");
-      });
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+    const { getRequest } = stubPlamoSseFetch([
+      formatSseEvent({
+        id: "chatcmpl-stream-test",
+        choices: [{ index: 0, delta: { content: "ok" } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-stream-test",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+      "data: [DONE]\n\n",
+    ]);
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
@@ -280,7 +270,7 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -311,26 +301,24 @@ describe("plamo provider plugin", () => {
     );
 
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    try {
-      for await (const _event of stream) {
-        // Drain the stream so the request completes.
-      }
-      result = await stream.result();
-    } finally {
-      server.close();
+    for await (const _event of stream) {
+      // Drain the stream so the request completes.
     }
+    result = await stream.result();
 
     expect(result).toMatchObject({
       stopReason: "stop",
       content: [{ type: "text", text: "ok" }],
     });
 
-    const request = await requestSeen;
-    expect(request.method).toBe("POST");
-    expect(request.url).toBe("/v1/chat/completions");
-    expect(request.headers.authorization).toBe("Bearer test-key");
-    expect(String(request.headers["content-type"] ?? "")).toContain("application/json");
-    expect(request.body).toMatchObject({
+    const request = getRequest();
+    const headers = new Headers(request.init?.headers);
+    const body = toRequestBody(request.init);
+    expect(request.url).toBe(`${PLAMO_TEST_BASE_URL}/chat/completions`);
+    expect(request.init?.method).toBe("POST");
+    expect(headers.get("authorization")).toBe("Bearer test-key");
+    expect(headers.get("content-type")).toContain("application/json");
+    expect(body).toMatchObject({
       model: "plamo-3.0-prime-beta",
       max_tokens: 512,
       messages: [
@@ -353,62 +341,28 @@ describe("plamo provider plugin", () => {
         },
       ],
     });
-    expect(request.body).not.toHaveProperty("stream_options");
-    expect(request.body).not.toHaveProperty("store");
-    expect(request.body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("stream_options");
+    expect(body).not.toHaveProperty("store");
+    expect(body).not.toHaveProperty("reasoning_effort");
     expect(
-      (request.body.tools as Array<{ function?: { strict?: unknown } }> | undefined)?.[0]?.function,
+      (body.tools as Array<{ function?: { strict?: unknown } }> | undefined)?.[0]?.function,
     ).not.toHaveProperty("strict");
   });
 
-  it("reassembles fragmented native SSE chunks without truncating the final text", async () => {
+  it("blocks private-network native baseUrl overrides before issuing fetch", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-
-    const server = createServer((req, res) => {
-      req.resume();
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-
-      const writeFragmented = (text: string) => {
-        for (let index = 0; index < text.length; index += 7) {
-          res.write(text.slice(index, index + 7));
-        }
-      };
-      const writeEvent = (event: Record<string, unknown>) => {
-        writeFragmented(`data: ${JSON.stringify(event)}\n\n`);
-      };
-
-      writeEvent({
-        id: "chatcmpl-stream-fragmented",
-        choices: [{ index: 0, delta: { reasoning_content: "thinking " } }],
-      });
-      writeEvent({
-        id: "chatcmpl-stream-fragmented",
-        choices: [{ index: 0, delta: { content: "明日" } }],
-      });
-      writeEvent({
-        id: "chatcmpl-stream-fragmented",
-        choices: [{ index: 0, delta: { content: "は晴れ" } }],
-      });
-      writeEvent({
-        id: "chatcmpl-stream-fragmented",
-        choices: [{ index: 0, delta: { content: "です。" }, finish_reason: "stop" }],
-      });
-      writeEvent({
-        id: "chatcmpl-stream-fragmented",
-        usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 },
-        choices: [],
-      });
-      writeFragmented("data: [DONE]\n\n");
-      res.end();
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+    const fetchMock = withFetchPreconnect(
+      vi.fn(async () =>
+        createSseResponse([
+          formatSseEvent({
+            id: "chatcmpl-unreachable",
+            choices: [{ index: 0, delta: { content: "unexpected" } }],
+          }),
+          "data: [DONE]\n\n",
+        ]),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
@@ -417,7 +371,60 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: "http://127.0.0.1:11434/v1",
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "こんにちは" }],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    await expect(stream.result()).resolves.toMatchObject({
+      stopReason: "error",
+      errorMessage: "Blocked hostname or private/internal/special-use IP address",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reassembles fragmented native SSE chunks without truncating the final text", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+    const chunks = [
+      formatSseEvent({
+        id: "chatcmpl-stream-fragmented",
+        choices: [{ index: 0, delta: { reasoning_content: "thinking " } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-stream-fragmented",
+        choices: [{ index: 0, delta: { content: "明日" } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-stream-fragmented",
+        choices: [{ index: 0, delta: { content: "は晴れ" } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-stream-fragmented",
+        choices: [{ index: 0, delta: { content: "です。" }, finish_reason: "stop" }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-stream-fragmented",
+        usage: { prompt_tokens: 11, completion_tokens: 5, total_tokens: 16 },
+        choices: [],
+      }),
+      "data: [DONE]\n\n",
+    ].flatMap((chunk) => splitEvery(chunk, 7));
+    stubPlamoSseFetch(chunks);
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -430,16 +437,12 @@ describe("plamo provider plugin", () => {
 
     const deltas: string[] = [];
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    try {
-      for await (const event of stream) {
-        if (event.type === "text_delta") {
-          deltas.push(event.delta);
-        }
+    for await (const event of stream) {
+      if (event.type === "text_delta") {
+        deltas.push(event.delta);
       }
-      result = await stream.result();
-    } finally {
-      server.close();
     }
+    result = await stream.result();
 
     expect(deltas.join("")).toBe("明日は晴れです。");
     expect(result).toMatchObject({
@@ -454,38 +457,23 @@ describe("plamo provider plugin", () => {
 
   it("clamps cached prompt reuse and does not double-count reasoning tokens in usage", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-
-    const server = createServer((req, res) => {
-      req.resume();
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-usage-clamp",
-          choices: [{ index: 0, delta: { content: "ok" } }],
-        })}\n\n`,
-      );
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-usage-clamp",
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-          usage: {
-            prompt_tokens: 4,
-            completion_tokens: 7,
-            prompt_tokens_details: { cached_tokens: 10 },
-            completion_tokens_details: { reasoning_tokens: 3 },
-          },
-        })}\n\n`,
-      );
-      res.end("data: [DONE]\n\n");
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+    stubPlamoSseFetch([
+      formatSseEvent({
+        id: "chatcmpl-usage-clamp",
+        choices: [{ index: 0, delta: { content: "ok" } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-usage-clamp",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 4,
+          completion_tokens: 7,
+          prompt_tokens_details: { cached_tokens: 10 },
+          completion_tokens_details: { reasoning_tokens: 3 },
+        },
+      }),
+      "data: [DONE]\n\n",
+    ]);
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
@@ -494,7 +482,7 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -506,14 +494,10 @@ describe("plamo provider plugin", () => {
     );
 
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    try {
-      for await (const _event of stream) {
-        // Drain the stream so the request completes.
-      }
-      result = await stream.result();
-    } finally {
-      server.close();
+    for await (const _event of stream) {
+      // Drain the stream so the request completes.
     }
+    result = await stream.result();
 
     expect(result).toMatchObject({
       stopReason: "stop",
@@ -529,95 +513,78 @@ describe("plamo provider plugin", () => {
 
   it("tracks interleaved native tool-call deltas by index when follow-up chunks omit ids", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-
-    const server = createServer((req, res) => {
-      req.resume();
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool-index",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "call_read",
-                    type: "function",
-                    function: { name: "read", arguments: '{"path":"' },
-                  },
-                  {
-                    index: 1,
-                    id: "call_write",
-                    type: "function",
-                    function: { name: "write", arguments: '{"path":"' },
-                  },
-                ],
-              },
+    stubPlamoSseFetch([
+      formatSseEvent({
+        id: "chatcmpl-tool-index",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_read",
+                  type: "function",
+                  function: { name: "read", arguments: '{"path":"' },
+                },
+                {
+                  index: 1,
+                  id: "call_write",
+                  type: "function",
+                  function: { name: "write", arguments: '{"path":"' },
+                },
+              ],
             },
-          ],
-        })}\n\n`,
-      );
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool-index",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 1,
-                    type: "function",
-                    function: { arguments: 'out.txt",' },
-                  },
-                  {
-                    index: 0,
-                    type: "function",
-                    function: { arguments: 'README.md",' },
-                  },
-                ],
-              },
+          },
+        ],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-tool-index",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  type: "function",
+                  function: { arguments: 'out.txt",' },
+                },
+                {
+                  index: 0,
+                  type: "function",
+                  function: { arguments: 'README.md",' },
+                },
+              ],
             },
-          ],
-        })}\n\n`,
-      );
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool-index",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 1,
-                    type: "function",
-                    function: { arguments: '"content":"hi"}' },
-                  },
-                  {
-                    index: 0,
-                    type: "function",
-                    function: { arguments: '"mode":"r"}' },
-                  },
-                ],
-                finish_reason: "tool_calls",
-              },
+          },
+        ],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-tool-index",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  type: "function",
+                  function: { arguments: '"content":"hi"}' },
+                },
+                {
+                  index: 0,
+                  type: "function",
+                  function: { arguments: '"mode":"r"}' },
+                },
+              ],
+              finish_reason: "tool_calls",
             },
-          ],
-        })}\n\n`,
-      );
-      res.end("data: [DONE]\n\n");
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+          },
+        ],
+      }),
+      "data: [DONE]\n\n",
+    ]);
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
@@ -626,7 +593,7 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -639,16 +606,12 @@ describe("plamo provider plugin", () => {
 
     const deltas: Array<{ contentIndex: number; delta: string }> = [];
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    try {
-      for await (const event of stream) {
-        if (event.type === "toolcall_delta") {
-          deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
-        }
+    for await (const event of stream) {
+      if (event.type === "toolcall_delta") {
+        deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
       }
-      result = await stream.result();
-    } finally {
-      server.close();
     }
+    result = await stream.result();
 
     expect(deltas).toEqual([
       { contentIndex: 0, delta: '{"path":"' },
@@ -679,95 +642,78 @@ describe("plamo provider plugin", () => {
 
   it("keeps using the native parser when the base stream fn is an auth-wrapped OpenAI completions transport", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-
-    const server = createServer((req, res) => {
-      req.resume();
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool-index-transport",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "call_read",
-                    type: "function",
-                    function: { name: "read", arguments: '{"path":"' },
-                  },
-                  {
-                    index: 1,
-                    id: "call_write",
-                    type: "function",
-                    function: { name: "write", arguments: '{"path":"' },
-                  },
-                ],
-              },
+    stubPlamoSseFetch([
+      formatSseEvent({
+        id: "chatcmpl-tool-index-transport",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_read",
+                  type: "function",
+                  function: { name: "read", arguments: '{"path":"' },
+                },
+                {
+                  index: 1,
+                  id: "call_write",
+                  type: "function",
+                  function: { name: "write", arguments: '{"path":"' },
+                },
+              ],
             },
-          ],
-        })}\n\n`,
-      );
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool-index-transport",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 1,
-                    type: "function",
-                    function: { arguments: 'out.txt",' },
-                  },
-                  {
-                    index: 0,
-                    type: "function",
-                    function: { arguments: 'README.md",' },
-                  },
-                ],
-              },
+          },
+        ],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-tool-index-transport",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  type: "function",
+                  function: { arguments: 'out.txt",' },
+                },
+                {
+                  index: 0,
+                  type: "function",
+                  function: { arguments: 'README.md",' },
+                },
+              ],
             },
-          ],
-        })}\n\n`,
-      );
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool-index-transport",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: 1,
-                    type: "function",
-                    function: { arguments: '"content":"hi"}' },
-                  },
-                  {
-                    index: 0,
-                    type: "function",
-                    function: { arguments: '"mode":"r"}' },
-                  },
-                ],
-              },
-              finish_reason: "tool_calls",
+          },
+        ],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-tool-index-transport",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  type: "function",
+                  function: { arguments: '"content":"hi"}' },
+                },
+                {
+                  index: 0,
+                  type: "function",
+                  function: { arguments: '"mode":"r"}' },
+                },
+              ],
             },
-          ],
-        })}\n\n`,
-      );
-      res.end("data: [DONE]\n\n");
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+            finish_reason: "tool_calls",
+          },
+        ],
+      }),
+      "data: [DONE]\n\n",
+    ]);
 
     const [model] = catalog.provider.models;
     const transportStreamFn = resolveEmbeddedAgentStreamFn({
@@ -790,7 +736,7 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -803,16 +749,12 @@ describe("plamo provider plugin", () => {
 
     const deltas: Array<{ contentIndex: number; delta: string }> = [];
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    try {
-      for await (const event of stream) {
-        if (event.type === "toolcall_delta") {
-          deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
-        }
+    for await (const event of stream) {
+      if (event.type === "toolcall_delta") {
+        deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
       }
-      result = await stream.result();
-    } finally {
-      server.close();
     }
+    result = await stream.result();
 
     expect(deltas).toEqual([
       { contentIndex: 0, delta: '{"path":"' },
@@ -885,33 +827,18 @@ describe("plamo provider plugin", () => {
       "<|plamo:end_tool_arguments:plamo|>" +
       "<|plamo:end_tool_request:plamo|>" +
       "<|plamo:end_tool_requests:plamo|>";
-
-    const server = createServer((req, res) => {
-      req.resume();
-      res.writeHead(200, { "Content-Type": "text/event-stream" });
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool",
-          choices: [{ index: 0, delta: { content: `I will inspect the file.\n${toolMarkup}` } }],
-        })}\n\n`,
-      );
-      res.write(
-        `data: ${JSON.stringify({
-          id: "chatcmpl-tool",
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-          usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
-        })}\n\n`,
-      );
-      res.end("data: [DONE]\n\n");
-    });
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-
-    const address = server.address();
-    if (!address || typeof address === "string") {
-      server.close();
-      throw new Error("expected tcp server address");
-    }
+    stubPlamoSseFetch([
+      formatSseEvent({
+        id: "chatcmpl-tool",
+        choices: [{ index: 0, delta: { content: `I will inspect the file.\n${toolMarkup}` } }],
+      }),
+      formatSseEvent({
+        id: "chatcmpl-tool",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      }),
+      "data: [DONE]\n\n",
+    ]);
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
@@ -920,7 +847,7 @@ describe("plamo provider plugin", () => {
         ...model,
         provider: "plamo",
         api: "openai-completions",
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
         systemPrompt: "system prompt",
@@ -933,14 +860,10 @@ describe("plamo provider plugin", () => {
 
     const eventTypes: string[] = [];
     let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    try {
-      for await (const event of stream) {
-        eventTypes.push(event.type);
-      }
-      result = await stream.result();
-    } finally {
-      server.close();
+    for await (const event of stream) {
+      eventTypes.push(event.type);
     }
+    result = await stream.result();
 
     expect(eventTypes).not.toContain("toolcall_start");
     expect(eventTypes).not.toContain("toolcall_delta");

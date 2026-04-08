@@ -16,9 +16,7 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
-import { isOpenAICompletionsTransportStreamFn } from "../../src/agents/openai-transport-stream.js";
-import { getModelProviderRequestTransport } from "../../src/agents/provider-request-config.js";
-import { buildGuardedModelFetch } from "../../src/agents/provider-transport-fetch.js";
+import { buildGuardedModelFetch, isOpenAICompletionsTransportStreamFn } from "./runtime-api.js";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
 const PLAMO_END_TOOL_REQUEST = "<|plamo:end_tool_request:plamo|>";
@@ -1190,28 +1188,19 @@ function shouldUseNativePlamoStream(baseStreamFn: StreamFn | undefined): boolean
   return isOpenAICompletionsTransportStreamFn(baseStreamFn);
 }
 
-function shouldUseTransportAwarePlamoFetch(
-  model: RuntimeModel,
-  baseStreamFn: StreamFn | undefined,
-): boolean {
-  if (!isOpenAICompletionsTransportStreamFn(baseStreamFn)) {
-    return false;
-  }
-  const request = getModelProviderRequestTransport(model as object);
-  return Boolean(request?.proxy || request?.tls);
-}
-
 export function createPlamoToolCallWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
     const sanitizedContext = sanitizePlamoReplayMessages(context);
 
     if (shouldUseNativePlamoStream(baseStreamFn)) {
-      const requestFetch = shouldUseTransportAwarePlamoFetch(model, baseStreamFn)
-        ? buildGuardedModelFetch(model as never)
-        : fetch;
       return wrapStreamNormalizePlamoToolMarkup(
-        createNativePlamoStream(model, sanitizedContext, options, requestFetch),
+        createNativePlamoStream(
+          model,
+          sanitizedContext,
+          options,
+          buildGuardedModelFetch(model as never),
+        ),
       );
     }
 
