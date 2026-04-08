@@ -606,4 +606,19 @@ describe("scripts/docker/setup.sh", () => {
     const compose = await readFile(join(repoRoot, "docker-compose.yml"), "utf8");
     expect(compose.match(/TZ: \$\{OPENCLAW_TZ:-UTC\}/g)).toHaveLength(2);
   });
+
+  it("Dockerfile ARG OPENCLAW_IMAGE_APT_PACKAGES must not have a default value", async () => {
+    // If the ARG has a default (e.g. ARG OPENCLAW_IMAGE_APT_PACKAGES=""), Docker treats it as
+    // "set" even when no --build-arg is passed. That breaks the RUN fallback expression
+    // ${OPENCLAW_IMAGE_APT_PACKAGES-$OPENCLAW_DOCKER_APT_PACKAGES} because the variable is
+    // never truly unset, so legacy-only callers using --build-arg OPENCLAW_DOCKER_APT_PACKAGES
+    // get nothing installed — a backward-compat regression.
+    const dockerfile = await readFile(join(repoRoot, "Dockerfile"), "utf8");
+    const argLine = dockerfile
+      .split("\n")
+      .find((line) => line.startsWith("ARG OPENCLAW_IMAGE_APT_PACKAGES"));
+    expect(argLine).toBeDefined();
+    // Must be bare `ARG OPENCLAW_IMAGE_APT_PACKAGES` with no default assignment
+    expect(argLine).toBe("ARG OPENCLAW_IMAGE_APT_PACKAGES");
+  });
 });
