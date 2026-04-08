@@ -143,4 +143,98 @@ describe("embeddings-ollama", () => {
       }),
     );
   });
+
+  it("uses /api/embed for batch embeddings", async () => {
+    const fetchMock = vi.fn(
+      async (_input?: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            embeddings: [
+              [3, 4],
+              [5, 12],
+            ],
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { provider } = await createOllamaEmbeddingProvider({
+      config: {} as OpenClawConfig,
+      provider: "ollama",
+      model: "nomic-embed-text",
+      fallback: "none",
+      remote: { baseUrl: "http://127.0.0.1:11434" },
+    });
+
+    const vectors = await provider.embedBatch(["doc1", "doc2"]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:11434/api/embed",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ model: "nomic-embed-text", input: ["doc1", "doc2"] }),
+      }),
+    );
+    expect(vectors[0]?.[0]).toBeCloseTo(0.6, 5);
+    expect(vectors[1]?.[1]).toBeCloseTo(12 / 13, 5);
+  });
+
+  it("falls back to sequential /api/embeddings when /api/embed lacks embeddings[]", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ embedding: [9, 9] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ embedding: [3, 4] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ embedding: [5, 12] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { provider } = await createOllamaEmbeddingProvider({
+      config: {} as OpenClawConfig,
+      provider: "ollama",
+      model: "nomic-embed-text",
+      fallback: "none",
+      remote: { baseUrl: "http://127.0.0.1:11434" },
+    });
+
+    const vectors = await provider.embedBatch(["doc1", "doc2"]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:11434/api/embed",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:11434/api/embeddings",
+      expect.objectContaining({
+        body: JSON.stringify({ model: "nomic-embed-text", prompt: "doc1" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:11434/api/embeddings",
+      expect.objectContaining({
+        body: JSON.stringify({ model: "nomic-embed-text", prompt: "doc2" }),
+      }),
+    );
+    expect(vectors).toHaveLength(2);
+  });
 });
