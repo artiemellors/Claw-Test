@@ -607,6 +607,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
 
   const {
     resolveMattermostMedia,
+    refetchPostFileIds,
     sendTypingIndicator,
     resolveChannelInfo,
     resolveUserInfo,
@@ -1274,7 +1275,16 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       recordPendingHistory();
       return;
     }
-    const mediaList = await resolveMattermostMedia(post.file_ids);
+    let fileIds = post.file_ids ?? [];
+    // Skip re-fetch for debounced merged posts: the merged payload carries only
+    // the last post's id, so re-fetching would query the wrong post.  Debounced
+    // batches already bypass file-bearing messages (shouldDebounce returns false
+    // when file_ids is non-empty), so this is a known gap only when a file post
+    // is batched with a later text post.
+    if (fileIds.length === 0 && !messageIds) {
+      fileIds = await refetchPostFileIds(post.id);
+    }
+    const mediaList = await resolveMattermostMedia(fileIds);
     const mediaPlaceholder = buildMattermostAttachmentPlaceholder(mediaList);
     const bodySource = oncharTriggered ? oncharResult.stripped : rawText;
     const baseText = [bodySource, mediaPlaceholder].filter(Boolean).join("\n").trim();

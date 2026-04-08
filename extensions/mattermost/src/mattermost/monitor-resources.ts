@@ -1,5 +1,7 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   fetchMattermostChannel,
+  fetchMattermostPost,
   fetchMattermostUser,
   sendMattermostTyping,
   updateMattermostPost,
@@ -19,6 +21,7 @@ export type MattermostMediaInfo = {
 
 const CHANNEL_CACHE_TTL_MS = 5 * 60_000;
 const USER_CACHE_TTL_MS = 10 * 60_000;
+const FILE_IDS_REFETCH_DELAYS_MS = [500, 1500];
 
 type FetchRemoteMedia = (params: {
   url: string;
@@ -173,8 +176,33 @@ export function createMattermostMonitorResources(params: {
     return {};
   };
 
+  // Mattermost broadcasts the WebSocket `posted` event before file attachment
+  // linkage is finalized, so `file_ids` is often empty.  Re-fetch the post via
+  // REST with progressive back-off (500ms then 1500ms).  Both delays always
+  // elapse for genuine text-only messages because the REST API also returns
+  // `file_ids: []` — there is no server-side signal to distinguish "no files"
+  // from "files not yet linked".  Total worst-case overhead: ~2s + 2 REST calls.
+  const refetchPostFileIds = async (postId: string): Promise<string[]> => {
+    for (const delayMs of FILE_IDS_REFETCH_DELAYS_MS) {
+      await sleep(delayMs);
+      try {
+        const post = await fetchMattermostPost(client, postId);
+        const ids = (post.file_ids ?? []).filter(Boolean);
+        if (ids.length > 0) return ids;
+      } catch (err) {
+        // Transient errors (5xx, timeout) should not abort the loop — the next
+        // attempt may succeed once Mattermost finishes linking the files.
+        logger.debug?.(
+          `mattermost: failed to re-fetch post ${postId} for file_ids: ${String(err)}`,
+        );
+      }
+    }
+    return [];
+  };
+
   return {
     resolveMattermostMedia,
+    refetchPostFileIds,
     sendTypingIndicator,
     resolveChannelInfo,
     resolveUserInfo,
