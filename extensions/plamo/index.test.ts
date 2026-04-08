@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
-import { registerSingleProviderPlugin } from "../../test/helpers/extensions/plugin-registration.js";
+import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
 
 type FakeWrappedStream = {
@@ -30,7 +30,7 @@ function createFakeStream(params: {
 }
 
 async function loadPlamoCatalog() {
-  const provider = registerSingleProviderPlugin(plamoPlugin);
+  const provider = await registerSingleProviderPlugin(plamoPlugin);
   const catalog = await provider.catalog!.run({
     config: {},
     env: {},
@@ -50,7 +50,7 @@ async function loadPlamoCatalog() {
 }
 
 function createWrappedPlamoStream(
-  provider: ReturnType<typeof registerSingleProviderPlugin>,
+  provider: Awaited<ReturnType<typeof registerSingleProviderPlugin>>,
   options?: {
     extraParams?: Record<string, unknown>;
     modelId?: string;
@@ -69,8 +69,8 @@ function createWrappedPlamoStream(
 }
 
 describe("plamo provider plugin", () => {
-  it("registers PLaMo with api-key auth wizard metadata", () => {
-    const provider = registerSingleProviderPlugin(plamoPlugin);
+  it("registers PLaMo with api-key auth wizard metadata", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
     const resolved = resolveProviderPluginChoice({
       providers: [provider],
       choice: "plamo-api-key",
@@ -535,7 +535,7 @@ describe("plamo provider plugin", () => {
   });
 
   it("defaults to native streaming and normalizes inline PLaMo tool markup into tool calls", async () => {
-    const provider = registerSingleProviderPlugin(plamoPlugin);
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
     const toolMarkup =
       "<|plamo:begin_tool_requests:plamo|>" +
       "<|plamo:begin_tool_request:plamo|>" +

@@ -1,4 +1,4 @@
-import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-models";
+import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-model-shared";
 
 export const PLAMO_BASE_URL = "https://api.platform.preferredai.jp/v1";
 export const PLAMO_DEFAULT_MODEL_ID = "plamo-3.0-prime-beta";
