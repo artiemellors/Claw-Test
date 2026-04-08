@@ -1523,6 +1523,7 @@ export function renderApp(state: AppViewState) {
                   state.workspaceFileContent = null;
                   if (resolvedAgentId && path) {
                     const requestedPath = path;
+                    const requestedAgentId = resolvedAgentId;
                     void state.client
                       ?.request<import("./types.js").AgentsWorkspaceGetResult>(
                         "agents.workspace.get",
@@ -1533,14 +1534,20 @@ export function renderApp(state: AppViewState) {
                         },
                       )
                       .then((result) => {
-                        // Ignore stale responses if user already selected a different file
-                        if (state.workspaceSelectedFile !== requestedPath) {
+                        // Ignore stale responses if user selected a different file or agent
+                        if (
+                          state.workspaceSelectedFile !== requestedPath ||
+                          state.agentsSelectedId !== requestedAgentId
+                        ) {
                           return;
                         }
                         state.workspaceFileContent = result?.content ?? null;
                       })
                       .catch((err) => {
-                        if (state.workspaceSelectedFile !== requestedPath) {
+                        if (
+                          state.workspaceSelectedFile !== requestedPath ||
+                          state.agentsSelectedId !== requestedAgentId
+                        ) {
                           return;
                         }
                         state.workspaceError = String(err);
@@ -1656,6 +1663,8 @@ export function renderApp(state: AppViewState) {
                 onWorkspaceMkdir: (name) => {
                   if (resolvedAgentId && name) {
                     const path = state.workspacePath ? `${state.workspacePath}/${name}` : name;
+                    const mkdirAgentId = resolvedAgentId;
+                    const mkdirListPath = state.workspacePath;
                     void state.client
                       ?.request<import("./types.js").AgentsWorkspaceMkdirResult>(
                         "agents.workspace.mkdir",
@@ -1665,17 +1674,27 @@ export function renderApp(state: AppViewState) {
                         },
                       )
                       .then(() => {
-                        // Refresh file list
-                        if (state.agentsPanel === "workspace") {
+                        // Refresh file list only if still on the same agent/path
+                        if (
+                          state.agentsPanel === "workspace" &&
+                          state.agentsSelectedId === mkdirAgentId &&
+                          state.workspacePath === mkdirListPath
+                        ) {
                           void state.client
                             ?.request<import("./types.js").AgentsWorkspaceListResult>(
                               "agents.workspace.list",
                               {
-                                agentId: resolvedAgentId,
-                                path: state.workspacePath,
+                                agentId: mkdirAgentId,
+                                path: mkdirListPath,
                               },
                             )
                             .then((result) => {
+                              if (
+                                state.agentsSelectedId !== mkdirAgentId ||
+                                state.workspacePath !== mkdirListPath
+                              ) {
+                                return;
+                              }
                               state.workspaceEntries = result?.entries ?? null;
                             });
                         }
