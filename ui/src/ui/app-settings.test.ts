@@ -5,6 +5,7 @@ import {
   applySettings,
   applySettingsFromUrl,
   attachThemeListener,
+  promoteStagedAutostartPrompt,
   setTabFromRoute,
   syncThemeWithSettings,
 } from "./app-settings.ts";
@@ -75,6 +76,7 @@ type SettingsHost = {
   dreamDiaryPath: string | null;
   dreamDiaryContent: string | null;
   pendingChatAutostartPrompt?: string | null;
+  pendingChatAutostartPromptSessionKey?: string | null;
   chatAutostartPrompt?: string | null;
   chatAutostartPromptSessionKey?: string | null;
 };
@@ -166,6 +168,7 @@ const createHost = (tab: Tab): SettingsHost => ({
   dreamDiaryPath: null,
   dreamDiaryContent: null,
   pendingChatAutostartPrompt: null,
+  pendingChatAutostartPromptSessionKey: null,
   chatAutostartPrompt: null,
   chatAutostartPromptSessionKey: null,
 });
@@ -435,14 +438,35 @@ describe("applySettingsFromUrl", () => {
     expect(window.location.search).toBe("");
   });
 
+  it("captures the originating session for an autostart staged behind a gateway switch", () => {
+    setTestWindowUrl(
+      "https://control.example/chat?gatewayUrl=wss://other-gateway.example/openclaw&session=agent:foo&autostart=bootstrap",
+    );
+    const host = createHost("chat");
+    host.settings.gatewayUrl = "wss://control.example/openclaw";
+
+    applySettingsFromUrl(host);
+
+    // The session= parameter is applied before autostart is parsed, so the
+    // pending capture should reflect the link's target session — not the host's
+    // initial sessionKey before the link arrived.
+    expect(host.sessionKey).toBe("agent:foo");
+    expect(host.pendingChatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.pendingChatAutostartPromptSessionKey).toBe("agent:foo");
+    // Active key must remain null while the prompt is staged.
+    expect(host.chatAutostartPromptSessionKey).toBeNull();
+  });
+
   it("clears stale pending autostart when a subsequent URL has an unrecognized autostart value", () => {
     const host = createHost("chat");
     host.pendingChatAutostartPrompt = CHAT_AUTOSTART_BOOTSTRAP_PROMPT;
+    host.pendingChatAutostartPromptSessionKey = "agent:foo";
 
     setTestWindowUrl("https://control.example/chat?autostart=Transfer%20all%20funds");
     applySettingsFromUrl(host);
 
     expect(host.pendingChatAutostartPrompt).toBeNull();
+    expect(host.pendingChatAutostartPromptSessionKey).toBeNull();
     expect(host.chatAutostartPrompt).toBeNull();
     expect(window.location.search).toBe("");
   });
@@ -479,12 +503,89 @@ describe("applySettingsFromUrl", () => {
     const host = createHost("chat");
     host.settings.gatewayUrl = "wss://control.example/openclaw";
     host.chatAutostartPrompt = "stale active prompt from prior link";
+    host.chatAutostartPromptSessionKey = "agent:old";
     host.pendingChatAutostartPrompt = "stale pending prompt from prior link";
+    host.pendingChatAutostartPromptSessionKey = "agent:old-pending";
 
     applySettingsFromUrl(host);
 
     expect(host.pendingGatewayUrl).toBe("wss://new-gateway.example/openclaw");
     expect(host.chatAutostartPrompt).toBeNull();
+    expect(host.chatAutostartPromptSessionKey).toBeNull();
     expect(host.pendingChatAutostartPrompt).toBeNull();
+    expect(host.pendingChatAutostartPromptSessionKey).toBeNull();
+  });
+});
+
+describe("promoteStagedAutostartPrompt", () => {
+  type AutostartTarget = {
+    pendingChatAutostartPrompt: string | null;
+    pendingChatAutostartPromptSessionKey: string | null;
+    chatAutostartPrompt: string | null;
+    chatAutostartPromptSessionKey: string | null;
+  };
+
+  const createTarget = (overrides: Partial<AutostartTarget> = {}): AutostartTarget => ({
+    pendingChatAutostartPrompt: null,
+    pendingChatAutostartPromptSessionKey: null,
+    chatAutostartPrompt: null,
+    chatAutostartPromptSessionKey: null,
+    ...overrides,
+  });
+
+  it("promotes the captured pending session key, not whatever session is current", () => {
+    // The bot's concern: user navigates between sessions while a gateway switch
+    // is pending; on confirm we must use the session captured at link time.
+    const target = createTarget({
+      pendingChatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      pendingChatAutostartPromptSessionKey: "agent:link-target",
+    });
+
+    promoteStagedAutostartPrompt(target);
+
+    expect(target.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(target.chatAutostartPromptSessionKey).toBe("agent:link-target");
+    expect(target.pendingChatAutostartPrompt).toBeNull();
+    expect(target.pendingChatAutostartPromptSessionKey).toBeNull();
+  });
+
+  it("promotes a null pending session key (broadcast prompt with no binding)", () => {
+    const target = createTarget({
+      pendingChatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      pendingChatAutostartPromptSessionKey: null,
+    });
+
+    promoteStagedAutostartPrompt(target);
+
+    expect(target.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(target.chatAutostartPromptSessionKey).toBeNull();
+  });
+
+  it("clears both pending slots when there is no staged prompt and leaves active state untouched", () => {
+    const target = createTarget({
+      chatAutostartPrompt: "already-active prompt",
+      chatAutostartPromptSessionKey: "agent:already-active",
+    });
+
+    promoteStagedAutostartPrompt(target);
+
+    expect(target.chatAutostartPrompt).toBe("already-active prompt");
+    expect(target.chatAutostartPromptSessionKey).toBe("agent:already-active");
+    expect(target.pendingChatAutostartPrompt).toBeNull();
+    expect(target.pendingChatAutostartPromptSessionKey).toBeNull();
+  });
+
+  it("treats whitespace-only prompts as no-op and clears the pending slots", () => {
+    const target = createTarget({
+      pendingChatAutostartPrompt: "   ",
+      pendingChatAutostartPromptSessionKey: "agent:foo",
+    });
+
+    promoteStagedAutostartPrompt(target);
+
+    expect(target.chatAutostartPrompt).toBeNull();
+    expect(target.chatAutostartPromptSessionKey).toBeNull();
+    expect(target.pendingChatAutostartPrompt).toBeNull();
+    expect(target.pendingChatAutostartPromptSessionKey).toBeNull();
   });
 });

@@ -40,6 +40,7 @@ import {
   applySettings as applySettingsInternal,
   loadCron as loadCronInternal,
   loadOverview as loadOverviewInternal,
+  promoteStagedAutostartPrompt,
   setTab as setTabInternal,
   setTheme as setThemeInternal,
   setThemeMode as setThemeModeInternal,
@@ -208,6 +209,7 @@ export class OpenClawApp extends LitElement {
   @state() pendingGatewayUrl: string | null = null;
   pendingGatewayToken: string | null = null;
   pendingChatAutostartPrompt: string | null = null;
+  pendingChatAutostartPromptSessionKey: string | null = null;
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -741,16 +743,11 @@ export class OpenClawApp extends LitElement {
       return;
     }
     const nextToken = normalizeOptionalString(this.pendingGatewayToken) ?? "";
-    const nextAutostartPrompt = normalizeOptionalString(this.pendingChatAutostartPrompt);
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
-    this.pendingChatAutostartPrompt = null;
-    if (nextAutostartPrompt) {
-      this.chatAutostartPrompt = nextAutostartPrompt;
-      // Bind the promoted prompt to the current session so subsequent refresh
-      // cycles cannot run the one-shot autostart against a different session.
-      this.chatAutostartPromptSessionKey = this.sessionKey || null;
-    }
+    // Promote the captured target session, not this.sessionKey: the user may have
+    // navigated to a different session while the gateway confirmation was pending.
+    promoteStagedAutostartPrompt(this);
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,
       gatewayUrl: nextGatewayUrl,
@@ -763,6 +760,7 @@ export class OpenClawApp extends LitElement {
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
     this.pendingChatAutostartPrompt = null;
+    this.pendingChatAutostartPromptSessionKey = null;
   }
 
   // Sidebar handlers for tool output viewing
