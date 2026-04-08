@@ -26,13 +26,13 @@ export function buildQualifiedChatModelValue(model: string, provider?: string | 
   if (!trimmedModel) {
     return "";
   }
-  // Preserve already-qualified model refs (provider/model) as-is.
-  // This avoids prepending an unrelated/default provider.
-  if (trimmedModel.includes("/")) {
+  const trimmedProvider = provider?.trim();
+  if (!trimmedProvider) {
     return trimmedModel;
   }
-  const trimmedProvider = provider?.trim();
-  return trimmedProvider ? `${trimmedProvider}/${trimmedModel}` : trimmedModel;
+  return trimmedModel.toLowerCase().startsWith(`${trimmedProvider.toLowerCase()}/`)
+    ? trimmedModel
+    : `${trimmedProvider}/${trimmedModel}`;
 }
 
 export function createChatModelOverride(value: string): ChatModelOverride | null {
@@ -98,7 +98,14 @@ export function resolveServerChatModelValue(
   if (typeof model !== "string") {
     return "";
   }
-  return buildQualifiedChatModelValue(model, provider);
+  const trimmedModel = model.trim();
+  if (!trimmedModel) {
+    return "";
+  }
+  if (trimmedModel.includes("/")) {
+    return trimmedModel;
+  }
+  return buildQualifiedChatModelValue(trimmedModel, provider);
 }
 
 export function resolvePreferredServerChatModel(
