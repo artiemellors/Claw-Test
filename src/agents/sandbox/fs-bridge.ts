@@ -129,6 +129,7 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
         check: writeCheck,
         pinned: pinnedWriteTarget,
         mkdir: params.mkdir !== false,
+        expectedSize: buffer.length,
       }),
       stdin: buffer,
       signal: params.signal,
