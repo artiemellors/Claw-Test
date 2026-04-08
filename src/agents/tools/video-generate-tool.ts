@@ -72,8 +72,13 @@ const SUPPORTED_ASPECT_RATIOS = new Set([
   "9:16",
   "16:9",
   "21:9",
-  // Provider-specific sentinel: bypasses normalization and is forwarded as-is
-  // (e.g. Seedance uses "adaptive" to auto-detect the ratio from input image dimensions).
+  // Provider-specific sentinel: accepted at the tool boundary, then forwarded
+  // to the active provider only if that provider declares "adaptive" in its
+  // capabilities.aspectRatios list. Providers that do not declare it see the
+  // value pushed into `ignoredOverrides` in the normalization layer so the
+  // tool surfaces a user-visible "ignored override" warning rather than
+  // silently dropping the request. Seedance uses this to auto-detect the
+  // ratio from input image dimensions.
   "adaptive",
 ]);
 
