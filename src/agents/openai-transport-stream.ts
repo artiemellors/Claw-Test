@@ -1075,7 +1075,7 @@ async function processOpenAICompletionsStream(
       });
       continue;
     }
-    if (choice.delta.tool_calls) {
+    if (choice.delta.tool_calls && choice.delta.tool_calls.length > 0) {
       for (const toolCall of choice.delta.tool_calls) {
         if (
           !currentBlock ||
@@ -1116,6 +1116,10 @@ async function processOpenAICompletionsStream(
     }
   }
   finishCurrentBlock();
+  const hasToolCalls = output.content.some((block) => block.type === "toolCall");
+  if (output.stopReason === "toolUse" && !hasToolCalls) {
+    output.stopReason = "stop";
+  }
 }
 
 function detectCompat(model: OpenAIModeModel) {
@@ -1290,11 +1294,11 @@ export function buildOpenAICompletionsParams(
   }
   if (context.tools) {
     params.tools = convertTools(context.tools, compat, model);
+    if (options?.toolChoice) {
+      params.tool_choice = options.toolChoice;
+    }
   } else if (hasToolHistory(context.messages)) {
     params.tools = [];
-  }
-  if (options?.toolChoice) {
-    params.tool_choice = options.toolChoice;
   }
   if (compat.thinkingFormat === "openrouter" && model.reasoning && options?.reasoningEffort) {
     params.reasoning = {
@@ -1353,3 +1357,7 @@ function mapStopReason(reason: string | null) {
       };
   }
 }
+
+export const __testing = {
+  processOpenAICompletionsStream,
+};
