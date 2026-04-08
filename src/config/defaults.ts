@@ -356,7 +356,9 @@ export function applyCompactionDefaults(cfg: OpenClawConfig): OpenClawConfig {
     return cfg;
   }
   const compaction = defaults?.compaction;
-  if (compaction?.mode) {
+  const needsModeDefault = compaction?.mode === undefined;
+  const needsGuardDefault = compaction?.guard?.enabled === undefined;
+  if (!needsModeDefault && !needsGuardDefault) {
     return cfg;
   }
 
@@ -368,7 +370,11 @@ export function applyCompactionDefaults(cfg: OpenClawConfig): OpenClawConfig {
         ...defaults,
         compaction: {
           ...compaction,
-          mode: "safeguard",
+          ...(needsModeDefault ? { mode: "safeguard" as const } : {}),
+          guard: {
+            ...compaction?.guard,
+            enabled: compaction?.guard?.enabled ?? false,
+          },
         },
       },
     },
