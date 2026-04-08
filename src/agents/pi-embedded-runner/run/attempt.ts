@@ -90,6 +90,7 @@ import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import { sanitizeToolUseResultPairing } from "../../session-transcript-repair.js";
+import { sanitizeModelName } from "../../../shared/string-coerce.js";
 import {
   acquireSessionWriteLock,
   resolveSessionLockMaxHoldFromTimeout,
@@ -536,7 +537,7 @@ export async function runEmbeddedAttempt(
             groupSpace: params.groupSpace,
             spawnedBy: params.spawnedBy,
             senderId: params.senderId,
-            senderName: params.senderName,
+            senderName: sanitizeModelName(params.senderName),
             senderUsername: params.senderUsername,
             senderE164: params.senderE164,
             senderIsOwner: params.senderIsOwner,
