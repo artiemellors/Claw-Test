@@ -32,6 +32,7 @@ Docs: https://docs.openclaw.ai
 - Matrix/gateway: wait for Matrix sync readiness before marking startup successful, keep Matrix background handler failures contained, and route fatal Matrix sync stops through channel-level restart handling instead of crashing the whole gateway. (#62779) Thanks @gumadeiras.
 - Browser/security: re-run blocked-destination safety checks after interaction-driven main-frame navigations from click, evaluate, hook-triggered click, and batched action flows, so browser interactions cannot bypass the SSRF quarantine when they land on forbidden URLs. (#63226) Thanks @eleqtrizit.
 - Providers/Ollama: allow Ollama models using the native `api: "ollama"` path to optionally display thinking output when `/think` is set to a non-off level. (#62712) Thanks @hoyyeva.
+- Browser/tabs: route `/tabs/action` close/select through the same browser endpoint reachability and policy checks as list/new, including Playwright-backed remote tab operations, so tab list, focus, and close flows all fail closed when the configured CDP endpoint is blocked without echoing raw policy details back to callers.
 
 ## 2026.4.8
 
