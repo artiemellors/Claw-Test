@@ -339,6 +339,49 @@ describe("scheduleRestartSentinelWake", () => {
     );
   });
 
+  it("requests another wake after enqueueing a systemEvent continuation", async () => {
+    mocks.consumeRestartSentinel.mockResolvedValue({
+      payload: {
+        sessionKey: "agent:main:main",
+        deliveryContext: {
+          channel: "whatsapp",
+          to: "+15550002",
+          accountId: "acct-2",
+        },
+        threadId: "thread-42",
+        ts: 123,
+        continuation: {
+          kind: "systemEvent",
+          text: "continue after restart",
+        },
+      },
+    } as Awaited<ReturnType<typeof mocks.consumeRestartSentinel>>);
+
+    await scheduleRestartSentinelWake({ deps: {} as never });
+
+    expect(mocks.enqueueSystemEvent).toHaveBeenNthCalledWith(
+      2,
+      "continue after restart",
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        deliveryContext: expect.objectContaining({
+          channel: "whatsapp",
+          to: "+15550002",
+          accountId: "acct-2",
+          threadId: "thread-42",
+        }),
+      }),
+    );
+    expect(mocks.requestHeartbeatNow).toHaveBeenNthCalledWith(1, {
+      reason: "wake",
+      sessionKey: "agent:main:main",
+    });
+    expect(mocks.requestHeartbeatNow).toHaveBeenNthCalledWith(2, {
+      reason: "wake",
+      sessionKey: "agent:main:main",
+    });
+  });
+
   it("logs and continues when continuation delivery fails", async () => {
     mocks.consumeRestartSentinel.mockResolvedValue({
       payload: {

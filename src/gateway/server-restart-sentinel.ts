@@ -160,6 +160,7 @@ async function dispatchRestartSentinelContinuation(params: {
           }
         : {}),
     });
+    requestHeartbeatNow({ reason: "wake", sessionKey: params.sessionKey });
     return;
   }
 
