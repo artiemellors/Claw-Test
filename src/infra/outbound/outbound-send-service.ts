@@ -162,6 +162,7 @@ export async function executeSendAction(params: {
     mirror: params.ctx.mirror,
     abortSignal: params.ctx.abortSignal,
     silent: params.ctx.silent,
+    sandboxed: params.ctx.ignoreConfiguredRootsForMedia,
   });
 
   return {
