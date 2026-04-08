@@ -31,7 +31,9 @@ const mocks = vi.hoisted(() => ({
   })),
   getChannelPlugin: vi.fn(() => undefined),
   normalizeChannelId: vi.fn((channel: string) => channel),
-  resolveOutboundTarget: vi.fn(() => ({ ok: true as const, to: "+15550002" })),
+  resolveOutboundTarget: vi.fn((() => ({ ok: true as const, to: "+15550002" })) as (
+    ...args: never[]
+  ) => { ok: true; to: string } | { ok: false; error: Error }),
   deliverOutboundPayloads: vi.fn(async () => [{ channel: "whatsapp", messageId: "msg-1" }]),
   enqueueDelivery: vi.fn(async () => "queue-1"),
   ackDelivery: vi.fn(async () => {}),
@@ -56,7 +58,7 @@ vi.mock("../config/sessions.js", () => ({
   resolveMainSessionKeyFromConfig: mocks.resolveMainSessionKeyFromConfig,
 }));
 
-vi.mock("../config/sessions/delivery-info.js", () => ({
+vi.mock("../config/sessions/thread-info.js", () => ({
   parseSessionThreadInfo: mocks.parseSessionThreadInfo,
 }));
 
@@ -355,6 +357,39 @@ describe("scheduleRestartSentinelWake", () => {
     );
     expect(mocks.logWarn).toHaveBeenCalledWith(
       expect.stringContaining("continuation delivery failed"),
+      expect.objectContaining({
+        sessionKey: "agent:main:main",
+        continuationKind: "agentTurn",
+      }),
+    );
+  });
+
+  it("warns and skips agentTurn continuation when restart routing cannot resolve a destination", async () => {
+    mocks.consumeRestartSentinel.mockResolvedValue({
+      payload: {
+        sessionKey: "agent:main:main",
+        deliveryContext: {
+          channel: "whatsapp",
+          to: "+15550002",
+          accountId: "acct-2",
+        },
+        ts: 123,
+        continuation: {
+          kind: "agentTurn",
+          message: "continue",
+        },
+      },
+    } as Awaited<ReturnType<typeof mocks.consumeRestartSentinel>>);
+    mocks.resolveOutboundTarget.mockReturnValueOnce({
+      ok: false,
+      error: new Error("missing route"),
+    });
+
+    await scheduleRestartSentinelWake({ deps: {} as never });
+
+    expect(mocks.recordInboundSessionAndDispatchReply).not.toHaveBeenCalled();
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      expect.stringContaining("restart continuation route unavailable"),
       expect.objectContaining({
         sessionKey: "agent:main:main",
         continuationKind: "agentTurn",

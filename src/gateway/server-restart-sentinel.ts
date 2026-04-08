@@ -163,11 +163,17 @@ async function dispatchRestartSentinelContinuation(params: {
     return;
   }
 
+  if (!params.channel || !params.to) {
+    throw new Error("restart continuation route unavailable");
+  }
+
   const messageId = buildRestartContinuationMessageId({
     sessionKey: params.sessionKey,
     kind: params.continuation.kind,
     ts: params.ts,
   });
+  const continuationChannel = params.channel;
+  const continuationTo = params.to;
   const userMessage = params.continuation.message.trim();
   const agentId = resolveSessionAgentId({
     sessionKey: params.sessionKey,
@@ -176,7 +182,7 @@ async function dispatchRestartSentinelContinuation(params: {
   let dispatchError: unknown;
   await recordInboundSessionAndDispatchReply({
     cfg: params.cfg,
-    channel: params.channel ?? INTERNAL_MESSAGE_CHANNEL,
+    channel: continuationChannel,
     accountId: params.accountId,
     agentId,
     routeSessionKey: params.sessionKey,
@@ -196,9 +202,9 @@ async function dispatchRestartSentinelContinuation(params: {
         Surface: INTERNAL_MESSAGE_CHANNEL,
         ChatType: "direct",
         CommandAuthorized: true,
-        OriginatingChannel: params.channel ?? INTERNAL_MESSAGE_CHANNEL,
-        OriginatingTo: params.to ?? `session:${params.sessionKey}`,
-        ExplicitDeliverRoute: Boolean(params.channel && params.to),
+        OriginatingChannel: continuationChannel,
+        OriginatingTo: continuationTo,
+        ExplicitDeliverRoute: true,
         MessageThreadId: params.threadId,
       },
       {
@@ -210,13 +216,10 @@ async function dispatchRestartSentinelContinuation(params: {
     recordInboundSession,
     dispatchReplyWithBufferedBlockDispatcher,
     deliver: async (payload) => {
-      if (!params.channel || !params.to) {
-        return;
-      }
       const results = await deliverOutboundPayloads({
         cfg: params.cfg,
-        channel: params.channel,
-        to: params.to,
+        channel: continuationChannel,
+        to: continuationTo,
         accountId: params.accountId,
         replyToId: params.replyToId,
         threadId: params.threadId,
