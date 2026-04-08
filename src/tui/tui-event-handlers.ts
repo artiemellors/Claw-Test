@@ -1,8 +1,11 @@
+import { logDebug } from "../logger.js";
 import { parseAgentSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { asString, extractTextFromMessage, isCommandMessage } from "./tui-formatters.js";
 import { TuiStreamAssembler } from "./tui-stream-assembler.js";
 import type { AgentEvent, BtwEvent, ChatEvent, TuiStateAccess } from "./tui-types.js";
+
+const TUI_LOG_PREFIX = "tui-events:";
 
 type EventHandlerChatLog = {
   startTool: (toolCallId: string, toolName: string, args: unknown) => void;
@@ -263,13 +266,18 @@ export function createEventHandlers(context: EventHandlerContext) {
     const evt = payload as ChatEvent;
     syncSessionKey();
     if (!isSameSessionKey(evt.sessionKey, state.currentSessionKey)) {
+      logDebug(`${TUI_LOG_PREFIX} chat event skipped — session mismatch (evt=${evt.sessionKey}, current=${state.currentSessionKey})`);
       return;
+    }
+    if (evt.state !== "delta") {
+      logDebug(`${TUI_LOG_PREFIX} chat event: runId=${evt.runId} state=${evt.state} activeChatRunId=${state.activeChatRunId ?? "null"}`);
     }
     if (finalizedRuns.has(evt.runId)) {
       if (evt.state === "delta") {
         return;
       }
       if (evt.state === "final") {
+        logDebug(`${TUI_LOG_PREFIX} chat final for already-finalized run=${evt.runId} (duplicate)`);
         return;
       }
     }
@@ -292,6 +300,9 @@ export function createEventHandlers(context: EventHandlerContext) {
       setActivityStatus("streaming");
     }
     if (evt.state === "final") {
+      logDebug(
+        `${TUI_LOG_PREFIX} chat final: runId=${evt.runId} hasMessage=${!!evt.message} activeRun=${state.activeChatRunId === evt.runId}`,
+      );
       const isLocalBtwRun = isLocalBtwRunId?.(evt.runId) ?? false;
       const wasActiveRun = state.activeChatRunId === evt.runId;
       if (!evt.message && isLocalBtwRun) {
@@ -349,6 +360,7 @@ export function createEventHandlers(context: EventHandlerContext) {
       });
     }
     if (evt.state === "aborted") {
+      logDebug(`${TUI_LOG_PREFIX} chat aborted: runId=${evt.runId}`);
       forgetLocalBtwRunId?.(evt.runId);
       const wasActiveRun = state.activeChatRunId === evt.runId;
       chatLog.addSystem("run aborted");
@@ -356,6 +368,9 @@ export function createEventHandlers(context: EventHandlerContext) {
       maybeRefreshHistoryForRun(evt.runId);
     }
     if (evt.state === "error") {
+      logDebug(
+        `${TUI_LOG_PREFIX} chat error: runId=${evt.runId} error=${evt.errorMessage ?? "unknown"}`,
+      );
       forgetLocalBtwRunId?.(evt.runId);
       const wasActiveRun = state.activeChatRunId === evt.runId;
       chatLog.addSystem(`run error: ${evt.errorMessage ?? "unknown"}`);
@@ -428,6 +443,7 @@ export function createEventHandlers(context: EventHandlerContext) {
         return;
       }
       const phase = typeof evt.data?.phase === "string" ? evt.data.phase : "";
+      logDebug(`${TUI_LOG_PREFIX} agent lifecycle: runId=${evt.runId} phase=${phase}`);
       if (phase === "start") {
         setActivityStatus("running");
       }

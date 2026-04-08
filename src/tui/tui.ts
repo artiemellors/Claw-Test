@@ -572,6 +572,9 @@ export async function runTui(opts: TuiOptions) {
       return false;
     }
     if (Date.now() - lastBusyEventAt > STALE_BUSY_TIMEOUT_MS) {
+      logInfo(
+        `tui: stale busy timeout — forcing idle (was ${activityStatus}, last event ${Math.round((Date.now() - lastBusyEventAt) / 1000)}s ago, activeChatRunId=${state.activeChatRunId ?? "null"})`,
+      );
       statusStartedAt = null;
       lastBusyEventAt = null;
       activityStatus = "idle";
@@ -711,9 +714,13 @@ export async function runTui(opts: TuiOptions) {
   };
 
   const setActivityStatus = (text: string) => {
+    const prev = activityStatus;
     activityStatus = text;
     if (busyStates.has(text)) {
       lastBusyEventAt = Date.now();
+    }
+    if (prev !== text) {
+      logDebug(`tui-status: ${prev} → ${text}`);
     }
     renderStatus();
   };
