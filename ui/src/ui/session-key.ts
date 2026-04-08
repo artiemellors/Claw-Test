@@ -66,6 +66,12 @@ export function buildAgentMainSessionKey(params: {
   return `agent:${agentId}:${mainKey}`;
 }
 
+export function buildDashboardSessionMainKey(params: { name: string; uniqueId: string }): string {
+  const sessionName = params.name.trim().toLowerCase().replace(/\s+/g, "-") || "session";
+  const uniqueId = params.uniqueId.trim().toLowerCase();
+  return `dashboard:${sessionName}:${uniqueId}`;
+}
+
 export function resolveAgentIdFromSessionKey(sessionKey: string | undefined | null): string {
   const parsed = parseAgentSessionKey(sessionKey);
   return normalizeAgentId(parsed?.agentId ?? DEFAULT_AGENT_ID);
