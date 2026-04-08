@@ -287,13 +287,13 @@ function queuePendingToolMedia(
 function collectEmittedToolOutputMediaUrls(
   toolName: string,
   outputText: string,
-  result: unknown,
+  builtinToolNames?: ReadonlySet<string>,
 ): string[] {
   const mediaUrls = splitMediaFromOutput(outputText).mediaUrls ?? [];
   if (mediaUrls.length === 0) {
     return [];
   }
-  return filterToolResultMediaUrls(toolName, mediaUrls, result);
+  return filterToolResultMediaUrls(toolName, mediaUrls, builtinToolNames);
 }
 
 const COMPACT_PROVIDER_INVENTORY_TOOLS = new Set(["image_generate", "video_generate"]);
@@ -408,12 +408,13 @@ function readExecApprovalUnavailableDetails(result: unknown): {
 async function emitToolResultOutput(params: {
   ctx: ToolHandlerContext;
   toolName: string;
+  rawToolName: string;
   meta?: string;
   isToolError: boolean;
   result: unknown;
   sanitizedResult: unknown;
 }) {
-  const { ctx, toolName, meta, isToolError, result, sanitizedResult } = params;
+  const { ctx, toolName, rawToolName, meta, isToolError, result, sanitizedResult } = params;
   const hasStructuredMedia =
     result &&
     typeof result === "object" &&
@@ -423,6 +424,7 @@ async function emitToolResultOutput(params: {
     typeof ((result as { details?: { media?: unknown } }).details?.media ?? undefined) ===
       "object" &&
     !Array.isArray((result as { details?: { media?: unknown } }).details?.media);
+
   const approvalPending = readExecApprovalPendingDetails(result);
   let emittedToolOutputMediaUrls: string[] = [];
   if (!isToolError && approvalPending) {
@@ -488,10 +490,10 @@ async function emitToolResultOutput(params: {
         emittedToolOutputMediaUrls = collectEmittedToolOutputMediaUrls(
           toolName,
           outputText,
-          result,
+          ctx.builtinToolNames,
         );
       }
-      ctx.emitToolOutput(toolName, meta, outputText, result);
+      ctx.emitToolOutput(toolName, meta, outputText, rawToolName);
     }
     if (!hasStructuredMedia) {
       return;
@@ -502,13 +504,19 @@ async function emitToolResultOutput(params: {
     return;
   }
 
-  const mediaReply = extractToolResultMediaArtifact(result);
-  if (!mediaReply) {
+  // emitToolOutput() already handles MEDIA: directives when enabled; this path
+  // only sends raw media URLs for non-verbose delivery mode.
+  const mediaArtifact = extractToolResultMediaArtifact(result);
+  if (!mediaArtifact) {
     return;
   }
-  const mediaUrls = filterToolResultMediaUrls(toolName, mediaReply.mediaUrls, result);
+  const mediaUrls = filterToolResultMediaUrls(
+    rawToolName,
+    mediaArtifact.mediaUrls,
+    ctx.builtinToolNames,
+  );
   const pendingMediaUrls =
-    mediaReply.audioAsVoice || emittedToolOutputMediaUrls.length === 0
+    mediaArtifact.audioAsVoice || emittedToolOutputMediaUrls.length === 0
       ? mediaUrls
       : mediaUrls.filter((url) => !emittedToolOutputMediaUrls.includes(url));
   if (pendingMediaUrls.length === 0) {
@@ -516,7 +524,7 @@ async function emitToolResultOutput(params: {
   }
   queuePendingToolMedia(ctx, {
     mediaUrls: pendingMediaUrls,
-    ...(mediaReply.audioAsVoice ? { audioAsVoice: true } : {}),
+    ...(mediaArtifact.audioAsVoice ? { audioAsVoice: true } : {}),
   });
 }
 
@@ -751,7 +759,8 @@ export async function handleToolExecutionEnd(
     result?: unknown;
   },
 ) {
-  const toolName = normalizeToolName(String(evt.toolName));
+  const rawToolName = String(evt.toolName);
+  const toolName = normalizeToolName(rawToolName);
   const toolCallId = String(evt.toolCallId);
   const runId = ctx.params.runId;
   const isError = Boolean(evt.isError);
@@ -1069,7 +1078,15 @@ export async function handleToolExecutionEnd(
     `embedded run tool end: runId=${ctx.params.runId} tool=${toolName} toolCallId=${toolCallId}`,
   );
 
-  await emitToolResultOutput({ ctx, toolName, meta, isToolError, result, sanitizedResult });
+  await emitToolResultOutput({
+    ctx,
+    toolName,
+    rawToolName,
+    meta,
+    isToolError,
+    result,
+    sanitizedResult,
+  });
 
   // Run after_tool_call plugin hook (fire-and-forget)
   const hookRunnerAfter = ctx.hookRunner ?? getGlobalHookRunner();
