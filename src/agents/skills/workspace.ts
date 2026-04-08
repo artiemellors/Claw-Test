@@ -141,13 +141,13 @@ function tryRealpath(filePath: string): string | null {
   }
 }
 
-function warnEscapedSkillPath(params: {
+function debugEscapedSkillPath(params: {
   source: string;
   rootDir: string;
   candidatePath: string;
   candidateRealPath: string;
 }) {
-  skillsLogger.warn("Skipping skill path that resolves outside its configured root.", {
+  skillsLogger.debug("Skipping skill path that resolves outside its configured root.", {
     source: params.source,
     rootDir: params.rootDir,
     path: params.candidatePath,
@@ -168,7 +168,7 @@ function resolveContainedSkillPath(params: {
   if (isPathInside(params.rootRealPath, candidateRealPath)) {
     return candidateRealPath;
   }
-  warnEscapedSkillPath({
+  debugEscapedSkillPath({
     source: params.source,
     rootDir: params.rootDir,
     candidatePath: path.resolve(params.candidatePath),
