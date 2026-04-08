@@ -1,6 +1,7 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { createAnthropicVertexStreamFnForModel } from "../anthropic-vertex-stream.js";
+import { preserveOpenAICompletionsTransportStreamFn } from "../openai-transport-stream.js";
 import { createOpenAIWebSocketStreamFn } from "../openai-ws-stream.js";
 import { createBoundaryAwareStreamFnForModel } from "../provider-transport-stream.js";
 import { stripSystemPromptCacheBoundary } from "../system-prompt-cache-boundary.js";
@@ -85,7 +86,7 @@ export function resolveEmbeddedAgentStreamFn(params: {
     // transports that still read credentials from options.apiKey.
     if (params.authStorage || params.resolvedApiKey) {
       const { authStorage, model, resolvedApiKey } = params;
-      return async (m, context, options) => {
+      return preserveOpenAICompletionsTransportStreamFn(inner, async (m, context, options) => {
         const apiKey = await resolveEmbeddedAgentApiKey({
           provider: model.provider,
           resolvedApiKey,
@@ -95,9 +96,11 @@ export function resolveEmbeddedAgentStreamFn(params: {
           ...options,
           apiKey: apiKey ?? options?.apiKey,
         });
-      };
+      });
     }
-    return (m, context, options) => inner(m, normalizeContext(context), options);
+    return preserveOpenAICompletionsTransportStreamFn(inner, (m, context, options) =>
+      inner(m, normalizeContext(context), options),
+    );
   }
 
   const currentStreamFn = params.currentStreamFn ?? streamSimple;

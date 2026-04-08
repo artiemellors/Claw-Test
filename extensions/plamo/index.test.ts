@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { createOpenAICompletionsTransportStreamFn } from "../../src/agents/openai-transport-stream.js";
+import { resolveEmbeddedAgentStreamFn } from "../../src/agents/pi-embedded-runner/stream-resolution.js";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
@@ -676,7 +677,7 @@ describe("plamo provider plugin", () => {
     });
   });
 
-  it("keeps using the native parser when the base stream fn is the OpenAI completions transport", async () => {
+  it("keeps using the native parser when the base stream fn is an auth-wrapped OpenAI completions transport", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
 
     const server = createServer((req, res) => {
@@ -769,8 +770,20 @@ describe("plamo provider plugin", () => {
     }
 
     const [model] = catalog.provider.models;
+    const transportStreamFn = resolveEmbeddedAgentStreamFn({
+      currentStreamFn: undefined,
+      providerStreamFn: createOpenAICompletionsTransportStreamFn(),
+      shouldUseWebSocketTransport: false,
+      sessionId: "session-1",
+      model: {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+      } as never,
+      resolvedApiKey: "resolved-key",
+    });
     const wrapped = createWrappedPlamoStream(provider, {
-      streamFn: createOpenAICompletionsTransportStreamFn(),
+      streamFn: transportStreamFn,
     });
     const stream = await wrapped(
       {

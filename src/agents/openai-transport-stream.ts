@@ -41,6 +41,13 @@ import { mergeTransportMetadata, sanitizeTransportPayloadText } from "./transpor
 const DEFAULT_AZURE_OPENAI_API_VERSION = "2024-12-01-preview";
 const OPENAI_COMPLETIONS_TRANSPORT_STREAM = Symbol("openclaw.openai-completions-transport-stream");
 
+function markOpenAICompletionsTransportStreamFn(streamFn: StreamFn): StreamFn {
+  Object.defineProperty(streamFn, OPENAI_COMPLETIONS_TRANSPORT_STREAM, {
+    value: true,
+  });
+  return streamFn;
+}
+
 type BaseStreamOptions = {
   temperature?: number;
   maxTokens?: number;
@@ -983,10 +990,7 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
     })();
     return eventStream as unknown as ReturnType<StreamFn>;
   };
-  Object.defineProperty(streamFn, OPENAI_COMPLETIONS_TRANSPORT_STREAM, {
-    value: true,
-  });
-  return streamFn;
+  return markOpenAICompletionsTransportStreamFn(streamFn);
 }
 
 export function isOpenAICompletionsTransportStreamFn(streamFn: StreamFn | undefined): boolean {
@@ -996,6 +1000,15 @@ export function isOpenAICompletionsTransportStreamFn(streamFn: StreamFn | undefi
       OPENAI_COMPLETIONS_TRANSPORT_STREAM
     ] === true,
   );
+}
+
+export function preserveOpenAICompletionsTransportStreamFn(
+  sourceStreamFn: StreamFn | undefined,
+  wrappedStreamFn: StreamFn,
+): StreamFn {
+  return isOpenAICompletionsTransportStreamFn(sourceStreamFn)
+    ? markOpenAICompletionsTransportStreamFn(wrappedStreamFn)
+    : wrappedStreamFn;
 }
 
 async function processOpenAICompletionsStream(
