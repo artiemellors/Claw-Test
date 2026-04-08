@@ -1,8 +1,42 @@
+import { createRequire } from "node:module";
+import { dirname, join, sep } from "node:path";
+
 type CanvasModule = typeof import("@napi-rs/canvas");
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
 let canvasModulePromise: Promise<CanvasModule> | null = null;
 let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
+let standardFontDataPathCache: string | null = null;
+
+// pdf.js needs `standardFontDataUrl` to render PDFs that reference the 14
+// standard PDF fonts (Helvetica, Times, Courier, etc.). Without it, every such
+// document throws `UnknownErrorException: Ensure that the standardFontDataUrl
+// API parameter is provided`, which then yields empty/garbled text extraction.
+//
+// The font files ship inside `pdfjs-dist/standard_fonts/`, so we resolve that
+// directory through the actual module resolver (works regardless of bundling).
+//
+// IMPORTANT: pdf.js's Node-side font fetcher reads via `fs.promises.readFile`
+// and expects a plain filesystem path with a trailing separator — not a
+// `file://` URL. Passing a `file://` URL triggers
+// `Unable to load font data at: file:///...` warnings even though the file
+// exists. This module is server-side only (the gateway runs in Node), so we
+// always pass a filesystem path.
+function getStandardFontDataPath(): string | undefined {
+  if (standardFontDataPathCache !== null) {
+    return standardFontDataPathCache || undefined;
+  }
+  try {
+    const require = createRequire(import.meta.url);
+    const pkgPath = require.resolve("pdfjs-dist/package.json");
+    const fontDir = join(dirname(pkgPath), "standard_fonts") + sep;
+    standardFontDataPathCache = fontDir;
+    return standardFontDataPathCache;
+  } catch {
+    standardFontDataPathCache = "";
+    return undefined;
+  }
+}
 
 async function loadCanvasModule(): Promise<CanvasModule> {
   if (!canvasModulePromise) {
@@ -49,7 +83,20 @@ export async function extractPdfContent(params: {
 }): Promise<PdfExtractedContent> {
   const { buffer, maxPages, maxPixels, minTextChars, pageNumbers, onImageExtractionError } = params;
   const { getDocument } = await loadPdfJsModule();
-  const pdf = await getDocument({ data: new Uint8Array(buffer), disableWorker: true }).promise;
+  // `pdfjs-dist/legacy/build/pdf.mjs` ships narrower `.d.ts` than the runtime
+  // accepts: `DocumentInitParameters` includes `standardFontDataUrl`, but the
+  // legacy build's inline types only declare `{ data, disableWorker }`. Extend
+  // the inferred parameter type structurally so we can pass the
+  // runtime-supported option without an `any` cast.
+  type GetDocumentParams = Parameters<typeof getDocument>[0] & {
+    standardFontDataUrl?: string | URL;
+  };
+  const getDocumentParams: GetDocumentParams = {
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    standardFontDataUrl: getStandardFontDataPath(),
+  };
+  const pdf = await getDocument(getDocumentParams).promise;
 
   const effectivePages: number[] = pageNumbers
     ? pageNumbers.filter((p) => p >= 1 && p <= pdf.numPages).slice(0, maxPages)
