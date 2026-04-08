@@ -426,6 +426,9 @@ async function prepareCronRunContext(params: {
     logWarn(`[cron:${input.job.id}] Failed to persist pre-run session entry: ${String(err)}`);
   }
 
+  // Isolated cron rolls the session id every run, but auth profile selection
+  // should stay stable (same as main-session cron), not follow "new session"
+  // rotation in resolveSessionAuthProfileOverride. See #62783.
   const authProfileId = await resolveSessionAuthProfileOverride({
     cfg: cfgWithAgentDefaults,
     provider,
@@ -434,7 +437,7 @@ async function prepareCronRunContext(params: {
     sessionStore: cronSession.store,
     sessionKey: agentSessionKey,
     storePath: cronSession.storePath,
-    isNewSession: cronSession.isNewSession,
+    isNewSession: cronSession.isNewSession && input.job.sessionTarget !== "isolated",
   });
   const liveSelection: CronLiveSelection = {
     provider,
