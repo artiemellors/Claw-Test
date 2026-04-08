@@ -35,6 +35,8 @@ export type ChatHost = {
   chatModelsLoading: boolean;
   chatModelCatalog: ModelCatalogEntry[];
   sessionsResult?: SessionsListResult | null;
+  chatAutostartPrompt?: string | null;
+  chatAutostartPromptSessionKey?: string | null;
   updateComplete?: Promise<unknown>;
   refreshSessionsAfterChat: Set<string>;
   /** Callback for slash-command side effects that need app-level access. */
@@ -137,12 +139,18 @@ async function sendChatMessageNow(
     previousAttachments?: ChatAttachment[];
     restoreAttachments?: boolean;
     refreshSessions?: boolean;
+    hideUserMessage?: boolean;
+    localEcho?: boolean;
   },
 ) {
   resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
   // Reset scroll state before sending to ensure auto-scroll works for the response
   resetChatScroll(host as unknown as Parameters<typeof resetChatScroll>[0]);
-  const runId = await sendChatMessage(host as unknown as OpenClawApp, message, opts?.attachments);
+  const runId = await sendChatMessage(host as unknown as OpenClawApp, message, {
+    attachments: opts?.attachments,
+    hideUserMessage: opts?.hideUserMessage,
+    localEcho: opts?.localEcho,
+  });
   const ok = Boolean(runId);
   if (!ok && opts?.previousDraft != null) {
     host.chatMessage = opts.previousDraft;
@@ -171,6 +179,50 @@ async function sendChatMessageNow(
     host.refreshSessionsAfterChat.add(runId);
   }
   return ok;
+}
+
+async function maybeAutostartChat(
+  host: ChatHost,
+  historyLoaded: boolean,
+  expectedSessionKey?: string,
+) {
+  if (expectedSessionKey && host.sessionKey !== expectedSessionKey) {
+    return;
+  }
+  const prompt = host.chatAutostartPrompt?.trim();
+  if (!prompt) {
+    return;
+  }
+  // Preserve the originating session so a one-shot prompt cannot drift into a
+  // different session after a failed send or navigation away and back.
+  const targetSessionKey = host.chatAutostartPromptSessionKey ?? null;
+  if (targetSessionKey && targetSessionKey !== host.sessionKey) {
+    return;
+  }
+  if (!historyLoaded) {
+    return;
+  }
+  if (!host.connected || !host.client || isChatBusy(host)) {
+    return;
+  }
+  if (host.chatMessages.length > 0 || typeof host.chatStream === "string") {
+    host.chatAutostartPrompt = null;
+    host.chatAutostartPromptSessionKey = null;
+    return;
+  }
+
+  host.chatAutostartPrompt = null;
+  const ok = await sendChatMessageNow(host, prompt, {
+    hideUserMessage: true,
+    localEcho: false,
+  });
+  if (!ok) {
+    // Restore the prompt; the session key is intentionally preserved so the
+    // next refresh cycle still validates the retry against the target session.
+    host.chatAutostartPrompt = prompt;
+    return;
+  }
+  host.chatAutostartPromptSessionKey = null;
 }
 
 async function flushChatQueue(host: ChatHost) {
@@ -394,7 +446,8 @@ function injectCommandResult(host: ChatHost, content: string) {
 }
 
 export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: boolean }) {
-  await Promise.all([
+  const refreshSessionKey = host.sessionKey;
+  const [historyLoaded] = await Promise.all([
     loadChatHistory(host as unknown as OpenClawApp),
     loadSessions(host as unknown as OpenClawApp, {
       activeMinutes: 0,
@@ -405,6 +458,7 @@ export async function refreshChat(host: ChatHost, opts?: { scheduleScroll?: bool
     refreshChatAvatar(host),
     refreshChatModels(host),
   ]);
+  await maybeAutostartChat(host, historyLoaded, refreshSessionKey);
   if (opts?.scheduleScroll !== false) {
     scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
   }

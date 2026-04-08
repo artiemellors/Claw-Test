@@ -565,6 +565,76 @@ describe("gateway server chat", () => {
     expect(collectHistoryTextValues(historyMessages)).toEqual(["hello", "real reply"]);
   });
 
+  test("chat.send can hide the triggering user turn from chat history", async () => {
+    await withMainSessionStore(async () => {
+      mockGetReplyFromConfigOnce(async () => ({
+        text: "Hello, I am ready to help.",
+      }));
+
+      const res = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "Please introduce yourself to the user.",
+        hideUserMessage: true,
+        idempotencyKey: "idem-hidden-user-turn-1",
+      });
+
+      expect(res.ok).toBe(true);
+      await waitForAgentRunOk("idem-hidden-user-turn-1", CHAT_RESPONSE_TIMEOUT_MS);
+
+      const historyRes = await rpcReq<{ messages?: unknown[] }>(ws, "chat.history", {
+        sessionKey: "main",
+      });
+      expect(historyRes.ok).toBe(true);
+      expect(collectHistoryTextValues(historyRes.payload?.messages ?? [])).toEqual([
+        "Hello, I am ready to help.",
+      ]);
+    });
+  });
+
+  test("chat.send requires operator.admin to hide the triggering user turn", async () => {
+    await withGatewayServer(async ({ port }) => {
+      await withMainSessionStore(async () => {
+        let scopedWs: WebSocket | undefined;
+
+        try {
+          scopedWs = new WebSocket(`ws://127.0.0.1:${port}`);
+          trackConnectChallengeNonce(scopedWs);
+          await new Promise<void>((resolve) => scopedWs?.once("open", resolve));
+          await connectOk(scopedWs, {
+            scopes: ["operator.write"],
+          });
+
+          const res = await rpcReq(scopedWs, "chat.send", {
+            sessionKey: "main",
+            message: "Please introduce yourself to the user.",
+            hideUserMessage: true,
+            idempotencyKey: "idem-hidden-user-turn-write-scope",
+          });
+
+          expect(res.ok).toBe(false);
+          expect(res.error?.message).toBe("missing scope: operator.admin");
+        } finally {
+          scopedWs?.close();
+        }
+      });
+    });
+  });
+
+  test("chat.send rejects hideUserMessage with attachments", async () => {
+    await withMainSessionStore(async () => {
+      const res = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "bootstrap",
+        hideUserMessage: true,
+        attachments: [{ type: "image", content: "iVBOR" }],
+        idempotencyKey: "idem-hidden-with-attachment",
+      });
+
+      expect(res.ok).toBe(false);
+      expect(res.error?.message).toBe("hideUserMessage cannot be combined with attachments");
+    });
+  });
+
   test("routes chat.send slash commands without agent runs", async () => {
     await withMainSessionStore(async () => {
       const spy = vi.mocked(agentCommand);

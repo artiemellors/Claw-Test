@@ -8,6 +8,7 @@ import {
 } from "./app-polling.ts";
 import { scheduleChatScroll, scheduleLogsScroll } from "./app-scroll.ts";
 import type { OpenClawApp } from "./app.ts";
+import { resolveChatAutostartPrompt } from "./chat-autostart.ts";
 import { loadAgentFiles } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
@@ -69,6 +70,10 @@ type SettingsHost = {
   dreamDiaryError: string | null;
   dreamDiaryPath: string | null;
   dreamDiaryContent: string | null;
+  pendingChatAutostartPrompt?: string | null;
+  pendingChatAutostartPromptSessionKey?: string | null;
+  chatAutostartPrompt?: string | null;
+  chatAutostartPromptSessionKey?: string | null;
 };
 
 export function applySettings(host: SettingsHost, next: UiSettings) {
@@ -101,6 +106,30 @@ export function setLastActiveSessionKey(host: SettingsHost, next: string) {
   applySettings(host, { ...host.settings, lastActiveSessionKey: trimmed });
 }
 
+/**
+ * Promote a deferred autostart prompt that was staged behind a pending gateway
+ * confirmation. The captured pending session key is bound to the active prompt
+ * so the one-shot lands in the link's target session even if the user navigated
+ * to a different session before clicking confirm.
+ */
+export function promoteStagedAutostartPrompt<
+  T extends {
+    pendingChatAutostartPrompt: string | null;
+    pendingChatAutostartPromptSessionKey: string | null;
+    chatAutostartPrompt: string | null;
+    chatAutostartPromptSessionKey: string | null;
+  },
+>(target: T): void {
+  const nextPrompt = normalizeOptionalString(target.pendingChatAutostartPrompt);
+  const nextSessionKey = target.pendingChatAutostartPromptSessionKey;
+  target.pendingChatAutostartPrompt = null;
+  target.pendingChatAutostartPromptSessionKey = null;
+  if (nextPrompt) {
+    target.chatAutostartPrompt = nextPrompt;
+    target.chatAutostartPromptSessionKey = nextSessionKey;
+  }
+}
+
 /** Set to true when the token is read from a query string (?token=) instead of a URL fragment. */
 export let warnQueryToken = false;
 
@@ -125,6 +154,7 @@ export function applySettingsFromUrl(host: SettingsHost) {
   const sessionRaw = params.get("session") ?? hashParams.get("session");
   const token = normalizeOptionalString(tokenRaw);
   const session = normalizeOptionalString(sessionRaw);
+  const autostartRaw = params.get("autostart") ?? hashParams.get("autostart");
   const shouldResetSessionForToken = Boolean(token && !session && !gatewayUrlChanged);
   let shouldCleanUrl = false;
 
@@ -182,12 +212,50 @@ export function applySettingsFromUrl(host: SettingsHost) {
       if (!token) {
         host.pendingGatewayToken = null;
       }
+      if (autostartRaw == null) {
+        host.chatAutostartPrompt = null;
+        host.chatAutostartPromptSessionKey = null;
+        host.pendingChatAutostartPrompt = null;
+        host.pendingChatAutostartPromptSessionKey = null;
+      }
     } else {
       host.pendingGatewayUrl = null;
       host.pendingGatewayToken = null;
+      host.pendingChatAutostartPrompt = null;
+      host.pendingChatAutostartPromptSessionKey = null;
     }
     params.delete("gatewayUrl");
     hashParams.delete("gatewayUrl");
+    shouldCleanUrl = true;
+  }
+
+  if (autostartRaw != null) {
+    const prompt = resolveChatAutostartPrompt(autostartRaw);
+    if (prompt) {
+      if (gatewayUrlChanged) {
+        host.chatAutostartPrompt = null;
+        host.chatAutostartPromptSessionKey = null;
+        host.pendingChatAutostartPrompt = prompt;
+        // Capture the session that was active when the deep link arrived so the
+        // promoted prompt binds to the link's target session, not whatever session
+        // the user happens to be on when they confirm the gateway switch.
+        host.pendingChatAutostartPromptSessionKey = host.sessionKey || null;
+      } else {
+        host.chatAutostartPrompt = prompt;
+        // Remember the session that was active when this deep link arrived so a
+        // failed or deferred autostart cannot drift into a different session.
+        host.chatAutostartPromptSessionKey = host.sessionKey || null;
+        host.pendingChatAutostartPrompt = null;
+        host.pendingChatAutostartPromptSessionKey = null;
+      }
+    } else {
+      host.chatAutostartPrompt = null;
+      host.chatAutostartPromptSessionKey = null;
+      host.pendingChatAutostartPrompt = null;
+      host.pendingChatAutostartPromptSessionKey = null;
+    }
+    params.delete("autostart");
+    hashParams.delete("autostart");
     shouldCleanUrl = true;
   }
 

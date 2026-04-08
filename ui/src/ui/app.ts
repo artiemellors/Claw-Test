@@ -40,6 +40,7 @@ import {
   applySettings as applySettingsInternal,
   loadCron as loadCronInternal,
   loadOverview as loadOverviewInternal,
+  promoteStagedAutostartPrompt,
   setTab as setTabInternal,
   setTheme as setThemeInternal,
   setThemeMode as setThemeModeInternal,
@@ -177,6 +178,8 @@ export class OpenClawApp extends LitElement {
   @state() chatAttachments: ChatAttachment[] = [];
   @state() chatManualRefreshInFlight = false;
   @state() navDrawerOpen = false;
+  chatAutostartPrompt: string | null = null;
+  chatAutostartPromptSessionKey: string | null = null;
 
   onSlashAction?: (action: string) => void;
 
@@ -204,6 +207,8 @@ export class OpenClawApp extends LitElement {
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
   pendingGatewayToken: string | null = null;
+  pendingChatAutostartPrompt: string | null = null;
+  pendingChatAutostartPromptSessionKey: string | null = null;
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -740,6 +745,9 @@ export class OpenClawApp extends LitElement {
     const nextToken = this.pendingGatewayToken?.trim() || "";
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
+    // Promote the captured target session, not this.sessionKey: the user may have
+    // navigated to a different session while the gateway confirmation was pending.
+    promoteStagedAutostartPrompt(this);
     applySettingsInternal(this as unknown as Parameters<typeof applySettingsInternal>[0], {
       ...this.settings,
       gatewayUrl: nextGatewayUrl,
@@ -751,6 +759,8 @@ export class OpenClawApp extends LitElement {
   handleGatewayUrlCancel() {
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
+    this.pendingChatAutostartPrompt = null;
+    this.pendingChatAutostartPromptSessionKey = null;
   }
 
   // Sidebar handlers for tool output viewing

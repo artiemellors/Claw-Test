@@ -2,6 +2,7 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatHost } from "./app-chat.ts";
+import { CHAT_AUTOSTART_BOOTSTRAP_PROMPT } from "./chat-autostart.ts";
 
 const { setLastActiveSessionKeyMock } = vi.hoisted(() => ({
   setLastActiveSessionKeyMock: vi.fn(),
@@ -14,18 +15,27 @@ vi.mock("./app-settings.ts", () => ({
 let handleSendChat: typeof import("./app-chat.ts").handleSendChat;
 let refreshChatAvatar: typeof import("./app-chat.ts").refreshChatAvatar;
 let clearPendingQueueItemsForRun: typeof import("./app-chat.ts").clearPendingQueueItemsForRun;
+let refreshChat: typeof import("./app-chat.ts").refreshChat;
 
 async function loadChatHelpers(params?: { reload?: boolean }): Promise<void> {
   if (params?.reload) {
     vi.resetModules();
   }
-  ({ handleSendChat, refreshChatAvatar, clearPendingQueueItemsForRun } =
+  ({ handleSendChat, refreshChatAvatar, clearPendingQueueItemsForRun, refreshChat } =
     await import("./app-chat.ts"));
 }
 
 function makeHost(overrides?: Partial<ChatHost>): ChatHost {
   return {
     client: null,
+    toolStreamById: new Map(),
+    toolStreamOrder: [],
+    chatToolMessages: [],
+    chatStreamSegments: [],
+    toolStreamSyncTimer: null,
+    chatHasAutoScrolled: false,
+    chatUserNearBottom: true,
+    chatNewMessagesBelow: false,
     chatMessages: [],
     chatStream: null,
     connected: true,
@@ -45,7 +55,7 @@ function makeHost(overrides?: Partial<ChatHost>): ChatHost {
     refreshSessionsAfterChat: new Set<string>(),
     updateComplete: Promise.resolve(),
     ...overrides,
-  };
+  } as ChatHost;
 }
 
 function createDeferred<T>() {
@@ -278,6 +288,332 @@ describe("handleSendChat", () => {
         text: "follow up",
       }),
     ]);
+  });
+
+  it("autostarts a hidden prompt once for an empty chat session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).toHaveBeenCalledWith("chat.send", {
+      sessionKey: "main",
+      message: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      deliver: false,
+      hideUserMessage: true,
+      idempotencyKey: expect.any(String),
+      attachments: undefined,
+    });
+    expect(host.chatMessages).toEqual([]);
+    expect(host.chatAutostartPrompt).toBeNull();
+  });
+
+  it("skips autostart when chat history failed to load", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        throw new Error("history unavailable");
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+  });
+
+  it("preserves autostart when the hidden send fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        throw new Error("gateway rejected hidden send");
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).toHaveBeenCalledWith("chat.send", {
+      sessionKey: "main",
+      message: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      deliver: false,
+      hideUserMessage: true,
+      idempotencyKey: expect.any(String),
+      attachments: undefined,
+    });
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatMessages).toEqual([]);
+  });
+
+  it("preserves autostart when the session changes during refresh", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    let host!: ChatHost;
+    let resolveHistory: (() => void) | null = null;
+    const request = vi.fn((method: string) => {
+      if (method === "chat.history") {
+        return new Promise((resolve) => {
+          resolveHistory = () => {
+            host.sessionKey = "secondary";
+            resolve({ messages: [], thinkingLevel: null });
+          };
+        });
+      }
+      if (method === "sessions.list") {
+        return Promise.resolve({
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        });
+      }
+      if (method === "models.list") {
+        return Promise.resolve({ models: [] });
+      }
+      if (method === "chat.send") {
+        return Promise.resolve({ ok: true });
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+    });
+
+    const refreshPromise = refreshChat(host, { scheduleScroll: false });
+    expect(resolveHistory).not.toBeNull();
+    // TypeScript cannot track the closure assignment inside the mock callback,
+    // so the narrowing after the null guard collapses to `never`. Assert here.
+    const resolve = resolveHistory as (() => void) | null;
+    if (!resolve) {
+      throw new Error("expected pending history resolver");
+    }
+    resolve();
+    await refreshPromise;
+
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    expect(host.sessionKey).toBe("secondary");
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+  });
+
+  it("skips autostart when the bound session differs from the current session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "secondary",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      chatAutostartPromptSessionKey: "main",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    // Prompt and session binding are preserved so returning to the target
+    // session still runs the one-shot autostart.
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatAutostartPromptSessionKey).toBe("main");
+  });
+
+  it("keeps session binding when the hidden send fails so a retry stays in the target session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        throw new Error("gateway rejected hidden send");
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      chatAutostartPromptSessionKey: "main",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(host.chatAutostartPrompt).toBe(CHAT_AUTOSTART_BOOTSTRAP_PROMPT);
+    expect(host.chatAutostartPromptSessionKey).toBe("main");
+  });
+
+  it("clears session binding after a successful hidden send", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        json: async () => ({}),
+      }) as unknown as typeof fetch,
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "chat.history") {
+        return { messages: [], thinkingLevel: null };
+      }
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 0,
+          defaults: {},
+          sessions: [],
+        };
+      }
+      if (method === "models.list") {
+        return { models: [] };
+      }
+      if (method === "chat.send") {
+        return { ok: true };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      sessionKey: "main",
+      chatAutostartPrompt: CHAT_AUTOSTART_BOOTSTRAP_PROMPT,
+      chatAutostartPromptSessionKey: "main",
+    });
+
+    await refreshChat(host, { scheduleScroll: false });
+
+    expect(host.chatAutostartPrompt).toBeNull();
+    expect(host.chatAutostartPromptSessionKey).toBeNull();
   });
 });
 
