@@ -130,31 +130,49 @@ and the shared live sweep.
 
 ### Content inputs
 
-| Parameter | Type     | Description                          |
-| --------- | -------- | ------------------------------------ |
-| `image`   | string   | Single reference image (path or URL) |
-| `images`  | string[] | Multiple reference images (up to 5)  |
-| `video`   | string   | Single reference video (path or URL) |
-| `videos`  | string[] | Multiple reference videos (up to 4)  |
+| Parameter    | Type     | Description                                                                                                                            |
+| ------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `image`      | string   | Single reference image (path or URL)                                                                                                   |
+| `images`     | string[] | Multiple reference images (up to 9)                                                                                                    |
+| `imageRoles` | string[] | Optional per-position role hints parallel to the combined image list. Canonical values: `first_frame`, `last_frame`, `reference_image` |
+| `video`      | string   | Single reference video (path or URL)                                                                                                   |
+| `videos`     | string[] | Multiple reference videos (up to 4)                                                                                                    |
+| `videoRoles` | string[] | Optional per-position role hints parallel to the combined video list. Canonical value: `reference_video`                               |
+| `audioRef`   | string   | Single reference audio (path or URL). Used for e.g. background music or voice reference when the provider supports audio inputs        |
+| `audioRefs`  | string[] | Multiple reference audios (up to 3)                                                                                                    |
+| `audioRoles` | string[] | Optional per-position role hints parallel to the combined audio list. Canonical value: `reference_audio`                               |
+
+Role hints are forwarded to the provider as-is. Canonical values come from
+the `VideoGenerationAssetRole` union but providers may accept additional
+role strings. `*Roles` arrays must not have more entries than the
+corresponding reference list; off-by-one mistakes fail with a clear error.
+Use an empty string to leave a slot unset.
 
 ### Style controls
 
-| Parameter         | Type    | Description                                                              |
-| ----------------- | ------- | ------------------------------------------------------------------------ |
-| `aspectRatio`     | string  | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`  |
-| `resolution`      | string  | `480P`, `720P`, `768P`, or `1080P`                                       |
-| `durationSeconds` | number  | Target duration in seconds (rounded to nearest provider-supported value) |
-| `size`            | string  | Size hint when the provider supports it                                  |
-| `audio`           | boolean | Enable generated audio when supported                                    |
-| `watermark`       | boolean | Toggle provider watermarking when supported                              |
+| Parameter         | Type    | Description                                                                             |
+| ----------------- | ------- | --------------------------------------------------------------------------------------- |
+| `aspectRatio`     | string  | `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, `21:9`, or `adaptive`  |
+| `resolution`      | string  | `480P`, `720P`, `768P`, or `1080P`                                                      |
+| `durationSeconds` | number  | Target duration in seconds (rounded to nearest provider-supported value)                |
+| `size`            | string  | Size hint when the provider supports it                                                 |
+| `audio`           | boolean | Enable generated audio in the output when supported. Distinct from `audioRef*` (inputs) |
+| `watermark`       | boolean | Toggle provider watermarking when supported                                             |
+
+`adaptive` is a provider-specific sentinel: it is forwarded as-is to
+providers that declare `adaptive` in their capabilities (e.g. BytePlus
+Seedance uses it to auto-detect the ratio from the input image
+dimensions). Providers that do not declare it surface the value via
+`details.ignoredOverrides` in the tool result so the drop is visible.
 
 ### Advanced
 
-| Parameter  | Type   | Description                                     |
-| ---------- | ------ | ----------------------------------------------- |
-| `action`   | string | `"generate"` (default), `"status"`, or `"list"` |
-| `model`    | string | Provider/model override (e.g. `runway/gen4.5`)  |
-| `filename` | string | Output filename hint                            |
+| Parameter         | Type   | Description                                                                                                                                                                                                                                                                               |
+| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`          | string | `"generate"` (default), `"status"`, or `"list"`                                                                                                                                                                                                                                           |
+| `model`           | string | Provider/model override (e.g. `runway/gen4.5`)                                                                                                                                                                                                                                            |
+| `filename`        | string | Output filename hint                                                                                                                                                                                                                                                                      |
+| `providerOptions` | object | Provider-specific options as a JSON object (e.g. `{"seed": 42, "draft": true}`). Each provider declares its own accepted keys and primitive types; unknown keys or type mismatches skip the candidate during fallback. Run `video_generate action=list` to see what each provider accepts |
 
 Not all providers support all parameters. OpenClaw already normalizes duration to the closest provider-supported value, and it also remaps translated geometry hints such as size-to-aspect-ratio when a fallback provider exposes a different control surface. Truly unsupported overrides are ignored on a best-effort basis and reported as warnings in the tool result. Hard capability limits (such as too many reference inputs) fail before submission.
 
@@ -165,9 +183,31 @@ Reference inputs also select the runtime mode:
 - No reference media: `generate`
 - Any image reference: `imageToVideo`
 - Any video reference: `videoToVideo`
+- Reference audio inputs do not change the resolved mode; they apply on top of whatever mode the image/video references select, and only work with providers that declare `maxInputAudios`
 
 Mixed image and video references are not a stable shared capability surface.
 Prefer one reference type per request.
+
+#### Fallback and typed options
+
+Some capability checks are applied at the fallback layer rather than the
+tool boundary so that a request that exceeds the primary provider's limits
+can still run on a capable fallback:
+
+- If the active candidate declares no `maxInputAudios` (or declares it as
+  `0`), it is skipped when the request contains audio references, and the
+  next candidate is tried.
+- If the active candidate's `maxDurationSeconds` is below the requested
+  `durationSeconds` and the candidate does not declare a
+  `supportedDurationSeconds` list, it is skipped.
+- If the request contains `providerOptions` and the active candidate does
+  not declare the requested keys in its typed `providerOptions` schema, or
+  the value types do not match, the candidate is skipped.
+
+The first skip reason in a request is logged at `warn` so operators see
+when their primary provider was passed over; subsequent skips log at
+`debug` to keep long fallback chains quiet. If every candidate is skipped,
+the aggregated error includes the skip reason for each.
 
 ## Actions
 
