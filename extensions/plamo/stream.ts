@@ -16,7 +16,7 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
-import { buildGuardedModelFetch, isOpenAICompletionsTransportStreamFn } from "./runtime-api.js";
+import { buildGuardedModelFetch } from "./runtime-api.js";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
 const PLAMO_END_TOOL_REQUEST = "<|plamo:end_tool_request:plamo|>";
@@ -1036,6 +1036,16 @@ function createNativePlamoStream(
   return stream;
 }
 
+export function createConfiguredPlamoStreamFn(): StreamFn {
+  return (model, context, options) =>
+    createNativePlamoStream(
+      model,
+      sanitizePlamoReplayMessages(context),
+      options,
+      buildGuardedModelFetch(model as never),
+    );
+}
+
 export function stripPlamoToolMarkup(text: string): string {
   return text
     .replace(PLAMO_TOOL_REQUESTS_BLOCK_RE, "")
@@ -1181,29 +1191,10 @@ function wrapStreamNormalizePlamoToolMarkup(
   return stream;
 }
 
-function shouldUseNativePlamoStream(baseStreamFn: StreamFn | undefined): boolean {
-  if (!baseStreamFn || baseStreamFn === streamSimple) {
-    return true;
-  }
-  return isOpenAICompletionsTransportStreamFn(baseStreamFn);
-}
-
 export function createPlamoToolCallWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
     const sanitizedContext = sanitizePlamoReplayMessages(context);
-
-    if (shouldUseNativePlamoStream(baseStreamFn)) {
-      return wrapStreamNormalizePlamoToolMarkup(
-        createNativePlamoStream(
-          model,
-          sanitizedContext,
-          options,
-          buildGuardedModelFetch(model as never),
-        ),
-      );
-    }
-
     const originalOnPayload = options?.onPayload;
     const maybeStream = underlying(model, sanitizedContext, {
       ...options,

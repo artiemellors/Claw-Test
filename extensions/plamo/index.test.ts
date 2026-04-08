@@ -1,7 +1,7 @@
 import { streamSimple } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createOpenAICompletionsTransportStreamFn } from "../../src/agents/openai-transport-stream.js";
 import { resolveEmbeddedAgentStreamFn } from "../../src/agents/pi-embedded-runner/stream-resolution.js";
+import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../src/agents/system-prompt-cache-boundary.js";
 import {
   installPinnedHostnameTestHooks,
   resolveRequestUrl,
@@ -124,10 +124,23 @@ function createWrappedPlamoStream(
     streamFn?: unknown;
   },
 ) {
+  const baseStreamFn =
+    options?.streamFn ??
+    provider.createStreamFn?.({
+      config: {},
+      provider: "plamo",
+      modelId: options?.modelId ?? "plamo-3.0-prime-beta",
+      model: {
+        provider: "plamo",
+        id: options?.modelId ?? "plamo-3.0-prime-beta",
+        api: "openai-completions",
+      } as never,
+    }) ??
+    streamSimple;
   const wrapped = provider.wrapStreamFn?.({
     provider: "plamo",
     modelId: options?.modelId ?? "plamo-3.0-prime-beta",
-    streamFn: (options?.streamFn ?? streamSimple) as never,
+    streamFn: baseStreamFn as never,
     extraParams: options?.extraParams ?? {},
   } as never);
   if (!wrapped) {
@@ -640,85 +653,37 @@ describe("plamo provider plugin", () => {
     });
   });
 
-  it("keeps using the native parser when the base stream fn is an auth-wrapped OpenAI completions transport", async () => {
+  it("preserves embedded auth/context wrappers on the native stream path", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
-    stubPlamoSseFetch([
+    const { getRequest } = stubPlamoSseFetch([
       formatSseEvent({
-        id: "chatcmpl-tool-index-transport",
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_read",
-                  type: "function",
-                  function: { name: "read", arguments: '{"path":"' },
-                },
-                {
-                  index: 1,
-                  id: "call_write",
-                  type: "function",
-                  function: { name: "write", arguments: '{"path":"' },
-                },
-              ],
-            },
-          },
-        ],
+        id: "chatcmpl-native-wrapped",
+        choices: [{ index: 0, delta: { content: "ok" } }],
       }),
       formatSseEvent({
-        id: "chatcmpl-tool-index-transport",
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [
-                {
-                  index: 1,
-                  type: "function",
-                  function: { arguments: 'out.txt",' },
-                },
-                {
-                  index: 0,
-                  type: "function",
-                  function: { arguments: 'README.md",' },
-                },
-              ],
-            },
-          },
-        ],
-      }),
-      formatSseEvent({
-        id: "chatcmpl-tool-index-transport",
-        choices: [
-          {
-            index: 0,
-            delta: {
-              tool_calls: [
-                {
-                  index: 1,
-                  type: "function",
-                  function: { arguments: '"content":"hi"}' },
-                },
-                {
-                  index: 0,
-                  type: "function",
-                  function: { arguments: '"mode":"r"}' },
-                },
-              ],
-            },
-            finish_reason: "tool_calls",
-          },
-        ],
+        id: "chatcmpl-native-wrapped",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
       }),
       "data: [DONE]\n\n",
     ]);
 
     const [model] = catalog.provider.models;
-    const transportStreamFn = resolveEmbeddedAgentStreamFn({
+    const providerStreamFn = provider.createStreamFn?.({
+      config: {},
+      provider: "plamo",
+      modelId: model.id,
+      model: {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+      } as never,
+    });
+    if (!providerStreamFn) {
+      throw new Error("expected native provider stream function");
+    }
+    const wrappedProviderStreamFn = resolveEmbeddedAgentStreamFn({
       currentStreamFn: undefined,
-      providerStreamFn: createOpenAICompletionsTransportStreamFn(),
+      providerStreamFn,
       shouldUseWebSocketTransport: false,
       sessionId: "session-1",
       model: {
@@ -729,7 +694,7 @@ describe("plamo provider plugin", () => {
       resolvedApiKey: "resolved-key",
     });
     const wrapped = createWrappedPlamoStream(provider, {
-      streamFn: transportStreamFn,
+      streamFn: wrappedProviderStreamFn,
     });
     const stream = await wrapped(
       {
@@ -739,48 +704,25 @@ describe("plamo provider plugin", () => {
         baseUrl: PLAMO_TEST_BASE_URL,
       } as never,
       {
-        systemPrompt: "system prompt",
-        messages: [{ role: "user", content: "tool test" }],
+        systemPrompt: `cached${SYSTEM_PROMPT_CACHE_BOUNDARY}live`,
+        messages: [{ role: "user", content: "wrapped test" }],
       } as never,
-      {
-        apiKey: "test-key",
-      } as never,
+      {} as never,
     );
 
-    const deltas: Array<{ contentIndex: number; delta: string }> = [];
-    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
-    for await (const event of stream) {
-      if (event.type === "toolcall_delta") {
-        deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
-      }
+    for await (const _event of stream) {
+      // Drain the stream so the request completes.
     }
-    result = await stream.result();
+    await stream.result();
 
-    expect(deltas).toEqual([
-      { contentIndex: 0, delta: '{"path":"' },
-      { contentIndex: 1, delta: '{"path":"' },
-      { contentIndex: 1, delta: 'out.txt",' },
-      { contentIndex: 0, delta: 'README.md",' },
-      { contentIndex: 1, delta: '"content":"hi"}' },
-      { contentIndex: 0, delta: '"mode":"r"}' },
+    const request = getRequest();
+    const headers = new Headers(request.init?.headers);
+    const body = toRequestBody(request.init);
+    expect(headers.get("authorization")).toBe("Bearer resolved-key");
+    expect(body.messages).toEqual([
+      { role: "system", content: "cached\nlive" },
+      { role: "user", content: "wrapped test" },
     ]);
-    expect(result).toMatchObject({
-      stopReason: "toolUse",
-      content: [
-        {
-          type: "toolCall",
-          id: "call_read",
-          name: "read",
-          arguments: { path: "README.md", mode: "r" },
-        },
-        {
-          type: "toolCall",
-          id: "call_write",
-          name: "write",
-          arguments: { path: "out.txt", content: "hi" },
-        },
-      ],
-    });
   });
 
   it("preserves text-block ordering when normalizing inline PLaMo tool markup", () => {

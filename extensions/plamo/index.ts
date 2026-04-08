@@ -1,7 +1,7 @@
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import { applyPlamoConfig, PLAMO_DEFAULT_MODEL_REF } from "./onboard.js";
 import { buildPlamoProvider } from "./provider-catalog.js";
-import { createPlamoToolCallWrapper } from "./stream.js";
+import { createConfiguredPlamoStreamFn, createPlamoToolCallWrapper } from "./stream.js";
 
 const PROVIDER_ID = "plamo";
 
@@ -39,6 +39,7 @@ export default defineSingleProviderPluginEntry({
     capabilities: {
       dropThinkingBlockModelHints: ["plamo"],
     },
+    createStreamFn: () => createConfiguredPlamoStreamFn(),
     wrapStreamFn: ({ streamFn }) => createPlamoToolCallWrapper(streamFn),
   },
 });
