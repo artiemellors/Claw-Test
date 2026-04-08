@@ -477,6 +477,8 @@ export function registerAnthropicPlugin(api: OpenClawPluginApi): void {
     isModernModelRef: ({ modelId }) => matchesAnthropicModernModel(modelId),
     resolveReasoningOutputMode: () => "native",
     wrapStreamFn: wrapAnthropicProviderStream,
+    supportsXHighThinking: ({ modelId }) =>
+      shouldUseAnthropicAdaptiveThinkingDefault(modelId) || undefined,
     resolveDefaultThinkingLevel: ({ modelId }) =>
       matchesAnthropicModernModel(modelId) && shouldUseAnthropicAdaptiveThinkingDefault(modelId)
         ? "adaptive"
