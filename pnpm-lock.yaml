@@ -1099,6 +1099,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/utopia:
+    dependencies:
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+
   extensions/vercel-ai-gateway:
     devDependencies:
       '@openclaw/plugin-sdk':
