@@ -1,4 +1,9 @@
 import * as path from "path";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "openclaw/plugin-sdk/text-runtime";
 import {
   getAccessToken,
   sendC2CFileMessage,
@@ -302,7 +307,7 @@ export async function sendPhoto(
       return { channel: "qqbot", error: sizeCheck.error! };
     }
     const fileBuffer = await readFileAsync(mediaPath);
-    const ext = path.extname(mediaPath).toLowerCase();
+    const ext = normalizeLowercaseStringOrEmpty(path.extname(mediaPath));
     const mimeTypes: Record<string, string> = {
       ".jpg": "image/jpeg",
       ".jpeg": "image/jpeg",
@@ -355,7 +360,7 @@ export async function sendPhoto(
       return { channel: "qqbot", error: "Channel does not support local/Base64 images" };
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErrorMessage(err);
 
     // Fall back to plugin-managed download + Base64 when QQ fails to fetch the URL directly.
     if (isHttp && !isData) {
@@ -439,7 +444,7 @@ export async function sendVoice(
           return { channel: "qqbot", error: "Voice not supported in channel" };
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = formatErrorMessage(err);
         debugWarn(
           `${prefix} sendVoice: URL direct upload failed (${msg}), downloading locally and retrying...`,
         );
@@ -481,7 +486,7 @@ async function sendVoiceFromLocal(
   const needsTranscode = shouldTranscodeVoice(mediaPath);
 
   if (needsTranscode && !transcodeEnabled) {
-    const ext = path.extname(mediaPath).toLowerCase();
+    const ext = normalizeLowercaseStringOrEmpty(path.extname(mediaPath));
     debugLog(
       `${prefix} sendVoice: transcode disabled, format ${ext} needs transcode, returning error for fallback`,
     );
@@ -534,7 +539,7 @@ async function sendVoiceFromLocal(
       return { channel: "qqbot", error: "Voice not supported in channel" };
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErrorMessage(err);
     debugError(`${prefix} sendVoice (local) failed: ${msg}`);
     return { channel: "qqbot", error: msg };
   }
@@ -590,7 +595,7 @@ export async function sendVideoMsg(
 
     return await sendVideoFromLocal(ctx, mediaPath, prefix);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErrorMessage(err);
 
     // If direct URL upload fails, retry through a local download path.
     if (isHttp) {
@@ -655,7 +660,7 @@ async function sendVideoFromLocal(
       return { channel: "qqbot", error: "Video not supported in channel" };
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErrorMessage(err);
     debugError(`${prefix} sendVideoMsg (local) failed: ${msg}`);
     return { channel: "qqbot", error: msg };
   }
@@ -714,7 +719,7 @@ export async function sendDocument(
 
     return await sendDocumentFromLocal(ctx, mediaPath, prefix);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErrorMessage(err);
 
     // If direct URL upload fails, retry through a local download path.
     if (isHttp) {
@@ -784,7 +789,7 @@ async function sendDocumentFromLocal(
       return { channel: "qqbot", error: "File not supported in channel" };
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErrorMessage(err);
     debugError(`${prefix} sendDocument (local) failed: ${msg}`);
     return { channel: "qqbot", error: msg };
   }
@@ -885,9 +890,9 @@ export async function sendText(ctx: OutboundContext): Promise<OutboundResult> {
         sendQueue.push({ type: "text", content: textBefore });
       }
 
-      const tagName = match[1].toLowerCase();
+      const tagName = normalizeLowercaseStringOrEmpty(match[1]);
 
-      let mediaPath = match[2]?.trim() ?? "";
+      let mediaPath = normalizeOptionalString(match[2]) ?? "";
       if (mediaPath.startsWith("MEDIA:")) {
         mediaPath = mediaPath.slice("MEDIA:".length);
       }
@@ -1090,7 +1095,7 @@ export async function sendText(ctx: OutboundContext): Promise<OutboundResult> {
           });
         }
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = formatErrorMessage(err);
         debugError(`[qqbot] sendText: Failed to send ${item.type}: ${errMsg}`);
         lastResult = { channel: "qqbot", error: errMsg };
       }
@@ -1184,7 +1189,7 @@ export async function sendText(ctx: OutboundContext): Promise<OutboundResult> {
       };
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = formatErrorMessage(err);
     return { channel: "qqbot", error: message };
   }
 }
@@ -1265,7 +1270,7 @@ export async function sendProactiveMessage(
     }
     return outResult;
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorMessage = formatErrorMessage(err);
     debugError(`[${timestamp}] [qqbot] sendProactiveMessage: error: ${errorMessage}`);
     debugError(
       `[${timestamp}] [qqbot] sendProactiveMessage: error stack: ${err instanceof Error ? err.stack : "No stack trace"}`,
@@ -1367,7 +1372,7 @@ async function sendTextAfterMedia(ctx: MediaTargetContext, text: string): Promis
 /** Extract a lowercase extension from a path or URL, ignoring query and hash segments. */
 function getCleanExt(filePath: string): string {
   const cleanPath = filePath.split("?")[0].split("#")[0];
-  return path.extname(cleanPath).toLowerCase();
+  return normalizeLowercaseStringOrEmpty(path.extname(cleanPath));
 }
 
 /** Check whether a file is an image using MIME first and extension as fallback. */
