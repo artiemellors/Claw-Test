@@ -488,6 +488,24 @@ export function createAgentEventHandler({
     pendingTerminalLifecycleErrors.delete(runId);
   };
 
+  // Per-session cache for spawnedBy — immutable once set, so lookup once is enough.
+  const spawnedByCache = new Map<string, string | null>();
+  const resolveSpawnedBy = (sessionKey: string): string | null => {
+    const cached = spawnedByCache.get(sessionKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    try {
+      const row = loadGatewaySessionRow(sessionKey);
+      const val = row?.spawnedBy ?? null;
+      spawnedByCache.set(sessionKey, val);
+      return val;
+    } catch {
+      spawnedByCache.set(sessionKey, null);
+      return null;
+    }
+  };
+
   const buildSessionEventSnapshot = (sessionKey: string, evt?: AgentEventPayload) => {
     const row = loadGatewaySessionRow(sessionKey);
     const lifecyclePatch = evt
@@ -698,9 +716,11 @@ export function createAgentEventHandler({
     }
     chatRunState.deltaSentAt.set(clientRunId, now);
     chatRunState.deltaLastBroadcastLen.set(clientRunId, mergedText.length);
+    const spawnedBy = resolveSpawnedBy(sessionKey);
     const payload = {
       runId: clientRunId,
       sessionKey,
+      ...(spawnedBy && { spawnedBy }),
       seq,
       state: "delta" as const,
       message: {
@@ -755,9 +775,11 @@ export function createAgentEventHandler({
     }
 
     const now = Date.now();
+    const spawnedBy = resolveSpawnedBy(sessionKey);
     const flushPayload = {
       runId: clientRunId,
       sessionKey,
+      ...(spawnedBy && { spawnedBy }),
       seq,
       state: "delta" as const,
       message: {
@@ -790,10 +812,12 @@ export function createAgentEventHandler({
     chatRunState.deltaLastBroadcastLen.delete(clientRunId);
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
+    const spawnedBy = resolveSpawnedBy(sessionKey);
     if (jobState === "done") {
       const payload = {
         runId: clientRunId,
         sessionKey,
+        ...(spawnedBy && { spawnedBy }),
         seq,
         state: "final" as const,
         ...(stopReason && { stopReason }),
@@ -813,6 +837,7 @@ export function createAgentEventHandler({
     const payload = {
       runId: clientRunId,
       sessionKey,
+      ...(spawnedBy && { spawnedBy }),
       seq,
       state: "error" as const,
       errorMessage: error ? formatForLog(error) : undefined,
@@ -862,7 +887,10 @@ export function createAgentEventHandler({
     const isAborted =
       chatRunState.abortedRuns.has(clientRunId) || chatRunState.abortedRuns.has(evt.runId);
     // Include sessionKey so Control UI can filter tool streams per session.
-    const agentPayload = sessionKey ? { ...eventForClients, sessionKey } : eventForClients;
+    const spawnedBy = sessionKey ? resolveSpawnedBy(sessionKey) : null;
+    const agentPayload = sessionKey
+      ? { ...eventForClients, sessionKey, ...(spawnedBy && { spawnedBy }) }
+      : eventForClients;
     const last = agentRunSeq.get(evt.runId) ?? 0;
     const isToolEvent = evt.stream === "tool";
     const isItemEvent = evt.stream === "item";
@@ -885,6 +913,7 @@ export function createAgentEventHandler({
         stream: "error",
         ts: Date.now(),
         sessionKey,
+        ...(spawnedBy && { spawnedBy }),
         data: {
           reason: "seq gap",
           expected: last + 1,
