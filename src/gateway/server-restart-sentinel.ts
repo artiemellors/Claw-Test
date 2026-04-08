@@ -208,7 +208,6 @@ async function dispatchRestartSentinelContinuation(params: {
         MessageThreadId: params.threadId,
       },
       {
-        forceBodyForAgent: true,
         forceBodyForCommands: true,
         forceChatType: true,
       },
@@ -268,6 +267,12 @@ export async function scheduleRestartSentinelWake(params: { deps: CliDeps }) {
   if (!sessionKey) {
     const mainSessionKey = resolveMainSessionKeyFromConfig();
     enqueueSystemEvent(message, { sessionKey: mainSessionKey });
+    if (payload.continuation) {
+      log.warn(`${summary}: continuation skipped: restart sentinel sessionKey unavailable`, {
+        sessionKey: mainSessionKey,
+        continuationKind: payload.continuation.kind,
+      });
+    }
     return;
   }
 
