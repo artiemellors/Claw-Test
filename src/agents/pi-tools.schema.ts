@@ -234,13 +234,21 @@ export function normalizeToolParameterSchema(
         : undefined;
 
   const nextSchema: Record<string, unknown> = { ...schemaRecord };
+  const finalProperties =
+    Object.keys(mergedProperties).length > 0 ? mergedProperties : (schemaRecord.properties ?? {});
+  const validRequired =
+    mergedRequired &&
+    mergedRequired.length > 0 &&
+    typeof finalProperties === "object" &&
+    finalProperties !== null
+      ? mergedRequired.filter((key) => key in (finalProperties as Record<string, unknown>))
+      : mergedRequired;
   const flattenedSchema = {
     type: "object",
     ...(typeof nextSchema.title === "string" ? { title: nextSchema.title } : {}),
     ...(typeof nextSchema.description === "string" ? { description: nextSchema.description } : {}),
-    properties:
-      Object.keys(mergedProperties).length > 0 ? mergedProperties : (schemaRecord.properties ?? {}),
-    ...(mergedRequired && mergedRequired.length > 0 ? { required: mergedRequired } : {}),
+    properties: finalProperties,
+    ...(validRequired && validRequired.length > 0 ? { required: validRequired } : {}),
     additionalProperties:
       "additionalProperties" in schemaRecord ? schemaRecord.additionalProperties : true,
   };
