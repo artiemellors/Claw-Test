@@ -168,6 +168,12 @@ export const execSchema = Type.Object({
       description: "Node id/name for host=node.",
     }),
   ),
+  onComplete: Type.Optional(
+    Type.String({
+      description:
+        'Completion behavior. "notify" backgrounds the command and sends a notification when it exits.',
+    }),
+  ),
 });
 
 export type ExecProcessFailureKind =
@@ -314,7 +320,12 @@ export function applyShellPath(env: Record<string, string>, shellPath?: string |
 }
 
 function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "failed") {
-  if (!session.backgrounded || !session.notifyOnExit || session.exitNotified) {
+  if (session.exitNotified || !session.backgrounded) {
+    return;
+  }
+  // Only fire if the caller explicitly opted in via onComplete="notify" or
+  // the tool defaults already had notifyOnExit enabled.
+  if (!session.explicitOnComplete && !session.notifyOnExit) {
     return;
   }
   const sessionKey = session.sessionKey?.trim();
@@ -535,6 +546,7 @@ export async function runExecProcess(opts: {
   pendingMaxOutput: number;
   notifyOnExit: boolean;
   notifyOnExitEmptySuccess?: boolean;
+  explicitOnComplete?: boolean;
   scopeKey?: string;
   sessionKey?: string;
   timeoutSec: number | null;
@@ -556,6 +568,7 @@ export async function runExecProcess(opts: {
     sessionKey: opts.sessionKey,
     notifyOnExit: opts.notifyOnExit,
     notifyOnExitEmptySuccess: opts.notifyOnExitEmptySuccess === true,
+    explicitOnComplete: opts.explicitOnComplete === true,
     exitNotified: false,
     child: undefined,
     stdin: undefined,
