@@ -286,7 +286,7 @@ describe("googlechatPlugin outbound sendMedia", () => {
 
     const cfg = createGoogleChatCfg();
 
-    await googlechatPlugin.outbound?.sendMedia?.({
+    await googlechatOutboundAdapter.attachedResults.sendMedia({
       cfg,
       to: "spaces/AAA",
       text: "",
