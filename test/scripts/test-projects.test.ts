@@ -175,13 +175,17 @@ describe("scripts/test-projects changed-target routing", () => {
     ]);
   });
 
-  it("routes the gateway e2e fixture to the e2e lane", () => {
-    const plans = buildVitestRunPlans(["src/gateway/gateway.test.ts"], process.cwd());
+  it.each([
+    "src/gateway/gateway.test.ts",
+    "src/gateway/server.startup-matrix-migration.integration.test.ts",
+    "src/gateway/sessions-history-http.test.ts",
+  ])("routes gateway integration fixture %s to the e2e lane", (target) => {
+    const plans = buildVitestRunPlans([target], process.cwd());
 
     expect(plans).toEqual([
       {
         config: "vitest.e2e.config.ts",
-        forwardedArgs: ["src/gateway/gateway.test.ts"],
+        forwardedArgs: [target],
         includePatterns: null,
         watchMode: false,
       },
@@ -191,32 +195,70 @@ describe("scripts/test-projects changed-target routing", () => {
 
 describe("scripts/test-projects full-suite sharding", () => {
   it("splits untargeted runs into fixed shard configs", () => {
+    const previousParallel = process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
     delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+    delete process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD;
+    delete process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+    try {
+      expect(buildFullSuiteVitestRunPlans([], process.cwd()).map((plan) => plan.config)).toEqual([
+        "vitest.full-core-unit-fast.config.ts",
+        "vitest.full-core-unit-src.config.ts",
+        "vitest.full-core-unit-security.config.ts",
+        "vitest.full-core-unit-ui.config.ts",
+        "vitest.full-core-unit-support.config.ts",
+        "vitest.full-core-support-boundary.config.ts",
+        "vitest.full-core-contracts.config.ts",
+        "vitest.full-core-bundled.config.ts",
+        "vitest.full-core-runtime.config.ts",
+        "vitest.full-agentic.config.ts",
+        "vitest.full-auto-reply.config.ts",
+        "vitest.full-extensions.config.ts",
+      ]);
+    } finally {
+      if (previousParallel === undefined) {
+        delete process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+      } else {
+        process.env.OPENCLAW_TEST_PROJECTS_PARALLEL = previousParallel;
+      }
+    }
+  });
 
-    expect(buildFullSuiteVitestRunPlans([], process.cwd()).map((plan) => plan.config)).toEqual([
-      "vitest.full-core-unit-fast.config.ts",
-      "vitest.full-core-unit-src.config.ts",
-      "vitest.full-core-unit-security.config.ts",
-      "vitest.full-core-unit-ui.config.ts",
-      "vitest.full-core-unit-support.config.ts",
-      "vitest.full-core-support-boundary.config.ts",
-      "vitest.full-core-contracts.config.ts",
-      "vitest.full-core-bundled.config.ts",
-      "vitest.full-core-runtime.config.ts",
-      "vitest.full-agentic.config.ts",
-      "vitest.full-auto-reply.config.ts",
-      "vitest.full-extensions.config.ts",
-    ]);
+  it("can skip the aggregate extension shard when CI runs dedicated extension shards", () => {
+    const previous = process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD;
+    const previousParallel = process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+    delete process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+    process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD = "1";
+    try {
+      const configs = buildFullSuiteVitestRunPlans([], process.cwd()).map((plan) => plan.config);
+
+      expect(configs).not.toContain("vitest.full-extensions.config.ts");
+      expect(configs).toContain("vitest.full-auto-reply.config.ts");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD;
+      } else {
+        process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD = previous;
+      }
+      if (previousParallel === undefined) {
+        delete process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+      } else {
+        process.env.OPENCLAW_TEST_PROJECTS_PARALLEL = previousParallel;
+      }
+    }
   });
 
   it("can expand full-suite shards to project configs for perf experiments", () => {
     const previous = process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
     process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS = "1";
-    const plans = buildFullSuiteVitestRunPlans([], process.cwd());
-    if (previous === undefined) {
-      delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
-    } else {
-      process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS = previous;
+    let plans: ReturnType<typeof buildFullSuiteVitestRunPlans>;
+    try {
+      plans = buildFullSuiteVitestRunPlans([], process.cwd());
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+      } else {
+        process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS = previous;
+      }
     }
 
     expect(plans.map((plan) => plan.config)).toEqual([
@@ -284,6 +326,55 @@ describe("scripts/test-projects full-suite sharding", () => {
         watchMode: false,
       })),
     );
+  });
+
+  it("skips extension project configs when leaf sharding and the aggregate extension shard is disabled", () => {
+    const previousLeafShards = process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+    const previousSkipExtensions = process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD;
+    process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS = "1";
+    process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD = "1";
+    try {
+      const configs = buildFullSuiteVitestRunPlans([], process.cwd()).map((plan) => plan.config);
+
+      expect(configs).not.toContain("vitest.extensions.config.ts");
+      expect(configs).not.toContain("vitest.extension-providers.config.ts");
+      expect(configs).toContain("vitest.auto-reply-reply.config.ts");
+    } finally {
+      if (previousLeafShards === undefined) {
+        delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+      } else {
+        process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS = previousLeafShards;
+      }
+      if (previousSkipExtensions === undefined) {
+        delete process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD;
+      } else {
+        process.env.OPENCLAW_TEST_SKIP_FULL_EXTENSIONS_SHARD = previousSkipExtensions;
+      }
+    }
+  });
+
+  it("expands full-suite shards before running them in parallel", () => {
+    const previousLeafShards = process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+    const previousParallel = process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+    delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+    process.env.OPENCLAW_TEST_PROJECTS_PARALLEL = "6";
+    try {
+      const configs = buildFullSuiteVitestRunPlans([], process.cwd()).map((plan) => plan.config);
+
+      expect(configs).toContain("vitest.extension-telegram.config.ts");
+      expect(configs).not.toContain("vitest.full-extensions.config.ts");
+    } finally {
+      if (previousLeafShards === undefined) {
+        delete process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS;
+      } else {
+        process.env.OPENCLAW_TEST_PROJECTS_LEAF_SHARDS = previousLeafShards;
+      }
+      if (previousParallel === undefined) {
+        delete process.env.OPENCLAW_TEST_PROJECTS_PARALLEL;
+      } else {
+        process.env.OPENCLAW_TEST_PROJECTS_PARALLEL = previousParallel;
+      }
+    }
   });
 
   it("keeps untargeted watch mode on the native root config", () => {
