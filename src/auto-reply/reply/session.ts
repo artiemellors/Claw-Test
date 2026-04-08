@@ -450,13 +450,13 @@ export async function initSessionState(params: {
     // When a reset trigger (/new, /reset) starts a new session, carry over
     // user-set behavior overrides (verbose, thinking, reasoning, ttsAuto)
     // so the user doesn't have to re-enable them every time.
+    // Model overrides are intentionally NOT carried over so that the new
+    // session reverts to the default model configured in openclaw.json.
     if (resetTriggered && entry) {
       persistedThinking = entry.thinkingLevel;
       persistedVerbose = entry.verboseLevel;
       persistedReasoning = entry.reasoningLevel;
       persistedTtsAuto = entry.ttsAuto;
-      persistedModelOverride = entry.modelOverride;
-      persistedProviderOverride = entry.providerOverride;
       persistedAuthProfileOverride = entry.authProfileOverride;
       persistedAuthProfileOverrideSource = entry.authProfileOverrideSource;
       persistedAuthProfileOverrideCompactionCount = entry.authProfileOverrideCompactionCount;

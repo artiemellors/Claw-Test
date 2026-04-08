@@ -1621,7 +1621,7 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
     }
   });
 
-  it("preserves selected auth profile overrides across /new and /reset", async () => {
+  it("preserves selected auth profile overrides across /new and /reset but clears model overrides", async () => {
     const storePath = await createStorePath("openclaw-reset-model-auth-");
     const sessionKey = "agent:main:telegram:dm:user-model-auth";
     const existingSessionId = "existing-session-model-auth";
@@ -1642,11 +1642,11 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
     } as const;
     const cases = [
       {
-        name: "new preserves selected auth profile overrides",
+        name: "new preserves selected auth profile overrides but clears model overrides",
         body: "/new",
       },
       {
-        name: "reset preserves selected auth profile overrides",
+        name: "reset preserves selected auth profile overrides but clears model overrides",
         body: "/reset",
       },
     ] as const;
@@ -1682,9 +1682,12 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
       expect(result.isNewSession, testCase.name).toBe(true);
       expect(result.resetTriggered, testCase.name).toBe(true);
       expect(result.sessionId, testCase.name).not.toBe(existingSessionId);
+      // Model overrides are cleared on reset so the session reverts to the
+      // default model configured in openclaw.json.
+      expect(result.sessionEntry.modelOverride, testCase.name).toBeUndefined();
+      expect(result.sessionEntry.providerOverride, testCase.name).toBeUndefined();
+      // Auth profile overrides are preserved so the user's auth selection persists.
       expect(result.sessionEntry, testCase.name).toMatchObject({
-        providerOverride: overrides.providerOverride,
-        modelOverride: overrides.modelOverride,
         authProfileOverride: overrides.authProfileOverride,
         authProfileOverrideSource: overrides.authProfileOverrideSource,
         authProfileOverrideCompactionCount: overrides.authProfileOverrideCompactionCount,
