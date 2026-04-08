@@ -560,6 +560,7 @@ export async function monitorWebInbox(options: {
       try {
         detachMessagesUpsert();
         detachConnectionUpdate();
+        await debouncer.flushAll();
         closeInboundMonitorSocket(sock);
       } catch (err) {
         logVerbose(`Socket close failed: ${String(err)}`);
