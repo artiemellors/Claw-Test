@@ -2052,6 +2052,18 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                   model: {
                     type: "string",
                   },
+                  inputType: {
+                    type: "string",
+                    minLength: 1,
+                  },
+                  queryInputType: {
+                    type: "string",
+                    minLength: 1,
+                  },
+                  documentInputType: {
+                    type: "string",
+                    minLength: 1,
+                  },
                   outputDimensionality: {
                     type: "integer",
                     exclusiveMinimum: 0,
@@ -3668,6 +3680,18 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
                     },
                     model: {
                       type: "string",
+                    },
+                    inputType: {
+                      type: "string",
+                      minLength: 1,
+                    },
+                    queryInputType: {
+                      type: "string",
+                      minLength: 1,
+                    },
+                    documentInputType: {
+                      type: "string",
+                      minLength: 1,
                     },
                     outputDimensionality: {
                       type: "integer",
@@ -13434,6 +13458,21 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
       label: "Memory Search Model",
       help: "Embedding model override used by the selected memory provider when a non-default model is required. Set this only when you need explicit recall quality/cost tuning beyond provider defaults.",
       tags: ["models"],
+    },
+    "agents.defaults.memorySearch.inputType": {
+      label: "Memory Search Input Type",
+      help: "Optional provider-specific `input_type` forwarded to OpenAI-compatible embedding requests. Use this when your remote embedding proxy expects a custom default for both queries and indexed documents.",
+      tags: ["advanced"],
+    },
+    "agents.defaults.memorySearch.queryInputType": {
+      label: "Memory Search Query Input Type",
+      help: "Optional provider-specific `input_type` for query-time embeddings only. This overrides `memorySearch.inputType` when semantic search requests need a different query label than indexed documents.",
+      tags: ["advanced"],
+    },
+    "agents.defaults.memorySearch.documentInputType": {
+      label: "Memory Search Document Input Type",
+      help: "Optional provider-specific `input_type` for document and indexing embeddings only. This overrides `memorySearch.inputType` for chunk indexing and other document-style embedding batches.",
+      tags: ["advanced"],
     },
     "agents.defaults.memorySearch.outputDimensionality": {
       label: "Memory Search Output Dimensionality",

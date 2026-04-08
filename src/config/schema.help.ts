@@ -802,6 +802,12 @@ export const FIELD_HELP: Record<string, string> = {
     'Selects the embedding backend used to build/query memory vectors: "openai", "gemini", "voyage", "mistral", "ollama", or "local". Keep your most reliable provider here and configure fallback for resilience.',
   "agents.defaults.memorySearch.model":
     "Embedding model override used by the selected memory provider when a non-default model is required. Set this only when you need explicit recall quality/cost tuning beyond provider defaults.",
+  "agents.defaults.memorySearch.inputType":
+    "Optional provider-specific `input_type` forwarded to OpenAI-compatible embedding requests. Use this when your remote embedding proxy expects a custom default for both queries and indexed documents.",
+  "agents.defaults.memorySearch.queryInputType":
+    "Optional provider-specific `input_type` for query-time embeddings only. This overrides `memorySearch.inputType` when semantic search requests need a different query label than indexed documents.",
+  "agents.defaults.memorySearch.documentInputType":
+    "Optional provider-specific `input_type` for document and indexing embeddings only. This overrides `memorySearch.inputType` for chunk indexing and other document-style embedding batches.",
   "agents.defaults.memorySearch.outputDimensionality":
     "Gemini embedding-2 only: chooses the output vector size for memory embeddings. Use 768, 1536, or 3072 (default), and expect a full reindex when you change it because stored vector dimensions must stay consistent.",
   "agents.defaults.memorySearch.remote.baseUrl":
