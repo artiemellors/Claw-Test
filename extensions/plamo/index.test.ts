@@ -448,6 +448,81 @@ describe("plamo provider plugin", () => {
     });
   });
 
+  it("clamps cached prompt reuse and does not double-count reasoning tokens in usage", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-usage-clamp",
+          choices: [{ index: 0, delta: { content: "ok" } }],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-usage-clamp",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 4,
+            completion_tokens: 7,
+            prompt_tokens_details: { cached_tokens: 10 },
+            completion_tokens_details: { reasoning_tokens: 3 },
+          },
+        })}\n\n`,
+      );
+      res.end("data: [DONE]\n\n");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "こんにちは" }],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
+    try {
+      for await (const _event of stream) {
+        // Drain the stream so the request completes.
+      }
+      result = await stream.result();
+    } finally {
+      server.close();
+    }
+
+    expect(result).toMatchObject({
+      stopReason: "stop",
+      usage: {
+        input: 0,
+        output: 7,
+        cacheRead: 10,
+        totalTokens: 17,
+      },
+      content: [{ type: "text", text: "ok" }],
+    });
+  });
+
   it("normalizes inline PLaMo tool markup in native stream results without synthetic toolcall events", async () => {
     const { provider, catalog } = await loadPlamoCatalog();
     const toolMarkup =
@@ -534,7 +609,7 @@ describe("plamo provider plugin", () => {
     });
   });
 
-  it("defaults to native streaming and normalizes inline PLaMo tool markup into tool calls", async () => {
+  it("defaults to native streaming and only normalizes finalized PLaMo tool markup", async () => {
     const provider = await registerSingleProviderPlugin(plamoPlugin);
     const toolMarkup =
       "<|plamo:begin_tool_requests:plamo|>" +
@@ -554,6 +629,7 @@ describe("plamo provider plugin", () => {
     };
     const finalMessage = {
       role: "assistant",
+      stopReason: "stop",
       content: [{ type: "text", text: `I will inspect the file.\n${toolMarkup}` }],
     };
 
@@ -591,8 +667,7 @@ describe("plamo provider plugin", () => {
 
     expect(baseFn).toHaveBeenCalledTimes(1);
     expect(partialMessage.content).toMatchObject([
-      { type: "text", text: "Checking..." },
-      { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+      { type: "text", text: `Checking...${toolMarkup}` },
     ]);
     expect(streamedMessage.content).toMatchObject([
       { type: "text", text: "Reading now." },
@@ -603,6 +678,62 @@ describe("plamo provider plugin", () => {
       { type: "toolCall", name: "read", arguments: { path: "README.md" } },
     ]);
     expect(finalMessage).toMatchObject({ stopReason: "toolUse" });
+    expect(result).toBe(finalMessage);
+  });
+
+  it("preserves non-stop finish reasons when normalizing finalized PLaMo tool markup", async () => {
+    const provider = await registerSingleProviderPlugin(plamoPlugin);
+    const toolMarkup =
+      "<|plamo:begin_tool_requests:plamo|>" +
+      "<|plamo:begin_tool_request:plamo|>" +
+      "<|plamo:begin_tool_name:plamo|>read<|plamo:end_tool_name:plamo|>" +
+      '<|plamo:begin_tool_arguments:plamo|><|plamo:msg|>{"path":"README.md"}' +
+      "<|plamo:end_tool_arguments:plamo|>" +
+      "<|plamo:end_tool_request:plamo|>" +
+      "<|plamo:end_tool_requests:plamo|>";
+    const finalMessage = {
+      role: "assistant",
+      stopReason: "length",
+      content: [{ type: "text", text: `I will inspect the file.\n${toolMarkup}` }],
+    };
+
+    const baseFn = vi.fn(() =>
+      createFakeStream({
+        events: [],
+        resultMessage: finalMessage,
+      }),
+    );
+
+    const wrapped = provider.wrapStreamFn?.({
+      provider: "plamo",
+      modelId: "plamo-3.0-prime-beta",
+      streamFn: baseFn as never,
+      extraParams: {},
+    } as never);
+    if (!wrapped) {
+      throw new Error("expected wrapped stream function");
+    }
+
+    const stream = await wrapped(
+      {
+        api: "openai-completions",
+        provider: "plamo",
+        id: "plamo-3.0-prime-beta",
+      } as never,
+      { messages: [] } as never,
+      {} as never,
+    );
+
+    const result = await stream.result();
+
+    expect(baseFn).toHaveBeenCalledTimes(1);
+    expect(finalMessage).toMatchObject({
+      stopReason: "length",
+      content: [
+        { type: "text", text: "I will inspect the file." },
+        { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+      ],
+    });
     expect(result).toBe(finalMessage);
   });
 });

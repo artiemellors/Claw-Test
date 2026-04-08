@@ -278,7 +278,7 @@ function resolvePlamoCompat(model: RuntimeModel): ResolvedPlamoCompat {
   const compat = (model as { compat?: OpenAICompletionsCompat }).compat;
   return {
     ...DEFAULT_PLAMO_COMPAT,
-    ...(compat ?? {}),
+    ...compat,
     reasoningEffortMap: compat?.reasoningEffortMap ?? DEFAULT_PLAMO_COMPAT.reasoningEffortMap,
     openRouterRouting: compat?.openRouterRouting ?? DEFAULT_PLAMO_COMPAT.openRouterRouting,
     vercelGatewayRouting: compat?.vercelGatewayRouting ?? DEFAULT_PLAMO_COMPAT.vercelGatewayRouting,
@@ -309,7 +309,7 @@ function convertTools(tools: Tool[], compat: ResolvedPlamoCompat): Array<Record<
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-      ...(compat.supportsStrictMode !== false && { strict: false }),
+      ...(compat.supportsStrictMode && { strict: false }),
     },
   }));
 }
@@ -426,8 +426,8 @@ function buildRequestHeaders(
     Authorization: `Bearer ${apiKey}`,
     Accept: "text/event-stream",
     "Content-Type": "application/json",
-    ...((model as { headers?: Record<string, string> }).headers ?? {}),
-    ...(options?.headers ?? {}),
+    ...(model as { headers?: Record<string, string> }).headers,
+    ...options?.headers,
   };
 }
 
@@ -467,8 +467,7 @@ function parseUsage(rawUsage: OpenAIStyleUsage | null | undefined, model: Runtim
     return buildZeroUsage(model);
   }
   const cachedTokens = toFiniteNumber(rawUsage.prompt_tokens_details?.cached_tokens);
-  const reasoningTokens = toFiniteNumber(rawUsage.completion_tokens_details?.reasoning_tokens);
-  const input = toFiniteNumber(rawUsage.prompt_tokens) - cachedTokens;
+  const input = Math.max(0, toFiniteNumber(rawUsage.prompt_tokens) - cachedTokens);
   const output = toFiniteNumber(rawUsage.completion_tokens);
   const usage: Usage = {
     input,
@@ -486,6 +485,23 @@ function parseUsage(rawUsage: OpenAIStyleUsage | null | undefined, model: Runtim
   };
   calculateCost(model as never, usage as never);
   return usage;
+}
+
+function formatFinishReason(reason: unknown): string {
+  if (typeof reason === "string") {
+    return reason;
+  }
+  if (typeof reason === "number" || typeof reason === "boolean" || typeof reason === "bigint") {
+    return String(reason);
+  }
+  if (typeof reason === "symbol") {
+    return reason.description ? `Symbol(${reason.description})` : "Symbol()";
+  }
+  try {
+    return JSON.stringify(reason) ?? Object.prototype.toString.call(reason);
+  } catch {
+    return Object.prototype.toString.call(reason);
+  }
 }
 
 function mapStopReason(reason: unknown): { stopReason: StopReason; errorMessage?: string } {
@@ -508,7 +524,7 @@ function mapStopReason(reason: unknown): { stopReason: StopReason; errorMessage?
     default:
       return {
         stopReason: "error",
-        errorMessage: `Provider finish_reason: ${String(reason)}`,
+        errorMessage: `Provider finish_reason: ${formatFinishReason(reason)}`,
       };
   }
 }
@@ -611,7 +627,7 @@ function parseStreamingChunk(raw: string): OpenAIStyleChunk | null {
     return JSON.parse(trimmed) as OpenAIStyleChunk;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid PLaMo stream chunk: ${message}`);
+    throw new Error(`Invalid PLaMo stream chunk: ${message}`, { cause: error });
   }
 }
 
@@ -734,10 +750,7 @@ function createNativePlamoStream(
           }
         }
 
-        const delta =
-          choice.delta && typeof choice.delta === "object"
-            ? (choice.delta as OpenAIStyleChunkDelta)
-            : null;
+        const delta = choice.delta && typeof choice.delta === "object" ? choice.delta : null;
         if (!delta) {
           continue;
         }
@@ -971,8 +984,9 @@ export function normalizePlamoToolMarkupInMessage(message: unknown): void {
   }
 
   (message as { content: unknown[] }).content = nextContent;
-  if (synthesizedToolCalls.length > 0) {
-    (message as { stopReason?: unknown }).stopReason = "toolUse";
+  const typedMessage = message as { stopReason?: unknown };
+  if (synthesizedToolCalls.length > 0 && typedMessage.stopReason === "stop") {
+    typedMessage.stopReason = "toolUse";
   }
 }
 
@@ -995,7 +1009,6 @@ function wrapStreamNormalizePlamoToolMarkup(
           const result = await iterator.next();
           if (!result.done && result.value && typeof result.value === "object") {
             const event = result.value as { partial?: unknown; message?: unknown };
-            normalizePlamoToolMarkupInMessage(event.partial);
             normalizePlamoToolMarkupInMessage(event.message);
           }
           return result;
