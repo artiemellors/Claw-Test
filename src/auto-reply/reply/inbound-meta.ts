@@ -67,7 +67,7 @@ export function buildInboundMetaSystemPrompt(
   const channelValue = resolveInboundChannel(ctx);
 
   // Normalize selfJid by stripping device suffix for cleaner model consumption
-  const rawSelfJid = safeTrim(ctx.SelfJid);
+  const rawSelfJid = normalizeOptionalString(ctx.SelfJid);
   const selfJidNormalized = rawSelfJid ? rawSelfJid.replace(/:\d+/, "") : undefined;
 
   const payload = {
@@ -81,7 +81,7 @@ export function buildInboundMetaSystemPrompt(
     response_format:
       options?.includeFormattingHints === false ? undefined : resolveInboundFormattingHints(ctx),
     self_jid: selfJidNormalized,
-    self_e164: safeTrim(ctx.SelfE164),
+    self_e164: normalizeOptionalString(ctx.SelfE164),
   };
 
   // Keep the instructions local to the payload so the meaning survives prompt overrides.
@@ -140,7 +140,7 @@ export function buildInboundUserContextPrefix(
       Array.isArray(ctx.MentionedJids) && ctx.MentionedJids.length > 0
         ? ctx.MentionedJids
         : undefined,
-    mentioned_contacts: safeTrim(ctx.MentionedContacts),
+    mentioned_contacts: normalizeOptionalString(ctx.MentionedContacts),
     has_reply_context: ctx.ReplyToBody ? true : undefined,
     has_forwarded_context: ctx.ForwardedFrom ? true : undefined,
     has_thread_starter: normalizeOptionalString(ctx.ThreadStarterBody) ? true : undefined,
