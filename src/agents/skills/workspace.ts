@@ -159,6 +159,7 @@ function resolveContainedSkillPath(params: {
   rootDir: string;
   rootRealPath: string;
   candidatePath: string;
+  allowSymlinks?: boolean;
 }): string | null {
   const candidateRealPath = tryRealpath(params.candidatePath);
   if (!candidateRealPath) {
@@ -166,6 +167,15 @@ function resolveContainedSkillPath(params: {
   }
   if (isPathInside(params.rootRealPath, candidateRealPath)) {
     return candidateRealPath;
+  }
+  // Fallback: accept paths that are logically inside the root even when
+  // internal symlinks (e.g. dist-runtime SKILL.md → dist/) cause the
+  // resolved path to land outside the resolved root.
+  if (params.allowSymlinks) {
+    const resolvedCandidate = path.resolve(params.candidatePath);
+    if (isPathInside(params.rootDir, resolvedCandidate)) {
+      return candidateRealPath;
+    }
   }
   warnEscapedSkillPath({
     source: params.source,
@@ -181,6 +191,7 @@ function filterLoadedSkillsInsideRoot(params: {
   source: string;
   rootDir: string;
   rootRealPath: string;
+  allowSymlinks?: boolean;
 }): Skill[] {
   return params.skills.filter((skill) => {
     const baseDirRealPath = resolveContainedSkillPath({
@@ -188,6 +199,7 @@ function filterLoadedSkillsInsideRoot(params: {
       rootDir: params.rootDir,
       rootRealPath: params.rootRealPath,
       candidatePath: skill.baseDir,
+      allowSymlinks: params.allowSymlinks,
     });
     if (!baseDirRealPath) {
       return false;
@@ -197,6 +209,7 @@ function filterLoadedSkillsInsideRoot(params: {
       rootDir: params.rootDir,
       rootRealPath: params.rootRealPath,
       candidatePath: skill.filePath,
+      allowSymlinks: params.allowSymlinks,
     });
     return Boolean(skillFileRealPath);
   });
@@ -255,7 +268,11 @@ function loadSkillEntries(
 ): SkillEntry[] {
   const limits = resolveSkillsLimits(opts?.config);
 
-  const loadSkills = (params: { dir: string; source: string }): Skill[] => {
+  const loadSkills = (params: {
+    dir: string;
+    source: string;
+    allowSymlinks?: boolean;
+  }): Skill[] => {
     const rootDir = path.resolve(params.dir);
     const rootRealPath = tryRealpath(rootDir) ?? rootDir;
     const resolved = resolveNestedSkillsRoot(params.dir, {
@@ -267,6 +284,7 @@ function loadSkillEntries(
       rootDir,
       rootRealPath,
       candidatePath: baseDir,
+      allowSymlinks: params.allowSymlinks,
     });
     if (!baseDirRealPath) {
       return [];
@@ -280,6 +298,7 @@ function loadSkillEntries(
         rootDir,
         rootRealPath: baseDirRealPath,
         candidatePath: rootSkillMd,
+        allowSymlinks: params.allowSymlinks,
       });
       if (!rootSkillRealPath) {
         return [];
@@ -303,12 +322,14 @@ function loadSkillEntries(
         dir: baseDir,
         source: params.source,
         maxBytes: limits.maxSkillFileBytes,
+        allowSymlinks: params.allowSymlinks,
       });
       return filterLoadedSkillsInsideRoot({
         skills: unwrapLoadedSkills(loaded),
         source: params.source,
         rootDir,
         rootRealPath: baseDirRealPath,
+        allowSymlinks: params.allowSymlinks,
       });
     }
 
@@ -345,6 +366,7 @@ function loadSkillEntries(
         rootDir,
         rootRealPath: baseDirRealPath,
         candidatePath: skillDir,
+        allowSymlinks: params.allowSymlinks,
       });
       if (!skillDirRealPath) {
         continue;
@@ -358,6 +380,7 @@ function loadSkillEntries(
         rootDir,
         rootRealPath: baseDirRealPath,
         candidatePath: skillMd,
+        allowSymlinks: params.allowSymlinks,
       });
       if (!skillMdRealPath) {
         continue;
@@ -381,6 +404,7 @@ function loadSkillEntries(
         dir: skillDir,
         source: params.source,
         maxBytes: limits.maxSkillFileBytes,
+        allowSymlinks: params.allowSymlinks,
       });
       loadedSkills.push(
         ...filterLoadedSkillsInsideRoot({
@@ -388,6 +412,7 @@ function loadSkillEntries(
           source: params.source,
           rootDir,
           rootRealPath: baseDirRealPath,
+          allowSymlinks: params.allowSymlinks,
         }),
       );
 
@@ -423,6 +448,7 @@ function loadSkillEntries(
     ? loadSkills({
         dir: bundledSkillsDir,
         source: "openclaw-bundled",
+        allowSymlinks: true,
       })
     : [];
   const extraSkills = mergedExtraDirs.flatMap((dir) => {

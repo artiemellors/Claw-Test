@@ -14,12 +14,14 @@ function isPathWithinRoot(rootRealPath: string, candidatePath: string): boolean 
 
 function readSkillFileSync(params: {
   rootRealPath: string;
+  rootDir?: string;
   filePath: string;
   maxBytes?: number;
+  allowSymlinks?: boolean;
 }): string | null {
   const opened = openVerifiedFileSync({
     filePath: params.filePath,
-    rejectPathSymlink: true,
+    rejectPathSymlink: !params.allowSymlinks,
     maxBytes: params.maxBytes,
   });
   if (!opened.ok) {
@@ -27,7 +29,14 @@ function readSkillFileSync(params: {
   }
   try {
     if (!isPathWithinRoot(params.rootRealPath, opened.path)) {
-      return null;
+      // Fallback: accept if the logical (non-resolved) path is inside the logical root.
+      if (
+        !params.allowSymlinks ||
+        !params.rootDir ||
+        !isPathWithinRoot(path.resolve(params.rootDir), path.resolve(params.filePath))
+      ) {
+        return null;
+      }
     }
     return fs.readFileSync(opened.fd, "utf8");
   } finally {
@@ -39,13 +48,17 @@ function loadSingleSkillDirectory(params: {
   skillDir: string;
   source: string;
   rootRealPath: string;
+  rootDir?: string;
   maxBytes?: number;
+  allowSymlinks?: boolean;
 }): Skill | null {
   const skillFilePath = path.join(params.skillDir, "SKILL.md");
   const raw = readSkillFileSync({
     rootRealPath: params.rootRealPath,
+    rootDir: params.rootDir,
     filePath: skillFilePath,
     maxBytes: params.maxBytes,
+    allowSymlinks: params.allowSymlinks,
   });
   if (!raw) {
     return null;
@@ -99,7 +112,12 @@ function listCandidateSkillDirs(dir: string): string[] {
   }
 }
 
-export function loadSkillsFromDirSafe(params: { dir: string; source: string; maxBytes?: number }): {
+export function loadSkillsFromDirSafe(params: {
+  dir: string;
+  source: string;
+  maxBytes?: number;
+  allowSymlinks?: boolean;
+}): {
   skills: Skill[];
 } {
   const rootDir = path.resolve(params.dir);
@@ -114,7 +132,9 @@ export function loadSkillsFromDirSafe(params: { dir: string; source: string; max
     skillDir: rootDir,
     source: params.source,
     rootRealPath,
+    rootDir,
     maxBytes: params.maxBytes,
+    allowSymlinks: params.allowSymlinks,
   });
   if (rootSkill) {
     return { skills: [rootSkill] };
@@ -126,7 +146,9 @@ export function loadSkillsFromDirSafe(params: { dir: string; source: string; max
         skillDir,
         source: params.source,
         rootRealPath,
+        rootDir,
         maxBytes: params.maxBytes,
+        allowSymlinks: params.allowSymlinks,
       }),
     )
     .filter((skill): skill is Skill => skill !== null);
