@@ -11,6 +11,7 @@ import {
   buildPluginLoaderJitiOptions,
   resolveLoaderPackageRoot,
   resolvePluginLoaderJitiConfig,
+  toSafeImportPath,
 } from "../plugins/sdk-alias.js";
 import type { AnyAgentTool, OpenClawPluginApi, PluginCommandContext } from "../plugins/types.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
@@ -285,10 +286,10 @@ function loadBundledEntryModuleSync(importMetaUrl: string, specifier: string): u
     try {
       loaded = nodeRequire(modulePath);
     } catch {
-      loaded = getJiti(modulePath)(modulePath);
+      loaded = getJiti(modulePath)(toSafeImportPath(modulePath));
     }
   } else {
-    loaded = getJiti(modulePath)(modulePath);
+    loaded = getJiti(modulePath)(toSafeImportPath(modulePath));
   }
   loadedModuleExports.set(modulePath, loaded);
   return loaded;

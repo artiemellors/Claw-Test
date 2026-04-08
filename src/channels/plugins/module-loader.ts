@@ -6,6 +6,7 @@ import { openBoundaryFileSync } from "../../infra/boundary-file-read.js";
 import {
   buildPluginLoaderJitiOptions,
   resolvePluginLoaderJitiConfig,
+  toSafeImportPath,
 } from "../../plugins/sdk-alias.js";
 import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 
@@ -105,5 +106,5 @@ export function loadChannelPluginModule(params: {
       // Fall back to the Jiti loader path when require() cannot handle the entry.
     }
   }
-  return loadModule(safePath)(safePath);
+  return loadModule(safePath)(toSafeImportPath(safePath));
 }
