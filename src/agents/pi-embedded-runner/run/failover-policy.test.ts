@@ -95,6 +95,40 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
+  it("keeps timed-out assistant attempts as local timeout handling", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: false,
+        fallbackConfigured: true,
+        failoverFailure: false,
+        failoverReason: null,
+        timedOut: true,
+        timedOutDuringCompaction: false,
+        profileRotated: false,
+      }),
+    ).toEqual({
+      action: "continue_normal",
+    });
+  });
+
+  it("keeps classified assistant timeout errors as local handling", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: false,
+        fallbackConfigured: true,
+        failoverFailure: true,
+        failoverReason: "timeout",
+        timedOut: false,
+        timedOutDuringCompaction: false,
+        profileRotated: false,
+      }),
+    ).toEqual({
+      action: "continue_normal",
+    });
+  });
+
   it("does nothing for assistant turns without failover signals", () => {
     expect(
       resolveRunFailoverDecision({

@@ -84,10 +84,10 @@ function shouldRotatePrompt(params: PromptDecisionParams): boolean {
 }
 
 function shouldRotateAssistant(params: AssistantDecisionParams): boolean {
-  return (
-    (!params.aborted && (params.failoverFailure || params.failoverReason !== null)) ||
-    (params.timedOut && !params.timedOutDuringCompaction)
-  );
+  if (params.aborted || params.timedOut || params.failoverReason === "timeout") {
+    return false;
+  }
+  return params.failoverFailure || params.failoverReason !== null;
 }
 
 export function mergeRetryFailoverReason(params: {
@@ -95,7 +95,13 @@ export function mergeRetryFailoverReason(params: {
   failoverReason: FailoverReason | null;
   timedOut?: boolean;
 }): FailoverReason | null {
-  return params.failoverReason ?? (params.timedOut ? "timeout" : null) ?? params.previous;
+  // timedOut takes precedence — timeout must always surface as the reason
+  // to prevent session-lock deadlock (#86). A pre-existing failoverReason
+  // (e.g. "rate_limit") must not mask a timeout condition.
+  if (params.timedOut) {
+    return "timeout";
+  }
+  return params.failoverReason ?? params.previous;
 }
 
 export function resolveRunFailoverDecision(

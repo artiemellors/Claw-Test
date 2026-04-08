@@ -243,6 +243,7 @@ export async function incrementCompactionCount(params: {
   // Build update payload with compaction count and optionally updated token counts
   const updates: Partial<SessionEntry> = {
     compactionCount: nextCount,
+    lastContextPressureBand: undefined,
     updatedAt: now,
   };
   if (newSessionId && newSessionId !== entry.sessionId) {
