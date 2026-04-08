@@ -8,6 +8,12 @@ import {
 } from "openclaw/plugin-sdk/provider-http";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type {
+
+/** Check whether private network addresses should be allowed (TUN/fake-ip proxy support). */
+function shouldAllowPrivateNetwork(cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"]): boolean {
+  if (process.env.OPENCLAW_ALLOW_PRIVATE_NETWORK === "1") return true;
+  return cfg?.agents?.defaults?.network?.dangerouslyAllowPrivateNetwork === true;
+}
   GeneratedVideoAsset,
   VideoGenerationProvider,
   VideoGenerationRequest,
@@ -309,7 +315,7 @@ export function buildXaiVideoGenerationProvider(): VideoGenerationProvider {
         resolveProviderHttpRequestConfig({
           baseUrl: resolveXaiVideoBaseUrl(req),
           defaultBaseUrl: DEFAULT_XAI_VIDEO_BASE_URL,
-          allowPrivateNetwork: false,
+          allowPrivateNetwork: shouldAllowPrivateNetwork(req.cfg),
           defaultHeaders: {
             Authorization: `Bearer ${auth.apiKey}`,
             "Content-Type": "application/json",

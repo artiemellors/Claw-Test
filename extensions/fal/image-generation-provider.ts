@@ -15,6 +15,12 @@ import {
   ssrfPolicyFromDangerouslyAllowPrivateNetwork,
 } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
+
+/** Check whether private network addresses should be allowed (TUN/fake-ip proxy support). */
+function shouldAllowPrivateNetwork(cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"]): boolean {
+  if (process.env.OPENCLAW_ALLOW_PRIVATE_NETWORK === "1") return true;
+  return cfg?.agents?.defaults?.network?.dangerouslyAllowPrivateNetwork === true;
+}
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "openclaw/plugin-sdk/text-runtime";
@@ -352,7 +358,7 @@ export function buildFalImageGenerationProvider(): ImageGenerationProvider {
         resolveProviderHttpRequestConfig({
           baseUrl: explicitBaseUrl,
           defaultBaseUrl: DEFAULT_FAL_BASE_URL,
-          allowPrivateNetwork: false,
+          allowPrivateNetwork: shouldAllowPrivateNetwork(req.cfg),
           defaultHeaders: {
             Authorization: `Key ${auth.apiKey}`,
             "Content-Type": "application/json",

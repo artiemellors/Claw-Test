@@ -24,6 +24,8 @@ function shouldAllowPrivateImageEndpoint(req: {
   if (req.provider === MOCK_OPENAI_PROVIDER_ID) {
     return true;
   }
+  if (process.env.OPENCLAW_ALLOW_PRIVATE_NETWORK === "1") return true;
+  if (req.cfg?.agents?.defaults?.network?.dangerouslyAllowPrivateNetwork === true) return true;
   const baseUrl = resolveConfiguredOpenAIBaseUrl(req.cfg);
   if (!baseUrl.startsWith("http://127.0.0.1:") && !baseUrl.startsWith("http://localhost:")) {
     return false;

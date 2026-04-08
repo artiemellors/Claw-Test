@@ -13,6 +13,15 @@ import type {
   VideoGenerationRequest,
 } from "openclaw/plugin-sdk/video-generation";
 
+/**
+ * Check whether private/reserved network addresses should be allowed.
+ * Supports TUN/fake-ip proxy environments.
+ */
+function shouldAllowPrivateNetwork(cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"]): boolean {
+  if (process.env.OPENCLAW_ALLOW_PRIVATE_NETWORK === "1") return true;
+  return cfg?.agents?.defaults?.network?.dangerouslyAllowPrivateNetwork === true;
+}
+
 const DEFAULT_MINIMAX_VIDEO_BASE_URL = "https://api.minimax.io";
 const DEFAULT_MINIMAX_VIDEO_MODEL = "MiniMax-Hailuo-2.3";
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -273,7 +282,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         resolveProviderHttpRequestConfig({
           baseUrl: resolveMinimaxVideoBaseUrl(req.cfg),
           defaultBaseUrl: DEFAULT_MINIMAX_VIDEO_BASE_URL,
-          allowPrivateNetwork: false,
+          allowPrivateNetwork: shouldAllowPrivateNetwork(req.cfg),
           defaultHeaders: {
             Authorization: `Bearer ${auth.apiKey}`,
             "Content-Type": "application/json",

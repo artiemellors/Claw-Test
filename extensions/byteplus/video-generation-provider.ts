@@ -14,6 +14,12 @@ import type {
 } from "openclaw/plugin-sdk/video-generation";
 import { BYTEPLUS_BASE_URL } from "./models.js";
 
+/** Check whether private network addresses should be allowed (TUN/fake-ip proxy support). */
+function shouldAllowPrivateNetwork(cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"]): boolean {
+  if (process.env.OPENCLAW_ALLOW_PRIVATE_NETWORK === "1") return true;
+  return cfg?.agents?.defaults?.network?.dangerouslyAllowPrivateNetwork === true;
+}
+
 const DEFAULT_BYTEPLUS_VIDEO_MODEL = "seedance-1-0-lite-t2v-250428";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 5_000;
@@ -182,7 +188,7 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
         resolveProviderHttpRequestConfig({
           baseUrl: resolveBytePlusVideoBaseUrl(req),
           defaultBaseUrl: BYTEPLUS_BASE_URL,
-          allowPrivateNetwork: false,
+          allowPrivateNetwork: shouldAllowPrivateNetwork(req.cfg),
           defaultHeaders: {
             Authorization: `Bearer ${auth.apiKey}`,
             "Content-Type": "application/json",
