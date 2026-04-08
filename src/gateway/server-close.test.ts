@@ -133,6 +133,10 @@ describe("createGatewayCloseHandler", () => {
     subsystemLoggerWarn.mockReset();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("unsubscribes lifecycle listeners during shutdown", async () => {
     const lifecycleUnsub = vi.fn();
     const harness = createCloseHarness({ lifecycleUnsub });
