@@ -9,46 +9,59 @@ export const autoReplyReplySubtreeTestInclude = ["src/auto-reply/reply/**/*.test
 export const fullSuiteVitestShards = [
   {
     config: "vitest.full-core-unit-fast.config.ts",
+    group: "core",
     name: "core-unit-fast",
     projects: ["vitest.unit-fast.config.ts"],
   },
   {
     config: "vitest.full-core-unit-src.config.ts",
+    group: "core",
     name: "core-unit-src",
     projects: ["vitest.unit-src.config.ts"],
   },
   {
     config: "vitest.full-core-unit-security.config.ts",
+    group: "core",
     name: "core-unit-security",
     projects: ["vitest.unit-security.config.ts"],
   },
   {
     config: "vitest.full-core-unit-ui.config.ts",
+    group: "core",
     name: "core-unit-ui",
     projects: ["vitest.unit-ui.config.ts"],
   },
   {
     config: "vitest.full-core-unit-support.config.ts",
+    group: "core",
     name: "core-unit-support",
     projects: ["vitest.unit-support.config.ts"],
   },
   {
     config: "vitest.full-core-support-boundary.config.ts",
+    group: "core",
     name: "core-support-boundary",
     projects: ["vitest.boundary.config.ts", "vitest.tooling.config.ts"],
   },
   {
+    // Historical config name; grouped under sdk because these tests exercise
+    // dist-sensitive plugin contracts rather than source-only core behavior.
     config: "vitest.full-core-contracts.config.ts",
+    group: "sdk-contracts",
     name: "core-contracts",
     projects: ["vitest.contracts.config.ts"],
   },
   {
+    // Historical config name; grouped under sdk because bundled plugin loading
+    // depends on built/plugin-packaged surfaces rather than source-only core paths.
     config: "vitest.full-core-bundled.config.ts",
+    group: "sdk-extensions",
     name: "core-bundled",
     projects: ["vitest.bundled.config.ts"],
   },
   {
     config: "vitest.full-core-runtime.config.ts",
+    group: "core",
     name: "core-runtime",
     projects: [
       "vitest.infra.config.ts",
@@ -70,8 +83,9 @@ export const fullSuiteVitestShards = [
     ],
   },
   {
-    config: "vitest.full-agentic.config.ts",
-    name: "agentic",
+    config: "vitest.full-core-agentic.config.ts",
+    group: "core",
+    name: "core-agentic",
     projects: [
       "vitest.gateway.config.ts",
       "vitest.cli.config.ts",
@@ -79,6 +93,13 @@ export const fullSuiteVitestShards = [
       "vitest.commands.config.ts",
       "vitest.agents.config.ts",
       "vitest.daemon.config.ts",
+    ],
+  },
+  {
+    config: "vitest.full-sdk-surfaces.config.ts",
+    group: "sdk-contracts",
+    name: "sdk-surfaces",
+    projects: [
       "vitest.plugin-sdk-light.config.ts",
       "vitest.plugin-sdk.config.ts",
       "vitest.plugins.config.ts",
@@ -87,6 +108,7 @@ export const fullSuiteVitestShards = [
   },
   {
     config: "vitest.full-auto-reply.config.ts",
+    group: "core",
     name: "auto-reply",
     projects: [
       "vitest.auto-reply-core.config.ts",
@@ -96,6 +118,7 @@ export const fullSuiteVitestShards = [
   },
   {
     config: "vitest.full-extensions.config.ts",
+    group: "sdk-extensions",
     name: "extensions",
     projects: [
       "vitest.extension-acpx.config.ts",

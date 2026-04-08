@@ -120,12 +120,14 @@ function expectInstalledBundledDirScenario(params: {
   cwd?: string;
   argv1?: string;
   bundledDirOverride?: string;
+  execArgv?: readonly string[];
 }) {
   expectResolvedBundledDirFromRoot({
     repoRoot: params.installedRoot,
     cwd: params.cwd ?? process.cwd(),
     ...(params.argv1 ? { argv1: params.argv1 } : {}),
     ...(params.bundledDirOverride ? { bundledDirOverride: params.bundledDirOverride } : {}),
+    ...(params.execArgv ? { execArgv: params.execArgv } : {}),
     expectedRelativeDir: path.join("dist", "extensions"),
   });
 }
@@ -136,6 +138,7 @@ function expectInstalledBundledDirScenarioCase(
     cwd?: string;
     argv1?: string;
     bundledDirOverride?: string;
+    execArgv?: readonly string[];
   },
 ) {
   expectInstalledBundledDirScenario(createScenario());
