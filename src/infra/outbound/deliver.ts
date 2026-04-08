@@ -2,6 +2,7 @@ import {
   resolveSendableOutboundReplyParts,
   sendMediaWithLeadingCaption,
 } from "openclaw/plugin-sdk/reply-payload";
+import { resolveSandboxRuntimeStatus } from "../../agents/sandbox/runtime-status.js";
 import {
   chunkByParagraph,
   chunkMarkdownTextWithMode,
@@ -299,6 +300,8 @@ type DeliverOutboundPayloadsCoreParams = {
   mirror?: DeliveryMirror;
   silent?: boolean;
   gatewayClientScopes?: readonly string[];
+  /** Explicitly signal sandbox mode to bypass host-root media restrictions. */
+  sandboxed?: boolean;
 };
 
 function collectPayloadMediaSources(payloads: ReplyPayload[]): string[] {
@@ -576,10 +579,19 @@ async function deliverOutboundPayloadsCore(
   const accountId = params.accountId;
   const deps = params.deps;
   const abortSignal = params.abortSignal;
+  const ignoreConfiguredRoots =
+    params.sandboxed ??
+    (() => {
+      const sandboxSessionKey = params.session?.key ?? params.mirror?.sessionKey;
+      return sandboxSessionKey
+        ? resolveSandboxRuntimeStatus({ cfg, sessionKey: sandboxSessionKey }).sandboxed
+        : false;
+    })();
   const mediaAccess = resolveAgentScopedOutboundMediaAccess({
     cfg,
     agentId: params.session?.agentId ?? params.mirror?.agentId,
     mediaSources: collectPayloadMediaSources(payloads),
+    ignoreConfiguredRoots,
   });
   const results: OutboundDeliveryResult[] = [];
   const handler = await createChannelHandler({

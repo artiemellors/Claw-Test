@@ -4,6 +4,95 @@ import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import { listSearchProviderOptions, setupSearch } from "./onboard-search.js";
 
+const bundledSearchProviders = vi.hoisted(() => {
+  const createProvider = (params: {
+    id: string;
+    pluginId: string;
+    label: string;
+    envVars: string[];
+    requiresCredential?: boolean;
+  }) => ({
+    id: params.id,
+    pluginId: params.pluginId,
+    label: params.label,
+    hint: `${params.label} provider`,
+    onboardingScopes: ["text-inference"],
+    envVars: params.envVars,
+    requiresCredential: params.requiresCredential,
+    placeholder: params.requiresCredential === false ? "(no key needed)" : "test-key",
+    signupUrl: "https://example.com/search",
+    credentialPath:
+      params.requiresCredential === false
+        ? ""
+        : `plugins.entries.${params.pluginId}.config.webSearch.apiKey`,
+    getCredentialValue: () => undefined,
+    setCredentialValue: () => {},
+    getConfiguredCredentialValue: () => undefined,
+    setConfiguredCredentialValue: () => {},
+    createTool: () => null,
+  });
+
+  const providers = [
+    createProvider({
+      id: "brave",
+      pluginId: "brave",
+      label: "Brave Search",
+      envVars: ["BRAVE_API_KEY"],
+    }),
+    createProvider({
+      id: "firecrawl",
+      pluginId: "firecrawl",
+      label: "Firecrawl Search",
+      envVars: ["FIRECRAWL_API_KEY"],
+    }),
+    createProvider({
+      id: "gemini",
+      pluginId: "google",
+      label: "Gemini",
+      envVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    }),
+    createProvider({
+      id: "grok",
+      pluginId: "xai",
+      label: "Grok",
+      envVars: ["XAI_API_KEY"],
+    }),
+    createProvider({
+      id: "kimi",
+      pluginId: "moonshot",
+      label: "Kimi",
+      envVars: ["KIMI_API_KEY", "MOONSHOT_API_KEY"],
+    }),
+    createProvider({
+      id: "perplexity",
+      pluginId: "perplexity",
+      label: "Perplexity",
+      envVars: ["PERPLEXITY_API_KEY", "OPENROUTER_API_KEY"],
+    }),
+    createProvider({
+      id: "tavily",
+      pluginId: "tavily",
+      label: "Tavily Search",
+      envVars: ["TAVILY_API_KEY"],
+    }),
+  ];
+
+  const pluginIdByProviderId = new Map(
+    providers.map((provider) => [provider.id, provider.pluginId]),
+  );
+
+  return {
+    providers,
+    resolveBundledWebSearchPluginId: (providerId?: string) =>
+      providerId ? pluginIdByProviderId.get(providerId) : undefined,
+  };
+});
+
+vi.mock("../plugins/bundled-web-search.js", () => ({
+  listBundledWebSearchProviders: () => bundledSearchProviders.providers,
+  resolveBundledWebSearchPluginId: bundledSearchProviders.resolveBundledWebSearchPluginId,
+}));
+
 const runtime: RuntimeEnv = {
   log: vi.fn(),
   error: vi.fn(),

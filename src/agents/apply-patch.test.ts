@@ -7,6 +7,7 @@ import {
   withRealpathSymlinkRebindRace,
 } from "../test-utils/symlink-rebind-race.js";
 import { applyPatch } from "./apply-patch.js";
+import { resolveRoots } from "./pi-tools.fs-roots.js";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-patch-"));
@@ -331,6 +332,101 @@ describe("applyPatch", () => {
       }
     });
   });
+
+  it("applies host-mode patches inside configured fs roots outside cwd", async () => {
+    await withTempDir(async (dir) => {
+      const allowedDir = await fs.mkdtemp(path.join(path.dirname(dir), "openclaw-patch-roots-"));
+      const target = path.join(allowedDir, "source.txt");
+      await fs.writeFile(target, "before\n", "utf8");
+
+      const patch = `*** Begin Patch
+*** Update File: ${target}
+@@
+-before
++after
+*** End Patch`;
+
+      try {
+        const result = await applyPatch(patch, {
+          cwd: dir,
+          workspaceOnly: false,
+          roots: resolveRoots([{ path: allowedDir, kind: "dir", access: "rw" }]),
+        });
+        expect(await fs.readFile(target, "utf8")).toBe("after\n");
+        expect(result.summary.modified).toEqual([target]);
+      } finally {
+        await fs.rm(allowedDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "deletes symlink entries safely when host-mode roots are configured",
+    async () => {
+      await withTempDir(async (dir) => {
+        const allowedDir = await fs.mkdtemp(path.join(path.dirname(dir), "openclaw-patch-roots-"));
+        const outsideDir = await fs.mkdtemp(
+          path.join(path.dirname(dir), "openclaw-patch-outside-"),
+        );
+        const outsideTarget = path.join(outsideDir, "keep.txt");
+        const linkPath = path.join(allowedDir, "link.txt");
+        await fs.writeFile(outsideTarget, "keep\n", "utf8");
+        await fs.symlink(outsideTarget, linkPath);
+
+        const patch = `*** Begin Patch
+*** Delete File: ${linkPath}
+*** End Patch`;
+
+        try {
+          const result = await applyPatch(patch, {
+            cwd: dir,
+            workspaceOnly: false,
+            roots: resolveRoots([{ path: allowedDir, kind: "dir", access: "rw" }]),
+          });
+          expect(result.summary.deleted).toEqual([linkPath]);
+          await expect(fs.lstat(linkPath)).rejects.toBeDefined();
+          expect(await fs.readFile(outsideTarget, "utf8")).toBe("keep\n");
+        } finally {
+          await fs.rm(allowedDir, { recursive: true, force: true });
+          await fs.rm(outsideDir, { recursive: true, force: true });
+        }
+      });
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "rejects deleting a symlink alias when a canonical read-only file root is stricter",
+    async () => {
+      await withTempDir(async (dir) => {
+        const allowedDir = await fs.mkdtemp(path.join(path.dirname(dir), "openclaw-patch-roots-"));
+        const secretFile = path.join(allowedDir, "secret.txt");
+        const linkPath = path.join(allowedDir, "link.txt");
+        await fs.writeFile(secretFile, "keep\n", "utf8");
+        await fs.symlink(secretFile, linkPath);
+
+        const patch = `*** Begin Patch
+*** Delete File: ${linkPath}
+*** End Patch`;
+
+        try {
+          await expect(
+            applyPatch(patch, {
+              cwd: dir,
+              workspaceOnly: false,
+              roots: resolveRoots([
+                { path: allowedDir, kind: "dir", access: "rw" },
+                { path: secretFile, kind: "file", access: "ro" },
+              ]),
+            }),
+          ).rejects.toThrow(/read-only file root/i);
+          await expect(fs.lstat(linkPath)).resolves.toBeDefined();
+          expect(await fs.readFile(secretFile, "utf8")).toBe("keep\n");
+        } finally {
+          await fs.rm(allowedDir, { recursive: true, force: true });
+        }
+      });
+    },
+  );
 
   it("allows deleting a symlink itself even if it points outside cwd", async () => {
     await withTempDir(async (dir) => {
