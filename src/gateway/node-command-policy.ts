@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../config/config.js";
 import {
   NODE_BROWSER_PROXY_COMMAND,
+  NODE_HTTP_REQUEST_COMMAND,
   NODE_SYSTEM_NOTIFY_COMMAND,
   NODE_SYSTEM_RUN_COMMANDS,
 } from "../infra/node-commands.js";
@@ -99,6 +100,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...REMINDERS_COMMANDS,
     ...PHOTOS_COMMANDS,
     ...MOTION_COMMANDS,
+    NODE_HTTP_REQUEST_COMMAND,
   ],
   macos: [
     ...CANVAS_COMMANDS,
