@@ -357,6 +357,20 @@ export class FeishuStreamingSession {
     await this.queue;
   }
 
+  async clearText(): Promise<void> {
+    if (!this.state || this.closed) {
+      return;
+    }
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.queue;
+    this.pendingText = null;
+    this.lastUpdateTime = 0;
+    this.state.currentText = "";
+  }
+
   private async updateNoteContent(note: string): Promise<void> {
     if (!this.state || !this.state.hasNote) {
       return;
