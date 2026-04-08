@@ -12,7 +12,7 @@ import type {
   ModelProviderConfig,
 } from "../config/types.models.js";
 import { normalizePluginsConfig, resolveEffectiveEnableState } from "../plugins/config-state.js";
-import { loadPluginManifestRegistry } from "../plugins/manifest-registry.js";
+import { resolveEffectivePluginManifestRecord } from "../plugins/manifest-registry.js";
 import { resolvePrimaryStringValue } from "../shared/string-coerce.js";
 
 export type { OpenClawConfig, ModelApi, ModelDefinitionConfig, ModelProviderConfig };
@@ -40,15 +40,12 @@ export type ProviderOnboardPresetAppliers<TArgs extends unknown[]> = {
   applyConfig: (cfg: OpenClawConfig, ...args: TArgs) => OpenClawConfig;
 };
 
-export function isBundledPluginLoadableAndEnabled(
+export function isPluginLoadableAndEnabled(
   cfg: OpenClawConfig,
   pluginId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const registry = loadPluginManifestRegistry({ config: cfg, env });
-  const record = registry.plugins.find(
-    (plugin) => plugin.id === pluginId && plugin.origin === "bundled",
-  );
+  const record = resolveEffectivePluginManifestRecord({ pluginId, config: cfg, env });
   if (!record) {
     return false;
   }
@@ -60,6 +57,8 @@ export function isBundledPluginLoadableAndEnabled(
     enabledByDefault: record.enabledByDefault,
   }).enabled;
 }
+
+export const isBundledPluginLoadableAndEnabled = isPluginLoadableAndEnabled;
 
 function extractAgentDefaultModelFallbacks(model: unknown): string[] | undefined {
   if (!model || typeof model !== "object") {

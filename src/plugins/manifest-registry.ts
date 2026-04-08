@@ -393,7 +393,7 @@ function buildBundleRecord(params: {
 
 function matchesInstalledPluginRecord(params: {
   pluginId: string;
-  candidate: PluginCandidate;
+  candidate: Pick<PluginCandidate, "origin" | "source">;
   config?: OpenClawConfig;
   env: NodeJS.ProcessEnv;
 }): boolean {
@@ -418,7 +418,7 @@ function matchesInstalledPluginRecord(params: {
 
 function resolveDuplicatePrecedenceRank(params: {
   pluginId: string;
-  candidate: PluginCandidate;
+  candidate: Pick<PluginCandidate, "origin" | "source">;
   config?: OpenClawConfig;
   env: NodeJS.ProcessEnv;
 }): number {
@@ -444,6 +444,39 @@ function resolveDuplicatePrecedenceRank(params: {
     return 3;
   }
   return 4;
+}
+
+export function resolveEffectivePluginManifestRecord(params: {
+  pluginId: string;
+  config?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  registry?: PluginManifestRegistry;
+}): PluginManifestRecord | undefined {
+  const env = params.env ?? process.env;
+  const registry = params.registry ?? loadPluginManifestRegistry({ config: params.config, env });
+  let winner: PluginManifestRecord | undefined;
+  let winnerRank = Number.POSITIVE_INFINITY;
+
+  for (const record of registry.plugins) {
+    if (record.id !== params.pluginId) {
+      continue;
+    }
+    const rank = resolveDuplicatePrecedenceRank({
+      pluginId: params.pluginId,
+      candidate: {
+        origin: record.origin,
+        source: record.source,
+      },
+      config: params.config,
+      env,
+    });
+    if (!winner || rank < winnerRank) {
+      winner = record;
+      winnerRank = rank;
+    }
+  }
+
+  return winner;
 }
 
 export function loadPluginManifestRegistry(

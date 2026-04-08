@@ -2,7 +2,12 @@ import {
   resolveAgentModelFallbackValues,
   resolveAgentModelPrimaryValue,
 } from "openclaw/plugin-sdk/provider-onboard";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanupPluginLoaderFixturesForTest,
+  resetPluginLoaderTestStateForTest,
+  writePlugin,
+} from "../../src/plugins/loader.test-fixtures.js";
 import {
   createConfigWithFallbacks,
   EXPECTED_FALLBACKS,
@@ -12,10 +17,19 @@ async function loadOnboardModule() {
   return import("./onboard.js");
 }
 
+function simplePluginBody(id: string) {
+  return `module.exports = { id: ${JSON.stringify(id)}, register() {} };`;
+}
+
 describe("plamo onboard", () => {
   afterEach(() => {
     vi.resetModules();
     vi.doUnmock("openclaw/plugin-sdk/provider-onboard");
+    resetPluginLoaderTestStateForTest();
+  });
+
+  afterAll(() => {
+    cleanupPluginLoaderFixturesForTest();
   });
 
   it("adds the PLaMo provider and defaults the ACP backend to acpx when available", async () => {
@@ -51,12 +65,32 @@ describe("plamo onboard", () => {
     expect(cfg.acp?.backend).toBeUndefined();
   });
 
-  it("does not force acpx when the bundled plugin is unavailable", async () => {
+  it("does not force acpx when a higher-precedence acpx override is disabled", async () => {
+    const shadow = writePlugin({
+      id: "acpx",
+      filename: "index.cjs",
+      body: simplePluginBody("acpx"),
+    });
+
+    const { applyPlamoConfig } = await loadOnboardModule();
+    const cfg = applyPlamoConfig({
+      plugins: {
+        load: { paths: [shadow.file] },
+        entries: {
+          acpx: { enabled: false },
+        },
+      },
+    });
+
+    expect(cfg.acp?.backend).toBeUndefined();
+  });
+
+  it("does not force acpx when the plugin is unavailable", async () => {
     vi.doMock("openclaw/plugin-sdk/provider-onboard", async (importActual) => {
       const actual = await importActual<typeof import("openclaw/plugin-sdk/provider-onboard")>();
       return {
         ...actual,
-        isBundledPluginLoadableAndEnabled: () => false,
+        isPluginLoadableAndEnabled: () => false,
       };
     });
 
