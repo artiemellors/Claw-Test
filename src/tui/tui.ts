@@ -1,3 +1,4 @@
+import { logDebug, logInfo } from "../logger.js";
 import {
   CombinedAutocompleteProvider,
   Container,
@@ -493,8 +494,9 @@ export async function runTui(opts: TuiOptions) {
   };
 
   const busyStates = new Set(["sending", "waiting", "streaming", "running"]);
-  const STALE_BUSY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  const STALE_BUSY_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes (reduced from 5 min)
   let lastBusyEventAt: number | null = null;
+  let gapRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let statusText: Text | null = null;
   let statusLoader: Loader | null = null;
 
@@ -982,10 +984,52 @@ export async function runTui(opts: TuiOptions) {
   };
 
   client.onGap = (info) => {
+    logInfo(
+      `tui: event gap detected — expected seq ${info.expected}, got ${info.received} (activityStatus=${activityStatus}, activeChatRunId=${state.activeChatRunId ?? "null"})`,
+    );
     setConnectionStatus(`event gap: expected ${info.expected}, got ${info.received}`, 5000);
     // Don't force idle here — a gap only means some events were missed, not that
     // the run finished. Long-running tool execution can have gaps without the run
-    // being done. The 5-minute stale busy timeout handles the truly stuck case.
+    // being done. But schedule a deferred check: if no new events arrive within
+    // 10s, check session state to detect whether the run completed during the gap.
+    if (busyStates.has(activityStatus) && state.activeChatRunId) {
+      // Cancel any prior pending recovery timer for this run to avoid duplicates.
+      if (gapRecoveryTimer !== null) {
+        clearTimeout(gapRecoveryTimer);
+        gapRecoveryTimer = null;
+      }
+      const runId = state.activeChatRunId;
+      gapRecoveryTimer = setTimeout(() => {
+        gapRecoveryTimer = null;
+        // Only act if we're still stuck on the same run
+        if (state.activeChatRunId !== runId) {
+          logDebug(
+            `tui: gap recovery cancelled — runId changed (${state.activeChatRunId ?? "null"})`,
+          );
+          return;
+        }
+        // If events resumed after the gap, don't wipe the chat log.
+        if (lastBusyEventAt && Date.now() - lastBusyEventAt < 15_000) {
+          logDebug(
+            `tui: gap recovery cancelled — recent activity (${Math.round((Date.now() - lastBusyEventAt) / 1000)}s ago)`,
+          );
+          return;
+        }
+        // Refresh session info first to check if the run completed during the gap.
+        // Only reload full history if session info confirms the run is no longer active,
+        // avoiding mid-stream chat log resets for genuinely long-running turns.
+        logInfo(`tui: gap recovery — checking session state for stuck run ${runId}`);
+        void refreshSessionInfo().then(() => {
+          if (state.activeChatRunId !== runId) {
+            logDebug(`tui: gap recovery — session info resolved run ${runId}`);
+            return;
+          }
+          logInfo(`tui: gap recovery — run ${runId} still active after session refresh, reloading history`);
+          void loadHistory();
+        });
+      }, 10_000);
+      gapRecoveryTimer.unref();
+    }
     tui.requestRender();
   };
 
