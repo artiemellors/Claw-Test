@@ -23,7 +23,7 @@ const GOOGLE_VIDEO_MAX_DURATION_SECONDS =
 
 function resolveConfiguredGoogleVideoBaseUrl(req: VideoGenerationRequest): string | undefined {
   const configured = normalizeOptionalString(req.cfg?.models?.providers?.google?.baseUrl);
-  return configured ? normalizeGoogleApiBaseUrl(configured) : undefined;
+  return configured ? normalizeGoogleApiBaseUrl(configured).replace(/\/v1beta$/i, "") : undefined;
 }
 
 function parseVideoSize(size: string | undefined): { width: number; height: number } | undefined {
