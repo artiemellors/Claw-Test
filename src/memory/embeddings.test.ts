@@ -147,6 +147,53 @@ describe("embedding provider remote overrides", () => {
     expect(headers["X-Remote"]).toBe("r");
   });
 
+  it("forwards queryInputType for openai-compatible query embeddings", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    mockPublicPinnedHostname();
+    mockResolvedProviderKey("provider-key");
+
+    const result = await createEmbeddingProvider({
+      config: {} as never,
+      provider: "openai",
+      model: "text-embedding-3-small",
+      inputType: "passage",
+      queryInputType: "query",
+      fallback: "none",
+    });
+
+    const provider = requireProvider(result);
+    await provider.embedQuery("hello");
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(init?.body as string) as { input_type?: string };
+    expect(body.input_type).toBe("query");
+  });
+
+  it("forwards documentInputType for openai-compatible batch embeddings", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    mockPublicPinnedHostname();
+    mockResolvedProviderKey("provider-key");
+
+    const result = await createEmbeddingProvider({
+      config: {} as never,
+      provider: "openai",
+      model: "text-embedding-3-small",
+      inputType: "query",
+      documentInputType: "passage",
+      fallback: "none",
+    });
+
+    const provider = requireProvider(result);
+    await provider.embedBatch(["doc1", "doc2"]);
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(init?.body as string) as { input_type?: string; input?: string[] };
+    expect(body.input).toEqual(["doc1", "doc2"]);
+    expect(body.input_type).toBe("passage");
+  });
+
   it("falls back to resolved api key when remote apiKey is blank", async () => {
     const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);

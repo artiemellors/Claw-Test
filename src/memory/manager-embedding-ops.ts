@@ -240,6 +240,9 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
           provider: "openai",
           baseUrl: this.openAi.baseUrl,
           model: this.openAi.model,
+          inputType: this.openAi.inputType,
+          queryInputType: this.openAi.queryInputType,
+          documentInputType: this.openAi.documentInputType,
           headers: entries,
         }),
       );
@@ -480,6 +483,9 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
         body: {
           model: openAi?.model ?? this.provider?.model ?? "text-embedding-3-small",
           input: chunk.text,
+          ...((openAi?.documentInputType ?? openAi?.inputType)
+            ? { input_type: (openAi.documentInputType ?? openAi.inputType)! }
+            : {}),
         },
       }),
       runBatch: async (runnerOptions) =>
