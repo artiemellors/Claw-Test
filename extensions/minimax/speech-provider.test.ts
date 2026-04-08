@@ -135,10 +135,19 @@ describe("buildMinimaxSpeechProvider", () => {
       expect(result.overrides?.model).toBe("speech-01-240228");
     });
 
-    it("handles speed key with valid value", () => {
+    it("handles integer speed without warning", () => {
+      const result = provider.parseDirectiveToken!({ key: "speed", value: "1", policy });
+      expect(result.handled).toBe(true);
+      expect(result.overrides?.speed).toBe(1);
+      expect(result.warnings).toBeUndefined();
+    });
+
+    it("handles non-integer speed with rounding warning", () => {
       const result = provider.parseDirectiveToken!({ key: "speed", value: "1.5", policy });
       expect(result.handled).toBe(true);
       expect(result.overrides?.speed).toBe(1.5);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings![0]).toContain("rounded to 2");
     });
 
     it("warns on invalid speed", () => {
@@ -271,7 +280,7 @@ describe("buildMinimaxSpeechProvider", () => {
       const body = JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0][1]!.body as string);
       expect(body.model).toBe("speech-01-240228");
       expect(body.voice_setting.voice_id).toBe("custom_voice");
-      expect(body.voice_setting.speed).toBe(1.5);
+      expect(body.voice_setting.speed).toBe(2);
     });
 
     it("throws when API key is missing", async () => {

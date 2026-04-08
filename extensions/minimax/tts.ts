@@ -60,9 +60,9 @@ export async function minimaxTTS(params: {
         text,
         voice_setting: {
           voice_id: voiceId,
-          speed,
-          vol,
-          pitch,
+          speed: Math.round(speed),
+          vol: Math.round(vol),
+          pitch: Math.round(pitch),
         },
         audio_setting: {
           format,
