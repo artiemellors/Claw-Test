@@ -264,6 +264,16 @@ describe("sessions_yield helpers", () => {
 });
 
 describe("runPromptWithRateLimitRetry", () => {
+  const computeBackoff = vi.fn((_attempt: number) => 1_000);
+  const sleepWithAbort = vi.fn(async (_delayMs: number, _abortSignal?: AbortSignal) => undefined);
+
+  beforeEach(() => {
+    computeBackoff.mockClear();
+    computeBackoff.mockImplementation((attempt: number) => attempt * 1_000);
+    sleepWithAbort.mockReset();
+    sleepWithAbort.mockImplementation(async () => undefined);
+  });
+
   function createRetryTestSession() {
     const initialMessages: AgentMessage[] = [
       {
@@ -321,11 +331,17 @@ describe("runPromptWithRateLimitRetry", () => {
         getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
+        computeBackoff,
+        sleepWithAbort,
       }),
     ).rejects.toBe(error);
 
     expect(session.prompt).toHaveBeenCalledTimes(4);
     expect(session.agent.replaceMessages).not.toHaveBeenCalled();
+    expect(computeBackoff).toHaveBeenNthCalledWith(1, 1);
+    expect(computeBackoff).toHaveBeenNthCalledWith(2, 2);
+    expect(computeBackoff).toHaveBeenNthCalledWith(3, 3);
+    expect(sleepWithAbort).toHaveBeenCalledTimes(3);
   });
 
   it("rewinds intermediate terminal rate-limit assistants and returns the final assistant failure", async () => {
@@ -349,11 +365,17 @@ describe("runPromptWithRateLimitRetry", () => {
         getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
+        computeBackoff,
+        sleepWithAbort,
       }),
     ).resolves.toBeUndefined();
 
     expect(session.prompt).toHaveBeenCalledTimes(4);
     expect(session.agent.replaceMessages).toHaveBeenCalledTimes(3);
+    expect(computeBackoff).toHaveBeenNthCalledWith(1, 1);
+    expect(computeBackoff).toHaveBeenNthCalledWith(2, 2);
+    expect(computeBackoff).toHaveBeenNthCalledWith(3, 3);
+    expect(sleepWithAbort).toHaveBeenCalledTimes(3);
     expect(session.messages).toHaveLength(2);
     expect(session.messages.at(-1)).toMatchObject({
       role: "assistant",
@@ -387,6 +409,8 @@ describe("runPromptWithRateLimitRetry", () => {
         getCompactionCount: () => 0,
         provider: "openai",
         modelId: "mock-1",
+        computeBackoff,
+        sleepWithAbort,
       }),
     ).resolves.toBeUndefined();
 
@@ -440,6 +464,8 @@ describe("runPromptWithRateLimitRetry", () => {
       getCompactionCount: () => compactionCount,
       provider: "openai",
       modelId: "mock-1",
+      computeBackoff,
+      sleepWithAbort,
     });
 
     expect(session.prompt).toHaveBeenCalledTimes(2);
@@ -521,6 +547,8 @@ describe("runPromptWithRateLimitRetry", () => {
       getCompactionCount: () => compactionCount,
       provider: "openai",
       modelId: "mock-1",
+      computeBackoff,
+      sleepWithAbort,
     });
 
     // Should have retried because compaction-aware classifyTerminalFailure
