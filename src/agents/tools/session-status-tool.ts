@@ -460,12 +460,16 @@ export function createSessionStatusTool(opts?: {
       const hasExplicitModelOverride = Boolean(
         resolved.entry.providerOverride?.trim() || resolved.entry.modelOverride?.trim(),
       );
+      const preserveFallbackStatus = Boolean(
+        resolved.entry.fallbackNoticeSelectedModel?.trim() &&
+          resolved.entry.fallbackNoticeActiveModel?.trim(),
+      );
       const runtimeProviderForCard = runtimeModelIdentity.provider?.trim();
       const runtimeModelForCard = runtimeModelIdentity.model.trim();
-      const defaultProviderForCard = hasExplicitModelOverride
+      const defaultProviderForCard = hasExplicitModelOverride || preserveFallbackStatus
         ? configured.provider
         : (runtimeProviderForCard ?? "");
-      const defaultModelForCard = hasExplicitModelOverride
+      const defaultModelForCard = hasExplicitModelOverride || preserveFallbackStatus
         ? configured.model
         : runtimeModelForCard || configured.model;
       const statusSessionEntry =
@@ -473,7 +477,9 @@ export function createSessionStatusTool(opts?: {
           ? { ...resolved.entry, providerOverride: "" }
           : resolved.entry;
       const providerOverrideForCard = statusSessionEntry.providerOverride?.trim();
-      const providerForCard = providerOverrideForCard ?? defaultProviderForCard;
+      const providerForCard = preserveFallbackStatus
+        ? (resolved.entry.providerOverride?.trim() || configured.provider)
+        : (providerOverrideForCard ?? defaultProviderForCard);
       const primaryModelLabel =
         providerForCard && defaultModelForCard
           ? `${providerForCard}/${defaultModelForCard}`

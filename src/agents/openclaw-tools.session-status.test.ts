@@ -768,6 +768,49 @@ describe("session_status tool", () => {
     );
   });
 
+  it("keeps fallback details visible when the runtime model differs from the selected model", async () => {
+    resetSessionStore({
+      main: {
+        sessionId: "runtime-fallback",
+        updatedAt: 10,
+        modelProvider: "anthropic",
+        model: "claude-opus-4-6",
+        fallbackNoticeSelectedModel: "openai-codex/gpt-5.4",
+        fallbackNoticeActiveModel: "anthropic/claude-opus-4-6",
+        fallbackNoticeReason: "rate limit",
+      },
+    });
+    mockConfig = {
+      session: { mainKey: "main", scope: "per-sender" },
+      agents: {
+        defaults: {
+          model: { primary: "openai-codex/gpt-5.4" },
+          models: {},
+        },
+      },
+      tools: {
+        agentToAgent: { enabled: false },
+      },
+    };
+    buildStatusMessageMock.mockImplementationOnce((args: any) => {
+      const selected = args.agent?.model?.primary ?? "unknown";
+      const fallback = args.sessionEntry?.fallbackNoticeActiveModel;
+      const reason = args.sessionEntry?.fallbackNoticeReason ?? "selected model unavailable";
+      return fallback
+        ? `OpenClaw\n🧠 Model: ${selected}\n↪️ Fallback: ${fallback} (${reason})`
+        : `OpenClaw\n🧠 Model: ${selected}`;
+    });
+
+    const tool = getSessionStatusTool();
+
+    const result = await tool.execute("call-runtime-fallback", {});
+    const details = result.details as { ok?: boolean; statusText?: string };
+    expect(details.ok).toBe(true);
+    expect(details.statusText).toContain("🧠 Model: openai-codex/gpt-5.4");
+    expect(details.statusText).toContain("↪️ Fallback: anthropic/claude-opus-4-6");
+    expect(details.statusText).toContain("(rate limit)");
+  });
+
   it("infers configured custom providers for runtime-only models in session_status", async () => {
     resetSessionStore({
       main: {
