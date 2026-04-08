@@ -213,8 +213,11 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
       if (aspectRatio) {
         body.ratio = aspectRatio;
       }
-      if (req.resolution) {
-        body.resolution = req.resolution;
+      // Seedance API requires lowercase resolution values (e.g. "480p", "720p"); uppercase
+      // variants like "480P" are rejected with InvalidParameter.
+      const resolution = normalizeOptionalString(req.resolution)?.toLowerCase();
+      if (resolution) {
+        body.resolution = resolution;
       }
       if (typeof req.durationSeconds === "number" && Number.isFinite(req.durationSeconds)) {
         body.duration = Math.max(1, Math.round(req.durationSeconds));
