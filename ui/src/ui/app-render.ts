@@ -1142,6 +1142,13 @@ export function renderApp(state: AppViewState) {
                   state.toolsEffectiveError = null;
                   state.toolsEffectiveLoading = false;
                   state.toolsEffectiveLoadingKey = null;
+                  // Always clear workspace state on agent switch to prevent cross-agent writes
+                  state.workspaceSelectedFile = null;
+                  state.workspaceFileContent = null;
+                  state.workspaceEditedContent = null;
+                  state.workspaceError = null;
+                  state.workspacePath = "";
+                  state.workspaceEntries = null;
                   void loadAgentIdentity(state, agentId);
                   if (state.agentsPanel === "files") {
                     void loadAgentFiles(state, agentId);
@@ -1159,12 +1166,7 @@ export function renderApp(state: AppViewState) {
                     void loadAgentSkills(state, agentId);
                   }
                   if (state.agentsPanel === "workspace") {
-                    // Reset workspace state and reload for the new agent
-                    state.workspaceSelectedFile = null;
-                    state.workspaceFileContent = null;
-                    state.workspaceEditedContent = null;
-                    state.workspaceError = null;
-                    state.workspacePath = "";
+                    // Reload workspace for the new agent
                     state.workspaceLoading = true;
                     const requestedAgentId = agentId;
                     void state.client
