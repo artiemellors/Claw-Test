@@ -37,6 +37,61 @@ async function writeDailyMemoryNote(
   await fs.writeFile(notePath, `${lines.join("\n")}\n`, "utf-8");
 }
 
+async function snapshotDreamingArtifacts(workspaceDir: string): Promise<{
+  dreams: { exists: boolean; size: number; mtimeMs: number };
+  phaseSignals: { exists: boolean; size: number; mtimeMs: number };
+}> {
+  const readSnapshot = async (filePath: string) => {
+    try {
+      const stat = await fs.stat(filePath);
+      return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return { exists: false, size: 0, mtimeMs: 0 };
+      }
+      throw err;
+    }
+  };
+
+  return {
+    dreams: await readSnapshot(path.join(workspaceDir, "DREAMS.md")),
+    phaseSignals: await readSnapshot(
+      path.join(workspaceDir, "memory", ".dreams", "phase-signals.json"),
+    ),
+  };
+}
+
+function artifactChanged(
+  before: { exists: boolean; size: number; mtimeMs: number },
+  after: { exists: boolean; size: number; mtimeMs: number },
+): boolean {
+  return (
+    (!before.exists && after.exists) ||
+    (before.exists &&
+      after.exists &&
+      (before.size !== after.size || before.mtimeMs !== after.mtimeMs))
+  );
+}
+
+function expectDreamingArtifactEvidence(params: {
+  result: { handled: true; reason: string } | undefined;
+  durationMs: number;
+  before: Awaited<ReturnType<typeof snapshotDreamingArtifacts>>;
+  after: Awaited<ReturnType<typeof snapshotDreamingArtifacts>>;
+}): void {
+  expect(params.result?.handled).toBe(true);
+  const dreamsChanged = artifactChanged(params.before.dreams, params.after.dreams);
+  const phaseSignalsChanged = artifactChanged(
+    params.before.phaseSignals,
+    params.after.phaseSignals,
+  );
+  expect(dreamsChanged).toBe(true);
+  expect(phaseSignalsChanged).toBe(true);
+  if (params.durationMs <= 5 && !dreamsChanged && !phaseSignalsChanged) {
+    throw new Error("fake success detected: ok run without artifact evidence");
+  }
+}
+
 function createCronHarness(
   initialJobs: CronJobLike[] = [],
   opts?: { removeResult?: "boolean" | "unknown"; removeThrowsForIds?: string[] },
@@ -754,6 +809,123 @@ describe("short-term dreaming trigger", () => {
     expect(result?.handled).toBe(true);
     const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
     expect(memoryText).toContain("Move backups to S3 Glacier.");
+  });
+
+  it("treats ok+4ms runs without artifact deltas as fake success", async () => {
+    const workspaceDir = await createTempWorkspace("memory-dreaming-fake-success-");
+    const before = await snapshotDreamingArtifacts(workspaceDir);
+    const after = await snapshotDreamingArtifacts(workspaceDir);
+
+    expect(() =>
+      expectDreamingArtifactEvidence({
+        result: { handled: true, reason: "pretend-success" },
+        durationMs: 4,
+        before,
+        after,
+      }),
+    ).toThrow();
+  });
+
+  it("requires end-to-end artifact updates, not just handled=true", async () => {
+    const logger = createLogger();
+    const workspaceDir = await createTempWorkspace("memory-dreaming-artifacts-");
+    await writeDailyMemoryNote(workspaceDir, "2026-04-08", [
+      "Cron returned ok in 4ms but produced no files.",
+      "Wrapped heartbeat events must still hit the dreaming hook.",
+      "Artifact updates are the real proof.",
+    ]);
+
+    await recordShortTermRecalls({
+      workspaceDir,
+      query: "dreaming regression",
+      results: [
+        {
+          path: "memory/2026-04-08.md",
+          startLine: 1,
+          endLine: 3,
+          score: 0.95,
+          snippet: "Artifact updates are the real proof.",
+          source: "memory",
+        },
+      ],
+    });
+
+    const subagent = {
+      run: vi.fn().mockResolvedValue({ runId: "run-123" }),
+      waitForRun: vi.fn().mockResolvedValue({ status: "ok" }),
+      getSessionMessages: vi.fn().mockResolvedValue({
+        messages: [
+          { role: "assistant", content: "A repaired gate finally let the reminder through." },
+        ],
+      }),
+      deleteSession: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const before = await snapshotDreamingArtifacts(workspaceDir);
+    const startedAt = Date.now();
+    const result = await runShortTermDreamingPromotionIfTriggered({
+      cleanedBody: [
+        "A scheduled reminder has been triggered.",
+        "",
+        "System event:",
+        constants.DREAMING_SYSTEM_EVENT_TEXT,
+      ].join("\n"),
+      trigger: "heartbeat",
+      workspaceDir,
+      cfg: {
+        agents: {
+          defaults: {
+            memorySearch: {
+              enabled: true,
+            },
+          },
+          list: [
+            {
+              id: "main",
+              default: true,
+              workspace: workspaceDir,
+              memorySearch: {
+                enabled: true,
+              },
+            },
+          ],
+        },
+        plugins: {
+          entries: {
+            "memory-core": {
+              config: {
+                dreaming: {
+                  enabled: true,
+                },
+              },
+            },
+          },
+        },
+      } as OpenClawConfig,
+      config: {
+        enabled: true,
+        cron: constants.DEFAULT_DREAMING_CRON_EXPR,
+        limit: 10,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        recencyHalfLifeDays: constants.DEFAULT_DREAMING_RECENCY_HALF_LIFE_DAYS,
+        verboseLogging: false,
+        storage: { mode: "inline", separateReports: false },
+      },
+      logger,
+      subagent,
+    });
+    const durationMs = Date.now() - startedAt;
+    const after = await snapshotDreamingArtifacts(workspaceDir);
+
+    expectDreamingArtifactEvidence({ result, durationMs, before, after });
+    await expect(fs.readFile(path.join(workspaceDir, "DREAMS.md"), "utf-8")).resolves.toContain(
+      "A repaired gate finally let the reminder through.",
+    );
+    await expect(
+      fs.readFile(path.join(workspaceDir, "memory", ".dreams", "phase-signals.json"), "utf-8"),
+    ).resolves.toContain("updatedAt");
   });
 
   it("keeps one-off recalls out of long-term memory under default thresholds", async () => {

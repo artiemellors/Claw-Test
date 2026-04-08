@@ -191,6 +191,7 @@ export type PluginHookRegistration = {
   pluginId: string;
   entry: HookEntry;
   events: string[];
+  handler?: Parameters<typeof registerInternalHook>[1];
   source: string;
   rootDir?: string;
 };
@@ -460,6 +461,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       pluginId: record.id,
       entry: hookEntry,
       events: normalizedEvents,
+      handler,
       source: record.source,
     });
 
