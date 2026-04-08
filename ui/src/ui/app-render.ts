@@ -1158,6 +1158,36 @@ export function renderApp(state: AppViewState) {
                   if (state.agentsPanel === "skills") {
                     void loadAgentSkills(state, agentId);
                   }
+                  if (state.agentsPanel === "workspace") {
+                    // Reset workspace state and reload for the new agent
+                    state.workspaceSelectedFile = null;
+                    state.workspaceFileContent = null;
+                    state.workspaceEditedContent = null;
+                    state.workspaceError = null;
+                    state.workspacePath = "";
+                    state.workspaceLoading = true;
+                    const requestedAgentId = agentId;
+                    void state.client
+                      ?.request<import("./types.js").AgentsWorkspaceListResult>(
+                        "agents.workspace.list",
+                        { agentId, path: "" },
+                      )
+                      .then((result) => {
+                        if (state.agentsSelectedId !== requestedAgentId) {
+                          return;
+                        }
+                        state.workspaceEntries = result?.entries ?? null;
+                        state.workspacePath = result?.path ?? "";
+                        state.workspaceLoading = false;
+                      })
+                      .catch((err) => {
+                        if (state.agentsSelectedId !== requestedAgentId) {
+                          return;
+                        }
+                        state.workspaceError = String(err);
+                        state.workspaceLoading = false;
+                      });
+                  }
                 },
                 onSelectPanel: (panel) => {
                   state.agentsPanel = panel;
