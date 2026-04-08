@@ -141,6 +141,11 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
         agentDir,
       }),
     capabilities: {
+      providerOptions: {
+        seed: "number",
+        draft: "boolean",
+        camerafixed: "boolean",
+      },
       generate: {
         maxVideos: 1,
         maxDurationSeconds: 12,
@@ -219,6 +224,22 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
       }
       if (typeof req.watermark === "boolean") {
         body.watermark = req.watermark;
+      }
+
+      // Forward declared providerOptions: seed, draft, camerafixed.
+      // draft=true forces 480p resolution for faster generation.
+      const opts = req.providerOptions ?? {};
+      const seed = typeof opts.seed === "number" ? opts.seed : undefined;
+      const draft = opts.draft === true;
+      const camerafixed = typeof opts.camerafixed === "boolean" ? opts.camerafixed : undefined;
+      if (seed != null) {
+        body.seed = seed;
+      }
+      if (draft && !body.resolution) {
+        body.resolution = "480p";
+      }
+      if (camerafixed != null) {
+        body.camerafixed = camerafixed;
       }
 
       const { response, release } = await postJsonRequest({
