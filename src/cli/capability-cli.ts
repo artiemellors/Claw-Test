@@ -816,16 +816,21 @@ async function runVideoGenerate(params: { prompt: string; model?: string; output
   });
   const outputs = await Promise.all(
     result.videos.map(async (video, index) => {
-      // url-only asset: provider returned a pre-signed URL instead of raw bytes
-      if (!video.buffer && video.url) {
-        return { path: video.url, mimeType: video.mimeType, size: 0 };
-      }
-      if (!video.buffer) {
+      if (!video.buffer && !video.url) {
         throw new Error(`Video asset at index ${index} has neither buffer nor url`);
+      }
+      // For url-only assets, download the video so --output writes a real local file.
+      let videoBuffer = video.buffer;
+      if (!videoBuffer && video.url) {
+        const res = await fetch(video.url);
+        if (!res.ok) {
+          throw new Error(`Failed to download video from ${video.url}: ${res.status}`);
+        }
+        videoBuffer = Buffer.from(await res.arrayBuffer());
       }
       return {
         ...(await writeOutputAsset({
-          buffer: video.buffer,
+          buffer: videoBuffer!,
           mimeType: video.mimeType,
           originalFilename: video.fileName,
           outputPath: params.output,
