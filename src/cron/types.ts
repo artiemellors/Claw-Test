@@ -1,6 +1,7 @@
 import type { FailoverReason } from "../agents/pi-embedded-helpers.js";
 import type { ChannelId } from "../channels/plugins/types.js";
 import type { HookExternalContentSource } from "../security/external-content.js";
+import type { PreHookConfig } from "./pre-hook.js";
 import type { CronJobBase } from "./types-shared.js";
 
 export type CronSchedule =
@@ -157,8 +158,12 @@ export type CronJobCreate = Omit<CronJob, "id" | "createdAtMs" | "updatedAtMs" |
   state?: Partial<CronJobState>;
 };
 
-export type CronJobPatch = Partial<Omit<CronJob, "id" | "createdAtMs" | "state" | "payload">> & {
+export type CronJobPatch = Partial<
+  Omit<CronJob, "id" | "createdAtMs" | "state" | "payload" | "preHook">
+> & {
   payload?: CronPayloadPatch;
   delivery?: CronDeliveryPatch;
+  /** Set to null to explicitly clear the pre-hook. */
+  preHook?: PreHookConfig | null;
   state?: Partial<CronJobState>;
 };
