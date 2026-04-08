@@ -108,6 +108,7 @@ const DEFAULT_PLAMO_COMPAT: ResolvedPlamoCompat = {
   thinkingFormat: "openai",
   openRouterRouting: {},
   vercelGatewayRouting: {},
+  zaiToolStream: false,
   supportsStrictMode: false,
 };
 
