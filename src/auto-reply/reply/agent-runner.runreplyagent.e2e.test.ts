@@ -5,9 +5,23 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { SessionEntry } from "../../config/sessions.js";
 import * as sessions from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
+import {
+  getMemoryFlushPlanResolver,
+  getMemoryPromptSectionBuilder,
+  getMemoryRuntime,
+  listMemoryCorpusSupplements,
+  listMemoryPromptSupplements,
+  registerMemoryFlushPlanResolver,
+  restoreMemoryPluginState,
+} from "../../plugins/memory-state.js";
 import { withStateDirEnv } from "../../test-helpers/state-dir-env.js";
 import type { TemplateContext } from "../templating.js";
 import type { GetReplyOptions } from "../types.js";
+import {
+  resolveMemoryFlushPromptForRun,
+  resolveMemoryFlushRelativePathForRun,
+  resolveMemoryFlushSettings,
+} from "./memory-flush.js";
 import {
   enqueueFollowupRun,
   refreshQueuedFollowupSession,
@@ -43,6 +57,14 @@ const state = vi.hoisted(() => ({
   compactEmbeddedPiSessionMock: vi.fn(),
   runEmbeddedPiAgentMock: vi.fn(),
 }));
+
+const initialMemoryPluginState = {
+  corpusSupplements: listMemoryCorpusSupplements(),
+  promptBuilder: getMemoryPromptSectionBuilder(),
+  promptSupplements: listMemoryPromptSupplements(),
+  flushPlanResolver: getMemoryFlushPlanResolver(),
+  runtime: getMemoryRuntime(),
+};
 
 let modelFallbackModule: typeof import("../../agents/model-fallback.js");
 let onAgentEvent: typeof import("../../infra/agent-events.js").onAgentEvent;
@@ -101,6 +123,7 @@ beforeAll(async () => {
 beforeEach(() => {
   state.compactEmbeddedPiSessionMock.mockClear();
   state.runEmbeddedPiAgentMock.mockClear();
+  restoreMemoryPluginState(initialMemoryPluginState);
   vi.mocked(enqueueFollowupRun).mockClear();
   vi.mocked(refreshQueuedFollowupSession).mockClear();
   vi.mocked(scheduleFollowupDrain).mockClear();
@@ -297,6 +320,39 @@ async function runReplyAgentWithBase(params: {
     resolvedBlockStreamingBreak: "message_end",
     shouldInjectGroupIntro: false,
     typingMode: params.typingMode ?? "instant",
+  });
+}
+
+function resolveMemoryFlushDateStamp(relativePath: string): string {
+  return relativePath.replace(/^memory\//, "").replace(/\.md$/, "");
+}
+
+function registerBuiltInMemoryFlushPlanResolver() {
+  registerMemoryFlushPlanResolver(({ cfg, nowMs }) => {
+    const settings = resolveMemoryFlushSettings(cfg);
+    if (!settings) {
+      return null;
+    }
+    const resolvedNowMs = Number.isFinite(nowMs) ? (nowMs as number) : Date.now();
+    const relativePath = resolveMemoryFlushRelativePathForRun({
+      cfg,
+      nowMs: resolvedNowMs,
+    });
+    return {
+      softThresholdTokens: settings.softThresholdTokens,
+      forceFlushTranscriptBytes: settings.forceFlushTranscriptBytes,
+      reserveTokensFloor: settings.reserveTokensFloor,
+      prompt: resolveMemoryFlushPromptForRun({
+        prompt: settings.prompt,
+        cfg,
+        nowMs: resolvedNowMs,
+      }),
+      systemPrompt: settings.systemPrompt.replaceAll(
+        "YYYY-MM-DD",
+        resolveMemoryFlushDateStamp(relativePath),
+      ),
+      relativePath,
+    };
   });
 }
 
@@ -814,12 +870,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const sessionEntry: SessionEntry = { sessionId: "session", updatedAt: Date.now() };
       const sessionStore = { main: sessionEntry };
 
-      state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: AgentRunParams) => {
-        params.onAgentEvent?.({
-          stream: "compaction",
-          data: { phase: "end", willRetry: false },
-        });
-        return { payloads: [{ text: "final" }], meta: {} };
+      state.runEmbeddedPiAgentMock.mockImplementationOnce(async (_params: AgentRunParams) => {
+        return {
+          payloads: [{ text: "final" }],
+          meta: { agentMeta: { compactionCount: 1 } },
+        };
       });
 
       const { run } = createMinimalRun({
@@ -1625,7 +1680,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
 
       expect(res).toMatchObject({
-        text: expect.stringContaining("Agent failed before reply"),
+        text: expect.stringContaining("Something went wrong while processing your request"),
       });
       expect(sessionStore.main).toBeDefined();
       await expect(fs.access(transcriptPath)).resolves.toBeUndefined();
@@ -1729,7 +1784,12 @@ describe("runReplyAgent memory flush", () => {
     fixtureRoot = await fs.mkdtemp(path.join(tmpdir(), "openclaw-memory-flush-"));
   });
 
+  beforeEach(() => {
+    registerBuiltInMemoryFlushPlanResolver();
+  });
+
   afterAll(async () => {
+    restoreMemoryPluginState(initialMemoryPluginState);
     if (fixtureRoot) {
       await fs.rm(fixtureRoot, { recursive: true, force: true });
     }
@@ -1754,6 +1814,18 @@ describe("runReplyAgent memory flush", () => {
       const baseRun = createBaseRun({
         storePath,
         sessionEntry,
+        config: {
+          agents: {
+            defaults: {
+              cliBackends: {
+                "codex-cli": {
+                  command: "codex",
+                  args: ["exec", "--json"],
+                },
+              },
+            },
+          },
+        },
         runOverrides: { provider: "codex-cli" },
       });
 
@@ -1935,9 +2007,75 @@ describe("runReplyAgent memory flush", () => {
       expect(flushCall?.extraSystemPrompt).toContain("extra system");
       expect(flushCall?.extraSystemPrompt).toContain("Flush memory now.");
       expect(flushCall?.extraSystemPrompt).toContain("NO_REPLY");
-      expect(flushCall?.extraSystemPrompt).toContain("memory/YYYY-MM-DD.md");
+      expect(flushCall?.extraSystemPrompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
       expect(flushCall?.extraSystemPrompt).toContain("MEMORY.md");
       expect(flushCall?.silentExpected).toBe(true);
+      expect(calls[1]?.prompt).toBe("hello");
+    });
+  });
+
+  it("preserves plugin-provided memory flush paths", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionFile = "oversized-session.jsonl";
+      const transcriptPath = path.join(path.dirname(storePath), sessionFile);
+      await fs.mkdir(path.dirname(transcriptPath), { recursive: true });
+      await fs.writeFile(transcriptPath, "x".repeat(3_000), "utf-8");
+
+      const sessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        sessionFile,
+        totalTokens: 10,
+        totalTokensFresh: false,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      registerMemoryFlushPlanResolver(() => ({
+        softThresholdTokens: 4_000,
+        forceFlushTranscriptBytes: 1,
+        reserveTokensFloor: 1_000,
+        prompt: "Plugin flush into memory/custom-snapshot.md.",
+        systemPrompt: "Plugin system prompt for memory/custom-snapshot.md.",
+        relativePath: "memory/custom-snapshot.md",
+      }));
+
+      const calls: Array<EmbeddedRunParams> = [];
+      state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+        calls.push(params);
+        if (params.prompt?.includes("Plugin flush into")) {
+          return { payloads: [], meta: {} };
+        }
+        return {
+          payloads: [{ text: "ok" }],
+          meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+        };
+      });
+
+      const baseRun = createBaseRun({
+        storePath,
+        sessionEntry,
+        runOverrides: { sessionFile },
+      });
+
+      await runReplyAgentWithBase({
+        baseRun,
+        storePath,
+        sessionKey,
+        sessionEntry,
+        commandBody: "hello",
+      });
+
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.memoryFlushWritePath).toBe("memory/custom-snapshot.md");
+      expect(calls[0]?.prompt).toContain("Plugin flush into memory/custom-snapshot.md.");
+      expect(calls[0]?.prompt).not.toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
+      expect(calls[0]?.extraSystemPrompt).toContain(
+        "Plugin system prompt for memory/custom-snapshot.md.",
+      );
+      expect(calls[0]?.extraSystemPrompt).not.toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
       expect(calls[1]?.prompt).toBe("hello");
     });
   });
@@ -2075,7 +2213,7 @@ describe("runReplyAgent memory flush", () => {
       expect(calls[0]?.prompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
       expect(calls[0]?.prompt).toContain("MEMORY.md");
       expect(calls[0]?.memoryFlushWritePath).toMatch(/^memory\/\d{4}-\d{2}-\d{2}\.md$/);
-      expect(calls[0]?.extraSystemPrompt).toContain("memory/YYYY-MM-DD.md");
+      expect(calls[0]?.extraSystemPrompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
       expect(calls[0]?.extraSystemPrompt).toContain("MEMORY.md");
       expect(calls[1]?.prompt).toBe("hello");
       expect(calls[1]?.sessionId).toBe("session-rotated");
