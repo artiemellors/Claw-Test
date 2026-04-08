@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentMainSessionKey,
   buildDashboardSessionMainKey,
+  normalizeDashboardSessionPart,
+  normalizeDashboardSessionUniqueId,
   resolveAgentIdFromSessionKey,
 } from "./session-key.ts";
 
@@ -50,5 +52,33 @@ describe("buildDashboardSessionMainKey", () => {
     });
 
     expect(key).toBe("dashboard:my-session-name:abc");
+  });
+
+  it("sanitizes reserved delimiters and invalid characters", () => {
+    const key = buildDashboardSessionMainKey({
+      name: "foo:bar/baz",
+      uniqueId: "abc:def",
+    });
+
+    expect(key).toBe("dashboard:foo-bar-baz:abc-def");
+  });
+
+  it("bounds overlong names to a safe length", () => {
+    const overlong = "a".repeat(200);
+    const key = buildDashboardSessionMainKey({
+      name: overlong,
+      uniqueId: "id",
+    });
+    expect(key).toBe(`dashboard:${"a".repeat(64)}:id`);
+  });
+});
+
+describe("dashboard key normalizers", () => {
+  it("falls back to session for empty/invalid name parts", () => {
+    expect(normalizeDashboardSessionPart(":::")).toBe("session");
+  });
+
+  it("falls back to id for empty unique ids", () => {
+    expect(normalizeDashboardSessionUniqueId("   ")).toBe("id");
   });
 });

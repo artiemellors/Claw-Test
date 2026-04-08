@@ -29,6 +29,7 @@ export function renderNewSessionModal(state: AppViewState) {
           <input
             type="text"
             placeholder="e.g. stocks, games, work"
+            maxlength="64"
             .value=${state.newSessionName}
             @input=${(e: Event) => {
               state.newSessionName = (e.target as HTMLInputElement).value;
