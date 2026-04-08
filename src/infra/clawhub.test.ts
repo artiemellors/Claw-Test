@@ -43,6 +43,14 @@ describe("clawhub helpers", () => {
       version: "1.2.3",
     });
     expect(parseClawHubPluginSpec("@scope/pkg")).toBeNull();
+
+    // Scoped packages are valid
+    expect(parseClawHubPluginSpec("clawhub:@openclaw/voice-call")).toEqual({
+      name: "@openclaw/voice-call",
+    });
+
+    // Trailing @ with no version is malformed
+    expect(parseClawHubPluginSpec("clawhub:demo@")).toBeNull();
   });
 
   it("resolves latest versions from latestVersion before tags", () => {
