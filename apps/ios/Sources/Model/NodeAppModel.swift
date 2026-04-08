@@ -1,3 +1,4 @@
+import CoreLocation
 import OpenClawChatUI
 import OpenClawKit
 import OpenClawProtocol
@@ -584,6 +585,10 @@ final class NodeAppModel {
                 enabled: enabled,
                 phase: enabled ? "enabled" : "disabled")
         }
+    }
+
+    func locationAuthorizationStatus() -> CLAuthorizationStatus {
+        self.locationService.authorizationStatus()
     }
 
     func requestLocationPermissions(mode: OpenClawLocationMode) async -> Bool {
