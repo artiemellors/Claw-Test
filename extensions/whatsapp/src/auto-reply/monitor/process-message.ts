@@ -25,6 +25,7 @@ import {
   buildHistoryContextFromEntries,
   createChannelReplyPipeline,
   formatInboundEnvelope,
+  jidToE164,
   logVerbose,
   normalizeE164,
   readStoreAllowFromForDmPolicy,

@@ -117,6 +117,11 @@ export async function buildStatusReply(params: {
     return undefined;
   }
 
+  // shoar local: in groups return a safe card with no internals (model/auth, tokens, cache, session ids)
+  if (params.isGroup) {
+    return { text: "Shoar is running." };
+  }
+
   return {
     text: await buildStatusText({
       ...params,
@@ -172,15 +177,6 @@ export async function buildStatusText(params: {
     isGroup,
     defaultGroupActivation,
   } = params;
-  // shoar local: only authorized senders see /status; in groups return a safe card with no internals
-  if (!command.isAuthorizedSender) {
-    logVerbose(`Ignoring /status from unauthorized sender: ${command.senderId || "<unknown>"}`);
-    return undefined;
-  }
-  if (isGroup) {
-    return { text: "Shoar is running." };
-  }
-
   const statusAgentId = sessionKey
     ? resolveSessionAgentId({ sessionKey, config: cfg })
     : resolveDefaultAgentId(cfg);
