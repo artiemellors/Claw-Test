@@ -22,7 +22,11 @@ import type {
 } from "../video-generation/types.js";
 
 export type GeneratedVideoAsset = {
-  buffer: Buffer;
+  /** Raw video bytes. Either buffer or url must be present. */
+  buffer?: Buffer;
+  /** Pre-signed URL for the video. When set and buffer is absent, the tool
+   * delivers the URL directly without downloading, bypassing channel file-size limits. */
+  url?: string;
   mimeType: string;
   fileName?: string;
   metadata?: Record<string, unknown>;
