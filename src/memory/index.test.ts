@@ -14,7 +14,14 @@ let closeAllMemorySearchManagers: MemoryIndexModule["closeAllMemorySearchManager
 
 let embedBatchCalls = 0;
 let embedBatchInputCalls = 0;
-let providerCalls: Array<{ provider?: string; model?: string; outputDimensionality?: number }> = [];
+let providerCalls: Array<{
+  provider?: string;
+  model?: string;
+  outputDimensionality?: number;
+  inputType?: string;
+  queryInputType?: string;
+  documentInputType?: string;
+}> = [];
 
 vi.mock("./embeddings.js", () => {
   const embedText = (text: string) => {
@@ -30,11 +37,17 @@ vi.mock("./embeddings.js", () => {
       provider?: string;
       model?: string;
       outputDimensionality?: number;
+      inputType?: string;
+      queryInputType?: string;
+      documentInputType?: string;
     }) => {
       providerCalls.push({
         provider: options.provider,
         model: options.model,
         outputDimensionality: options.outputDimensionality,
+        inputType: options.inputType,
+        queryInputType: options.queryInputType,
+        documentInputType: options.documentInputType,
       });
       const providerId = options.provider === "gemini" ? "gemini" : "mock";
       const model = options.model ?? "mock-embed";
@@ -995,6 +1008,35 @@ describe("memory index", () => {
           call.provider === "gemini" &&
           call.model === "gemini-embedding-2-preview" &&
           call.outputDimensionality === 1536,
+      ),
+    ).toBe(true);
+    await manager.close?.();
+  });
+
+  it("passes memorySearch input_type config into the provider", async () => {
+    const cfg = createCfg({
+      storePath: indexMainPath,
+      provider: "openai",
+      model: "text-embedding-3-small",
+    });
+    cfg.agents!.defaults!.memorySearch = {
+      ...cfg.agents!.defaults!.memorySearch,
+      inputType: "passage",
+      queryInputType: "query",
+      documentInputType: "document",
+    };
+
+    const result = await getMemorySearchManager({ cfg, agentId: "main" });
+    const manager = requireManager(result);
+    await manager.probeEmbeddingAvailability();
+
+    expect(
+      providerCalls.some(
+        (call) =>
+          call.provider === "openai" &&
+          call.inputType === "passage" &&
+          call.queryInputType === "query" &&
+          call.documentInputType === "document",
       ),
     ).toBe(true);
     await manager.close?.();
