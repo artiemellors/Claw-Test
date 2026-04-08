@@ -1,6 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
 import { createRequire } from "node:module";
 import { normalizeProviderId } from "../agents/provider-id.js";
-import { listBundledPluginMetadata } from "./bundled-plugin-metadata.js";
+import { loadPluginManifest } from "./manifest.js";
+import { resolveBundledPluginsDir } from "./bundled-dir.js";
 
 type SetupRegistryRuntimeModule = Pick<
   typeof import("./setup-registry.js"),
@@ -19,15 +22,45 @@ const SETUP_REGISTRY_RUNTIME_CANDIDATES = ["./setup-registry.js", "./setup-regis
 
 let setupRegistryRuntimeModule: SetupRegistryRuntimeModule | undefined;
 
-const BUNDLED_SETUP_CLI_BACKENDS = listBundledPluginMetadata().flatMap((entry) =>
-  (entry.manifest.cliBackends ?? []).map(
-    (backendId) =>
-      ({
-        pluginId: entry.manifest.id,
-        backend: { id: backendId },
-      }) satisfies SetupCliBackendRuntimeEntry,
-  ),
-);
+let bundledSetupCliBackendsCacheKey: string | undefined;
+let bundledSetupCliBackendsCache: readonly SetupCliBackendRuntimeEntry[] | undefined;
+
+function resolveBundledSetupCliBackends(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly SetupCliBackendRuntimeEntry[] {
+  const bundledPluginsDir = resolveBundledPluginsDir(env);
+  const cacheKey = bundledPluginsDir ? path.resolve(bundledPluginsDir) : "";
+  if (bundledSetupCliBackendsCache && bundledSetupCliBackendsCacheKey === cacheKey) {
+    return bundledSetupCliBackendsCache;
+  }
+  if (!bundledPluginsDir || !fs.existsSync(bundledPluginsDir)) {
+    bundledSetupCliBackendsCacheKey = cacheKey;
+    bundledSetupCliBackendsCache = [];
+    return bundledSetupCliBackendsCache;
+  }
+
+  const entries = fs
+    .readdirSync(bundledPluginsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const pluginDir = path.join(bundledPluginsDir, entry.name);
+      const manifestResult = loadPluginManifest(pluginDir, false);
+      if (!manifestResult.ok) {
+        return [];
+      }
+      return (manifestResult.manifest.cliBackends ?? []).map(
+        (backendId) =>
+          ({
+            pluginId: manifestResult.manifest.id,
+            backend: { id: backendId },
+          }) satisfies SetupCliBackendRuntimeEntry,
+      );
+    });
+
+  bundledSetupCliBackendsCacheKey = cacheKey;
+  bundledSetupCliBackendsCache = entries;
+  return bundledSetupCliBackendsCache;
+}
 
 function loadSetupRegistryRuntime(): SetupRegistryRuntimeModule | null {
   if (setupRegistryRuntimeModule) {
@@ -50,7 +83,7 @@ export function resolvePluginSetupCliBackendRuntime(params: { backend: string })
     return runtime.resolvePluginSetupCliBackend(params);
   }
   const normalized = normalizeProviderId(params.backend);
-  return BUNDLED_SETUP_CLI_BACKENDS.find(
+  return resolveBundledSetupCliBackends().find(
     (entry) => normalizeProviderId(entry.backend.id) === normalized,
   );
 }
