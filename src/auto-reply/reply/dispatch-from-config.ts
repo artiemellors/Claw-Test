@@ -946,7 +946,7 @@ export async function dispatchReplyFromConfig(params: {
                   }
                 } else {
                   // Fallback timeout protection when no abort signal is available
-                  // (e.g., compaction notice path). Use 10s timeout to match MAX_HUMAN_DELAY_MS.
+                  // (e.g., compaction notice path). Use 15s timeout (MAX_HUMAN_DELAY_MS + 5s buffer).
                   // Make timeout non-fatal for no-context callers (followup runners, etc.)
                   let timeoutId: NodeJS.Timeout | undefined;
                   try {
@@ -955,7 +955,7 @@ export async function dispatchReplyFromConfig(params: {
                       new Promise<void>((_, reject) => {
                         timeoutId = setTimeout(() => {
                           reject(new Error("block reply delivery timeout (no abort context)"));
-                        }, 10_000);
+                        }, 15_000);
                       }),
                     ]);
                   } catch (err) {
