@@ -1085,7 +1085,9 @@ export async function startGatewayServer(
           const messageSeq = entry?.sessionId
             ? readSessionMessages(entry.sessionId, storePath, entry.sessionFile).length
             : undefined;
-          const sessionRow = loadGatewaySessionRow(sessionKey);
+          const sessionRow = loadGatewaySessionRow(sessionKey, {
+            includeTranscriptUsage: true,
+          });
           const sessionSnapshot = sessionRow
             ? {
                 session: sessionRow,
@@ -1180,7 +1182,9 @@ export async function startGatewayServer(
           if (connIds.size === 0) {
             return;
           }
-          const sessionRow = loadGatewaySessionRow(event.sessionKey);
+          const sessionRow = loadGatewaySessionRow(event.sessionKey, {
+            includeTranscriptUsage: true,
+          });
           broadcastToConnIds(
             "sessions.changed",
             {

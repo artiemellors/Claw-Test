@@ -790,6 +790,9 @@ describe("agent event handler", () => {
       new Set(["conn-session"]),
       { dropIfSlow: true },
     );
+    expect(loadGatewaySessionRow).toHaveBeenCalledWith("session-1", {
+      includeTranscriptUsage: true,
+    });
     resetAgentRunContextForTest();
   });
 
