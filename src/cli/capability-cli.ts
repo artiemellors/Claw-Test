@@ -826,6 +826,33 @@ async function runVideoGenerate(params: { prompt: string; model?: string; output
         if (!res.ok) {
           throw new Error(`Failed to download video from ${video.url}: ${res.status}`);
         }
+        // When an explicit output path is provided, stream directly to disk to avoid
+        // buffering the entire video in memory (URL-only delivery is typically used for
+        // large files that could OOM if fully loaded via arrayBuffer).
+        if (params.output && res.body) {
+          const { pipeline } = await import("stream/promises");
+          const { Readable } = await import("stream");
+          const { createWriteStream } = await import("fs");
+          const mimeType = normalizeMimeType(video.mimeType);
+          const ext =
+            extensionForMime(mimeType) ??
+            path.extname(video.fileName ?? "") ??
+            path.extname(params.output);
+          const resolvedOutput = path.resolve(params.output);
+          const parsed = path.parse(resolvedOutput);
+          const filePath =
+            result.videos.length <= 1
+              ? path.join(parsed.dir, `${parsed.name}${ext}`)
+              : path.join(parsed.dir, `${parsed.name}-${String(index + 1)}${ext}`);
+          await fs.mkdir(path.dirname(filePath), { recursive: true });
+          await pipeline(
+            Readable.fromWeb(res.body as import("stream/web").ReadableStream),
+            createWriteStream(filePath),
+          );
+          const stat = await fs.stat(filePath);
+          return { path: filePath, mimeType: video.mimeType, size: stat.size };
+        }
+        // No explicit output path: load into buffer for auto-named save.
         videoBuffer = Buffer.from(await res.arrayBuffer());
       }
       return {
