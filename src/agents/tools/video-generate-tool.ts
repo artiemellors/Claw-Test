@@ -343,18 +343,10 @@ function validateVideoGenerationCapabilities(params: {
       );
     }
   }
-  if (params.inputAudioCount > 0) {
-    // Fall back to flat provider.capabilities.maxInputAudios for providers that set the
-    // all-modes default at the top level rather than nesting it in capabilities.generate etc.
-    const maxInputAudios = caps.maxInputAudios ?? provider.capabilities.maxInputAudios ?? 0;
-    if (params.inputAudioCount > maxInputAudios) {
-      throw new ToolInputError(
-        maxInputAudios === 0
-          ? `${provider.id} does not support reference audio inputs.`
-          : `${provider.id} supports at most ${maxInputAudios} reference audio${maxInputAudios === 1 ? "" : "s"}.`,
-      );
-    }
-  }
+  // Audio-count validation is intentionally deferred to runtime.ts (generateVideo).
+  // The runtime guard skips per-candidate providers that lack audio support, allowing
+  // fallback candidates that do support audio to run. A ToolInputError here would fire
+  // against only the primary provider and prevent valid fallback-based audio requests.
   if (
     typeof params.durationSeconds === "number" &&
     Number.isFinite(params.durationSeconds) &&
