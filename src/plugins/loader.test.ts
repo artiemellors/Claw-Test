@@ -1478,6 +1478,7 @@ module.exports = { id: "throws-after-import", register() {} };`,
       "loaded",
     );
     expect(scoped.hooks.map((entry) => entry.entry.hook.name)).toEqual(["snapshot-hook"]);
+    expect(scoped.hooks[0]?.handler).toBeTypeOf("function");
     expect(getRegisteredEventKeys()).toEqual([]);
 
     clearInternalHooks();

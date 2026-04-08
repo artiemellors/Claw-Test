@@ -245,6 +245,13 @@ describe("generateAndAppendDreamNarrative", () => {
     expect(subagent.run.mock.calls[0][0]).toMatchObject({
       deliver: false,
     });
+    expect(subagent.run.mock.calls[0][0]).toMatchObject({
+      idempotencyKey: expect.any(String),
+      sessionKey: expect.any(String),
+    });
+    expect(subagent.run.mock.calls[0][0]?.idempotencyKey).toBe(
+      subagent.run.mock.calls[0][0]?.sessionKey,
+    );
     expect(subagent.waitForRun).toHaveBeenCalledOnce();
     expect(subagent.deleteSession).toHaveBeenCalledOnce();
 
