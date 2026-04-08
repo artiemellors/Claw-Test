@@ -64,7 +64,6 @@ import {
   AgentsWorkspaceStatParamsSchema,
   AgentsWorkspaceStatResultSchema,
   WorkspaceEntrySchema,
-  WorkspaceEntryTypeSchema,
 } from "./agents-workspace.js";
 import {
   ChannelsLogoutParamsSchema,
@@ -385,7 +384,6 @@ export const ProtocolSchemas = {
   AgentsWorkspaceStatParams: AgentsWorkspaceStatParamsSchema,
   AgentsWorkspaceStatResult: AgentsWorkspaceStatResultSchema,
   WorkspaceEntry: WorkspaceEntrySchema,
-  WorkspaceEntryType: WorkspaceEntryTypeSchema,
 } satisfies Record<string, TSchema>;
 
 export const PROTOCOL_VERSION = 3 as const;
@@ -406,5 +404,4 @@ export {
   AgentsWorkspaceStatParamsSchema,
   AgentsWorkspaceStatResultSchema,
   WorkspaceEntrySchema,
-  WorkspaceEntryTypeSchema,
 };
