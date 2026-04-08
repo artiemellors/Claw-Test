@@ -14,8 +14,11 @@ vi.mock("./bot.js", () => ({
   createTelegramBot: createTelegramBotMock,
 }));
 
+const isStaleConnectionErrorMock = vi.hoisted(() => vi.fn(() => false));
+
 vi.mock("./network-errors.js", () => ({
   isRecoverableTelegramNetworkError: isRecoverableTelegramNetworkErrorMock,
+  isStaleConnectionError: isStaleConnectionErrorMock,
 }));
 
 vi.mock("./api-logging.js", () => ({
@@ -35,6 +38,7 @@ function makeBot() {
     api: {
       deleteWebhook: vi.fn(async () => true),
       getUpdates: vi.fn(async () => []),
+      getMe: vi.fn(async () => ({ id: 1, is_bot: true, first_name: "Test" })),
       config: { use: vi.fn() },
     },
     stop: vi.fn(async () => undefined),
@@ -48,10 +52,17 @@ function installPollingStallWatchdogHarness() {
     return 1 as unknown as ReturnType<typeof setInterval>;
   });
   const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
-  const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn) => {
-    void Promise.resolve().then(() => (fn as () => void)());
-    return 1 as unknown as ReturnType<typeof setTimeout>;
-  });
+  const setTimeoutSpy = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementation((fn, delay?: number) => {
+      // Skip health-check interval timers (>= 60s) to avoid unhandled rejections
+      // from the health check timeout racing against getMe() in mocked time.
+      if (delay != null && delay >= 60_000) {
+        return 999 as unknown as ReturnType<typeof setTimeout>;
+      }
+      void Promise.resolve().then(() => (fn as () => void)());
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    });
   const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
   const dateNowSpy = vi
     .spyOn(Date, "now")
@@ -140,6 +151,7 @@ describe("TelegramPollingSession", () => {
     runMock.mockReset();
     createTelegramBotMock.mockReset();
     isRecoverableTelegramNetworkErrorMock.mockReset().mockReturnValue(true);
+    isStaleConnectionErrorMock.mockReset().mockReturnValue(false);
     computeBackoffMock.mockReset().mockReturnValue(0);
     sleepWithAbortMock.mockReset().mockResolvedValue(undefined);
   });
@@ -153,6 +165,7 @@ describe("TelegramPollingSession", () => {
       api: {
         deleteWebhook: vi.fn(async () => true),
         getUpdates: vi.fn(async () => []),
+        getMe: vi.fn(async () => ({ id: 1, is_bot: true, first_name: "Test" })),
         config: { use: vi.fn() },
       },
       stop: botStop,
@@ -210,6 +223,7 @@ describe("TelegramPollingSession", () => {
       api: {
         deleteWebhook: vi.fn(async () => true),
         getUpdates: vi.fn(async () => []),
+        getMe: vi.fn(async () => ({ id: 1, is_bot: true, first_name: "Test" })),
         config: { use: vi.fn() },
       },
       stop: botStop,
@@ -412,10 +426,15 @@ describe("TelegramPollingSession", () => {
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
     const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn) => {
-      void Promise.resolve().then(() => (fn as () => void)());
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    });
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((fn, delay?: number) => {
+        if (delay != null && delay >= 60_000) {
+          return 999 as unknown as ReturnType<typeof setTimeout>;
+        }
+        void Promise.resolve().then(() => (fn as () => void)());
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      });
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
     const dateNowSpy = vi
       .spyOn(Date, "now")
@@ -522,10 +541,15 @@ describe("TelegramPollingSession", () => {
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
     const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn) => {
-      void Promise.resolve().then(() => (fn as () => void)());
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    });
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((fn, delay?: number) => {
+        if (delay != null && delay >= 60_000) {
+          return 999 as unknown as ReturnType<typeof setTimeout>;
+        }
+        void Promise.resolve().then(() => (fn as () => void)());
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      });
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
     const dateNowSpy = vi
       .spyOn(Date, "now")
@@ -640,10 +664,15 @@ describe("TelegramPollingSession", () => {
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
     const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn) => {
-      void Promise.resolve().then(() => (fn as () => void)());
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    });
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((fn, delay?: number) => {
+        if (delay != null && delay >= 60_000) {
+          return 999 as unknown as ReturnType<typeof setTimeout>;
+        }
+        void Promise.resolve().then(() => (fn as () => void)());
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      });
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
     const dateNowSpy = vi
       .spyOn(Date, "now")
@@ -753,10 +782,15 @@ describe("TelegramPollingSession", () => {
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
     const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation((fn) => {
-      void Promise.resolve().then(() => (fn as () => void)());
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    });
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((fn, delay?: number) => {
+        if (delay != null && delay >= 60_000) {
+          return 999 as unknown as ReturnType<typeof setTimeout>;
+        }
+        void Promise.resolve().then(() => (fn as () => void)());
+        return 1 as unknown as ReturnType<typeof setTimeout>;
+      });
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => {});
     const dateNowSpy = vi
       .spyOn(Date, "now")
