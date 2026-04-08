@@ -6818,6 +6818,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                           exclusiveMinimum: 0,
                           maximum: 9007199254740991,
                         },
+                        approvalRunningNoticeMs: {
+                          type: "integer",
+                          minimum: 0,
+                          maximum: 9007199254740991,
+                        },
                         cleanupMs: {
                           type: "integer",
                           exclusiveMinimum: 0,
@@ -6846,11 +6851,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                             },
                           },
                           additionalProperties: false,
-                        },
-                        approvalRunningNoticeMs: {
-                          type: "integer",
-                          minimum: 0,
-                          maximum: 9007199254740991,
                         },
                       },
                       additionalProperties: false,
@@ -17016,6 +17016,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
               timeoutSec: {
                 type: "integer",
                 exclusiveMinimum: 0,
+                maximum: 9007199254740991,
+              },
+              approvalRunningNoticeMs: {
+                type: "integer",
+                minimum: 0,
                 maximum: 9007199254740991,
               },
               cleanupMs: {
