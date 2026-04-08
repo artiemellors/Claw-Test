@@ -60,6 +60,7 @@ import {
   triggerInternalHook,
 } from "./dispatch-from-config.runtime.js";
 import { shouldSkipDuplicateInbound } from "./inbound-dedupe.js";
+import { isPowernapDraining } from "./powernap-drain.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
@@ -260,6 +261,12 @@ export async function dispatchReplyFromConfig(params: {
 
   if (shouldSkipDuplicateInbound(ctx)) {
     recordProcessed("skipped", { reason: "duplicate" });
+    return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
+  }
+
+  if (isPowernapDraining()) {
+    logVerbose("Skipping inbound message: powernap in progress");
+    recordProcessed("skipped", { reason: "powernap_drain" });
     return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
   }
 

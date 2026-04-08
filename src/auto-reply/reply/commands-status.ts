@@ -117,6 +117,11 @@ export async function buildStatusReply(params: {
     return undefined;
   }
 
+  // shoar local: in groups return a safe card with no internals (model/auth, tokens, cache, session ids)
+  if (params.isGroup) {
+    return { text: "Shoar is running." };
+  }
+
   return {
     text: await buildStatusText({
       ...params,

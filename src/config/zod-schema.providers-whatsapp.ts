@@ -18,9 +18,12 @@ const ToolPolicyBySenderSchema = z.record(z.string(), ToolPolicySchema).optional
 
 const WhatsAppGroupEntrySchema = z
   .object({
+    name: z.string().optional(),
     requireMention: z.boolean().optional(),
     tools: ToolPolicySchema,
     toolsBySender: ToolPolicyBySenderSchema,
+    forceActivation: z.enum(["always", "mentions", "never"]).optional(),
+    systemPrompt: z.string().optional(),
   })
   .strict()
   .optional();
@@ -117,6 +120,7 @@ export const WhatsAppAccountSchema = WhatsAppSharedSchema.extend({
 }).strict();
 
 export const WhatsAppConfigSchema = WhatsAppSharedSchema.extend({
+  enabled: z.boolean().optional(),
   accounts: z.record(z.string(), WhatsAppAccountSchema.optional()).optional(),
   defaultAccount: z.string().optional(),
   mediaMaxMb: z.number().int().positive().optional().default(50),

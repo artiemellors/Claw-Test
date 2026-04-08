@@ -22,9 +22,13 @@ export type WhatsAppActionConfig = {
 export type WhatsAppReactionLevel = ReactionLevel;
 
 export type WhatsAppGroupConfig = {
+  /** Friendly display name for target resolution (e.g. "Bot Bros"). */
+  name?: string;
   requireMention?: boolean;
   tools?: GroupToolPolicyConfig;
   toolsBySender?: GroupToolPolicyBySenderConfig;
+  /** Per-group system prompt injected into every API call for this group. */
+  systemPrompt?: string;
 };
 
 export type WhatsAppAckReactionConfig = {

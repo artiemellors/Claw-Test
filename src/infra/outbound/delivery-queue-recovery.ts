@@ -54,6 +54,17 @@ const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
   /User .* not in room/i,
 ];
 
+// Errors that mean "the channel listener is not yet ready, try again later".
+// Recovery treats these as deferrals so retryCount is preserved across gateway
+// restarts. Without this list a slow-to-start listener (e.g. WhatsApp Web takes
+// ~2 minutes to come up after launchctl kickstart) burns through MAX_RETRIES
+// across normal restart cycles and the queued deliveries get permanently failed.
+const TRANSIENT_ERROR_PATTERNS: readonly RegExp[] = [
+  /no active .* listener/i,
+  /listener.*not.*(ready|active|available|started)/i,
+  /channel.*not.*(ready|connected|available|started)/i,
+];
+
 function createEmptyRecoverySummary(): RecoverySummary {
   return {
     recovered: 0,
@@ -143,6 +154,10 @@ export function isPermanentDeliveryError(error: string): boolean {
   return PERMANENT_ERROR_PATTERNS.some((re) => re.test(error));
 }
 
+export function isTransientListenerDeliveryError(error: string): boolean {
+  return TRANSIENT_ERROR_PATTERNS.some((re) => re.test(error));
+}
+
 /**
  * On gateway startup, scan the delivery queue and retry any pending entries.
  * Uses exponential backoff and moves entries that exceed MAX_RETRIES to failed/.
@@ -203,6 +218,14 @@ export async function recoverPendingDeliveries(opts: {
         opts.log.warn(`Delivery ${entry.id} hit permanent error — moving to failed/: ${errMsg}`);
         await moveEntryToFailedWithLogging(entry.id, opts.log, opts.stateDir);
         summary.failed += 1;
+        continue;
+      }
+      if (isTransientListenerDeliveryError(errMsg)) {
+        // Channel listener (e.g. WhatsApp Web) is not yet up. Defer without
+        // touching retryCount so we do not burn through MAX_RETRIES on every
+        // gateway restart while the listener is still warming up.
+        summary.deferredBackoff += 1;
+        opts.log.info(`Delivery ${entry.id} deferred — channel listener not ready yet: ${errMsg}`);
         continue;
       }
       try {

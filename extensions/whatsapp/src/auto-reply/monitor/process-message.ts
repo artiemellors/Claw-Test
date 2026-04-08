@@ -25,6 +25,7 @@ import {
   buildHistoryContextFromEntries,
   createChannelReplyPipeline,
   formatInboundEnvelope,
+  jidToE164,
   logVerbose,
   normalizeE164,
   readStoreAllowFromForDmPolicy,
@@ -41,6 +42,56 @@ import {
   type LoadConfigFn,
   type resolveAgentRoute,
 } from "./runtime-api.js";
+
+/**
+ * Build a human-readable mention contact map so the model knows who was @mentioned.
+ * Resolves JIDs to names via the group roster, and marks the bot's own JID as "you (self)".
+ */
+function buildMentionedContacts(params: {
+  mentionedJids?: string[];
+  roster?: Map<string, string>;
+  selfJid?: string | null;
+  selfE164?: string | null;
+}): string | undefined {
+  const { mentionedJids, roster, selfJid, selfE164 } = params;
+  if (!mentionedJids?.length) {
+    return undefined;
+  }
+
+  // Normalize selfJid by stripping device suffix (e.g. :0, :14)
+  const normalizedSelf = selfJid ? selfJid.replace(/:\d+/, "") : null;
+
+  const entries: string[] = [];
+  for (const jid of mentionedJids) {
+    // Check if this is the bot's own JID/LID
+    if (normalizedSelf && jid === normalizedSelf) {
+      entries.push(`${jid} = you (self)`);
+      continue;
+    }
+    // Also check E164 match for self (handles standard JID format)
+    if (selfE164) {
+      const jidE164 = jidToE164(jid);
+      if (jidE164 && normalizeE164(jidE164) === normalizeE164(selfE164)) {
+        entries.push(`${jid} = you (self)`);
+        continue;
+      }
+    }
+    // Try to resolve via E164 + group roster
+    const e164 = jidToE164(jid);
+    if (e164 && roster) {
+      const normalized = normalizeE164(e164);
+      const name = normalized ? roster.get(normalized) : undefined;
+      if (name) {
+        entries.push(`${jid} = ${name}`);
+        continue;
+      }
+    }
+    // LID or unresolvable — include raw JID
+    entries.push(jid);
+  }
+
+  return entries.join(", ");
+}
 
 async function resolveWhatsAppCommandAuthorized(params: {
   cfg: ReturnType<LoadConfigFn>;
@@ -289,6 +340,14 @@ export async function processMessage(params: {
     pipelineResponsePrefix: replyPipeline.responsePrefix,
   });
 
+  // shoar local: resolve per-group systemPrompt (specific JID entry, then wildcard "*" fallback).
+  const whatsAppGroups = params.cfg.channels?.whatsapp?.groups;
+  const groupEntry =
+    params.msg.chatType === "group"
+      ? (whatsAppGroups?.[params.msg.from] ?? whatsAppGroups?.["*"])
+      : undefined;
+  const groupSystemPrompt = groupEntry?.systemPrompt?.trim() || undefined;
+
   const ctxPayload = buildWhatsAppInboundContext({
     combinedBody,
     commandAuthorized,
@@ -303,6 +362,18 @@ export async function processMessage(params: {
       e164: sender.e164 ?? undefined,
     },
     visibleReplyTo: visibleReplyTo ?? undefined,
+    // shoar local: mention enrichment so the model knows exactly who was @mentioned in groups
+    mentionedJids: params.msg.mentionedJids,
+    selfJid: params.msg.selfJid ?? undefined,
+    selfE164: params.msg.selfE164 ?? undefined,
+    mentionedContacts: buildMentionedContacts({
+      mentionedJids: params.msg.mentionedJids,
+      roster: params.groupMemberNames.get(params.groupHistoryKey),
+      selfJid: params.msg.selfJid,
+      selfE164: params.msg.selfE164,
+    }),
+    // shoar local: per-group system prompt (used by the dump group protocol)
+    groupSystemPrompt,
   });
 
   const pinnedMainDmRecipient = resolvePinnedMainDmRecipient({

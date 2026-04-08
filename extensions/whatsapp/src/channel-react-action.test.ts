@@ -22,8 +22,13 @@ vi.mock("./channel-react-action.runtime.js", async () => {
         return null;
       }
       const stripped = raw.replace(/^whatsapp:/, "");
-      return stripped.startsWith("+") ? stripped : `+${stripped.replace(/^\+/, "")}`;
+      return stripped.includes("@g.us")
+        ? stripped
+        : stripped.startsWith("+")
+          ? stripped
+          : `+${stripped.replace(/^\+/, "")}`;
     },
+    isWhatsAppGroupJid: (value: string) => value.endsWith("@g.us"),
     readStringParam: (
       params: Record<string, unknown>,
       key: string,
@@ -184,5 +189,55 @@ describe("whatsapp react action messageId resolution", () => {
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).name).toBe("ToolInputError");
+  });
+
+  it("defaults participant to requesterSenderId for group reactions", async () => {
+    await handleWhatsAppReactAction({
+      action: "react",
+      params: { emoji: "👍", to: "120363401234567890@g.us", messageId: "msg-1" },
+      cfg: baseCfg,
+      accountId: "default",
+      requesterSenderId: "15551234567@s.whatsapp.net",
+    });
+
+    expect(hoisted.handleWhatsAppAction).toHaveBeenCalledWith(
+      expect.objectContaining({ participant: "15551234567@s.whatsapp.net" }),
+      baseCfg,
+    );
+  });
+
+  it("keeps explicit participant when provided", async () => {
+    await handleWhatsAppReactAction({
+      action: "react",
+      params: {
+        emoji: "👍",
+        to: "120363401234567890@g.us",
+        messageId: "msg-1",
+        participant: "explicit-participant@s.whatsapp.net",
+      },
+      cfg: baseCfg,
+      accountId: "default",
+      requesterSenderId: "15551234567@s.whatsapp.net",
+    });
+
+    expect(hoisted.handleWhatsAppAction).toHaveBeenCalledWith(
+      expect.objectContaining({ participant: "explicit-participant@s.whatsapp.net" }),
+      baseCfg,
+    );
+  });
+
+  it("does not default participant for direct chat reactions", async () => {
+    await handleWhatsAppReactAction({
+      action: "react",
+      params: { emoji: "👍", to: "+1555", messageId: "msg-1" },
+      cfg: baseCfg,
+      accountId: "default",
+      requesterSenderId: "15551234567@s.whatsapp.net",
+    });
+
+    expect(hoisted.handleWhatsAppAction).toHaveBeenCalledWith(
+      expect.objectContaining({ participant: undefined }),
+      baseCfg,
+    );
   });
 });

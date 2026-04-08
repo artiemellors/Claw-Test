@@ -1276,16 +1276,43 @@ export async function startGatewayServer(
         : () => {};
 
     // Recover pending outbound deliveries from previous crash/restart.
+    // Delay the initial pass and run a couple of follow-up passes so that
+    // slow-to-start channel listeners (e.g. WhatsApp Web takes ~2 minutes
+    // after launchctl kickstart) have a chance to come up before we attempt
+    // delivery. Without this, recovery races with listener startup and the
+    // queue silently defers (or worse, fails) on every restart cycle.
     if (!minimalTestGateway) {
       void (async () => {
         const { recoverPendingDeliveries } = await import("../infra/outbound/delivery-queue.js");
         const { deliverOutboundPayloads } = await import("../infra/outbound/deliver.js");
         const logRecovery = log.child("delivery-recovery");
-        await recoverPendingDeliveries({
-          deliver: deliverOutboundPayloads,
-          log: logRecovery,
-          cfg: cfgAtStart,
-        });
+        const passes = [
+          { delayMs: 30_000, label: "initial" },
+          { delayMs: 90_000, label: "warm-up" },
+          { delayMs: 240_000, label: "post-warmup" },
+        ];
+        for (const pass of passes) {
+          await new Promise<void>((resolve) => setTimeout(resolve, pass.delayMs));
+          try {
+            const summary = await recoverPendingDeliveries({
+              deliver: deliverOutboundPayloads,
+              log: logRecovery,
+              cfg: cfgAtStart,
+            });
+            // If nothing remained pending and nothing was deferred, stop
+            // running follow-up passes — the queue is empty.
+            if (
+              summary.recovered === 0 &&
+              summary.failed === 0 &&
+              summary.skippedMaxRetries === 0 &&
+              summary.deferredBackoff === 0
+            ) {
+              break;
+            }
+          } catch (err) {
+            logRecovery.error(`${pass.label} pass failed: ${String(err)}`);
+          }
+        }
       })().catch((err) => log.error(`Delivery recovery failed: ${String(err)}`));
     }
 
