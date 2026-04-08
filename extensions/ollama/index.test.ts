@@ -19,9 +19,10 @@ const promptAndConfigureOllamaMock = vi.hoisted(() =>
 );
 const ensureOllamaModelPulledMock = vi.hoisted(() => vi.fn(async () => {}));
 const buildOllamaProviderMock = vi.hoisted(() => vi.fn());
-const createConfiguredOllamaStreamFnMock = vi.hoisted(() =>
-  vi.fn((_params: { model: unknown; providerBaseUrl?: string }) => ({}) as never),
+const innerStreamFnMock = vi.hoisted(() =>
+  vi.fn((_m: unknown, _ctx: unknown, _opts?: { apiKey?: string }) => ({}) as never),
 );
+const resolveEnvApiKeyMock = vi.hoisted(() => vi.fn(() => null as { apiKey: string } | null));
 
 vi.mock("./api.js", () => ({
   promptAndConfigureOllama: promptAndConfigureOllamaMock,
@@ -34,15 +35,27 @@ vi.mock("./src/stream.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./src/stream.js")>();
   return {
     ...actual,
-    createConfiguredOllamaStreamFn: createConfiguredOllamaStreamFnMock,
+    createConfiguredOllamaStreamFn: () => innerStreamFnMock,
   };
+});
+
+vi.mock("openclaw/plugin-sdk/provider-auth", async (importOriginal) => {
+  const orig = await importOriginal<Record<string, unknown>>();
+  return { ...orig };
+});
+
+vi.mock("openclaw/plugin-sdk/provider-auth-runtime", async (importOriginal) => {
+  const orig = await importOriginal<Record<string, unknown>>();
+  return { ...orig, resolveEnvApiKey: resolveEnvApiKeyMock };
 });
 
 beforeEach(() => {
   promptAndConfigureOllamaMock.mockClear();
   ensureOllamaModelPulledMock.mockClear();
   buildOllamaProviderMock.mockReset();
-  createConfiguredOllamaStreamFnMock.mockClear();
+  innerStreamFnMock.mockClear();
+  resolveEnvApiKeyMock.mockReset();
+  resolveEnvApiKeyMock.mockReturnValue(null);
 });
 
 function registerProvider() {
@@ -240,24 +253,6 @@ describe("ollama plugin", () => {
     expect(auth).toBeUndefined();
   });
 
-  it("mints synthetic auth for non-default explicit ollama config", () => {
-    const provider = registerProvider();
-
-    const auth = provider.resolveSyntheticAuth?.({
-      providerConfig: {
-        baseUrl: "http://remote-ollama:11434",
-        api: "ollama",
-        models: [],
-      },
-    });
-
-    expect(auth).toEqual({
-      apiKey: "ollama-local",
-      source: "models.providers.ollama (synthetic local key)",
-      mode: "api-key",
-    });
-  });
-
   it("wraps OpenAI-compatible payloads with num_ctx for Ollama compat routes", () => {
     const provider = registerProvider();
     let payloadSeen: Record<string, unknown> | undefined;
@@ -360,9 +355,39 @@ describe("ollama plugin", () => {
 
     provider.createStreamFn?.({ config, model, provider: "ollama2" } as never);
 
-    expect(createConfiguredOllamaStreamFnMock).toHaveBeenCalledWith(
-      expect.objectContaining({ providerBaseUrl: "http://127.0.0.1:11435" }),
-    );
+    expect(resolveEnvApiKeyMock).not.toHaveBeenCalled();
+  });
+
+  it("injects the selected provider's API key instead of hardcoded ollama", () => {
+    resolveEnvApiKeyMock.mockReturnValue(null);
+    const provider = registerProvider();
+    const streamFn = provider.createStreamFn?.({
+      config: {
+        models: {
+          providers: {
+            ollama: {
+              api: "ollama",
+              baseUrl: "http://127.0.0.1:11434",
+              apiKey: "sk-wrong-provider",
+            },
+            ollama2: {
+              api: "ollama",
+              baseUrl: "http://127.0.0.1:11435",
+              apiKey: "sk-right-provider",
+            },
+          },
+        },
+      },
+      model: { id: "llama3.2", provider: "ollama2", api: "ollama" },
+      provider: "ollama2",
+    } as never);
+
+    expect(streamFn).not.toBe(innerStreamFnMock);
+    innerStreamFnMock.mockClear();
+    void streamFn?.({} as never, {} as never, {});
+    expect(innerStreamFnMock).toHaveBeenCalledTimes(1);
+    const passedOpts = innerStreamFnMock.mock.calls[0]?.[2];
+    expect(passedOpts?.apiKey).toBe("sk-right-provider");
   });
 
   it("uses ollama provider baseUrl when provider is ollama (backward compat)", () => {
@@ -387,9 +412,7 @@ describe("ollama plugin", () => {
 
     provider.createStreamFn?.({ config, model, provider: "ollama" } as never);
 
-    expect(createConfiguredOllamaStreamFnMock).toHaveBeenCalledWith(
-      expect.objectContaining({ providerBaseUrl: "http://127.0.0.1:11434" }),
-    );
+    expect(resolveEnvApiKeyMock).not.toHaveBeenCalled();
   });
 
   it("wraps native Ollama payloads with top-level think=false when thinking is off", () => {
@@ -551,5 +574,201 @@ describe("ollama plugin", () => {
     );
     expect(baseStreamFn).toHaveBeenCalledTimes(1);
     expect(payloadSeen?.think).toBeUndefined();
+  });
+
+  describe("resolveSyntheticAuth", () => {
+    it("returns synthetic auth for local/private HTTP endpoints", () => {
+      const provider = registerProvider();
+      for (const baseUrl of [
+        "http://192.168.4.50:11434",
+        "http://10.0.0.5:11434",
+        "http://gpu-node-server:11434",
+        "http://myhost.local:11434",
+      ]) {
+        const result = provider.resolveSyntheticAuth?.({
+          providerConfig: { baseUrl, api: "ollama", models: [] },
+        });
+        expect(result).toEqual(
+          expect.objectContaining({ apiKey: "ollama-local", mode: "api-key" }),
+        );
+      }
+    });
+
+    it("returns synthetic auth for localhost HTTP endpoints when explicitly configured", () => {
+      const provider = registerProvider();
+      for (const baseUrl of ["http://localhost:11434", "http://127.0.0.1:11434"]) {
+        const result = provider.resolveSyntheticAuth?.({
+          providerConfig: { baseUrl, api: "ollama", models: [{ id: "test" }] },
+        });
+        expect(result).toEqual(
+          expect.objectContaining({ apiKey: "ollama-local", mode: "api-key" }),
+        );
+      }
+    });
+
+    it("returns undefined for HTTPS endpoints on public hosts", () => {
+      const provider = registerProvider();
+      for (const baseUrl of [
+        "https://ollama.com",
+        "https://my-ollama.example.com:11434",
+        "https://cloud.ollama.ai",
+        "https://10.example.com:11434",
+        "https://[2001:db8::1]:11434",
+      ]) {
+        const result = provider.resolveSyntheticAuth?.({
+          providerConfig: { baseUrl, api: "ollama", models: [] },
+        });
+        expect(result).toBeUndefined();
+      }
+    });
+
+    it("returns synthetic auth for HTTPS endpoints on private/local hosts", () => {
+      const provider = registerProvider();
+      for (const baseUrl of [
+        "https://localhost:11434",
+        "https://192.168.1.100:11434",
+        "https://10.0.0.5:11434",
+        "https://ollama.local:443",
+        "https://ollama.internal:443",
+        "https://gpu-node-server:11434",
+      ]) {
+        const result = provider.resolveSyntheticAuth?.({
+          providerConfig: { baseUrl, api: "ollama", models: [] },
+        });
+        expect(result).toEqual(
+          expect.objectContaining({ apiKey: "ollama-local", mode: "api-key" }),
+        );
+      }
+    });
+
+    it("returns synthetic auth when no baseUrl is configured", () => {
+      const provider = registerProvider();
+      const result = provider.resolveSyntheticAuth?.({
+        providerConfig: { api: "ollama", models: [{ id: "test" }] },
+      });
+      expect(result).toEqual(expect.objectContaining({ apiKey: "ollama-local" }));
+    });
+
+    it("returns undefined when no provider config is present", () => {
+      const provider = registerProvider();
+      const result = provider.resolveSyntheticAuth?.({
+        providerConfig: undefined,
+      });
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe("createStreamFn key injection", () => {
+    it("returns inner stream function unwrapped when apiKey is the default marker", () => {
+      resolveEnvApiKeyMock.mockReturnValue(null);
+      const provider = registerProvider();
+      const streamFn = provider.createStreamFn?.({
+        config: {
+          models: {
+            providers: {
+              ollama: { baseUrl: "http://localhost:11434", apiKey: "ollama-local" },
+            },
+          },
+        },
+        model: { id: "test", provider: "ollama", api: "ollama" },
+      });
+      expect(streamFn).toBe(innerStreamFnMock);
+    });
+
+    it("injects env-var resolved key into stream options", () => {
+      resolveEnvApiKeyMock.mockReturnValue({ apiKey: "resolved-cloud-key" });
+      const provider = registerProvider();
+      const streamFn = provider.createStreamFn?.({
+        config: {
+          models: {
+            providers: {
+              ollama: { baseUrl: "https://ollama.com", apiKey: "OLLAMA_API_KEY" },
+            },
+          },
+        },
+        model: { id: "test", provider: "ollama", api: "ollama" },
+        provider: "ollama",
+      });
+      expect(streamFn).not.toBe(innerStreamFnMock);
+
+      innerStreamFnMock.mockClear();
+      void streamFn?.({} as never, {} as never, {});
+      expect(innerStreamFnMock).toHaveBeenCalledTimes(1);
+      const passedOpts = innerStreamFnMock.mock.calls[0]?.[2];
+      expect(passedOpts?.apiKey).toBe("resolved-cloud-key");
+    });
+
+    it("falls back to inline key when resolveEnvApiKey returns null", () => {
+      resolveEnvApiKeyMock.mockReturnValue(null);
+      const provider = registerProvider();
+      const streamFn = provider.createStreamFn?.({
+        config: {
+          models: {
+            providers: {
+              ollama: { baseUrl: "https://ollama.com", apiKey: "sk-my-inline-token" },
+            },
+          },
+        },
+        model: { id: "test", provider: "ollama", api: "ollama" },
+        provider: "ollama",
+      });
+      expect(streamFn).not.toBe(innerStreamFnMock);
+
+      innerStreamFnMock.mockClear();
+      void streamFn?.({} as never, {} as never, {});
+      expect(innerStreamFnMock).toHaveBeenCalledTimes(1);
+      const passedOpts = innerStreamFnMock.mock.calls[0]?.[2];
+      expect(passedOpts?.apiKey).toBe("sk-my-inline-token");
+    });
+
+    it("does not inject unresolved env-var marker as a literal key", () => {
+      resolveEnvApiKeyMock.mockReturnValue(null);
+      const provider = registerProvider();
+      const streamFn = provider.createStreamFn?.({
+        config: {
+          models: {
+            providers: {
+              ollama: { baseUrl: "https://ollama.com", apiKey: "OLLAMA_API_KEY" },
+            },
+          },
+        },
+        model: { id: "test", provider: "ollama", api: "ollama" },
+        provider: "ollama",
+      });
+      // Env var unset + config is a known marker → should NOT inject the marker string
+      expect(streamFn).toBe(innerStreamFnMock);
+    });
+
+    it("does not override an existing apiKey in options", () => {
+      resolveEnvApiKeyMock.mockReturnValue({ apiKey: "resolved-cloud-key" });
+      const provider = registerProvider();
+      const streamFn = provider.createStreamFn?.({
+        config: {
+          models: {
+            providers: {
+              ollama: { baseUrl: "https://ollama.com", apiKey: "OLLAMA_API_KEY" },
+            },
+          },
+        },
+        model: { id: "test", provider: "ollama", api: "ollama" },
+        provider: "ollama",
+      });
+
+      innerStreamFnMock.mockClear();
+      void streamFn?.({} as never, {} as never, { apiKey: "caller-provided-key" } as never);
+      expect(innerStreamFnMock).toHaveBeenCalledTimes(1);
+      const passedOpts = innerStreamFnMock.mock.calls[0]?.[2];
+      expect(passedOpts?.apiKey).toBe("caller-provided-key");
+    });
+
+    it("returns inner stream function unwrapped when no provider config is present", () => {
+      resolveEnvApiKeyMock.mockReturnValue(null);
+      const provider = registerProvider();
+      const streamFn = provider.createStreamFn?.({
+        config: {},
+        model: { id: "test", provider: "ollama", api: "ollama" },
+      });
+      expect(streamFn).toBe(innerStreamFnMock);
+    });
   });
 });

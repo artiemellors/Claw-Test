@@ -6,6 +6,8 @@ import {
   type ProviderAuthResult,
   type ProviderDiscoveryContext,
 } from "openclaw/plugin-sdk/plugin-entry";
+import { isNonSecretApiKeyMarker } from "openclaw/plugin-sdk/provider-auth";
+import { resolveEnvApiKey } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
   buildProviderReplayFamilyHooks,
   type ModelProviderConfig,
@@ -237,11 +239,34 @@ export default definePluginEntry({
         await ensureOllamaModelPulled({ config, model, prompter });
       },
       createStreamFn: ({ config, model, provider }) => {
-        return createConfiguredOllamaStreamFn({
+        const innerStreamFn = createConfiguredOllamaStreamFn({
           model,
           providerBaseUrl: resolveConfiguredOllamaProviderConfig({ config, providerId: provider })
             ?.baseUrl,
         });
+        // Resolve the provider API key so the Ollama stream function receives
+        // it via options.apiKey. The pi-ai runtime does not inject apiKey for
+        // custom API stream functions, so the plugin must do it here.
+        const rawApiKey = resolveConfiguredOllamaProviderConfig({
+          config,
+          providerId: provider,
+        })?.apiKey;
+        const configApiKey = typeof rawApiKey === "string" ? rawApiKey : undefined;
+        let resolvedKey: string | undefined;
+        if (configApiKey && configApiKey !== DEFAULT_API_KEY && configApiKey !== "custom-local") {
+          // Try env-var resolution first (handles markers like "OLLAMA_API_KEY").
+          // Only fall back to the raw config value if it's a real inline key,
+          // not an unresolved env-var marker (which would send a literal
+          // "Authorization: Bearer OLLAMA_API_KEY" header).
+          const envResolved = resolveEnvApiKey(PROVIDER_ID)?.apiKey;
+          resolvedKey =
+            envResolved ?? (isNonSecretApiKeyMarker(configApiKey) ? undefined : configApiKey);
+        }
+        if (!resolvedKey) {
+          return innerStreamFn;
+        }
+        return (m, ctx, opts) =>
+          innerStreamFn(m, ctx, { ...opts, apiKey: opts?.apiKey || resolvedKey });
       },
       ...OPENAI_COMPATIBLE_REPLAY_HOOKS,
       resolveReasoningOutputMode: () => "native",
@@ -263,6 +288,39 @@ export default definePluginEntry({
       resolveSyntheticAuth: ({ providerConfig }) => {
         if (!hasMeaningfulExplicitOllamaConfig(providerConfig)) {
           return undefined;
+        }
+        // Only provide synthetic "ollama-local" auth for local/LAN instances.
+        // Remote HTTPS endpoints (e.g. Ollama Cloud) require real credentials;
+        // returning undefined forces the auth pipeline to resolve a real key.
+        // HTTPS endpoints on local/private hosts (e.g. reverse-proxied Ollama)
+        // still get synthetic auth since they don't require Cloud credentials.
+        const baseUrl = providerConfig?.baseUrl?.trim();
+        if (baseUrl) {
+          try {
+            const parsed = new URL(baseUrl);
+            if (parsed.protocol === "https:") {
+              const host = parsed.hostname.toLowerCase();
+              const isIpv4Literal = /^\d+\.\d+\.\d+\.\d+$/.test(host);
+              const isPrivateIpv4 =
+                isIpv4Literal && /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host);
+              const isIpv6Loopback = host === "[::1]" || host === "::1";
+              const isBareHostname = !host.includes(".") && !host.includes(":") && !isIpv4Literal;
+              const isPrivateHost =
+                host === "localhost" ||
+                host === "127.0.0.1" ||
+                host === "0.0.0.0" ||
+                isIpv6Loopback ||
+                host.endsWith(".local") ||
+                host.endsWith(".internal") ||
+                isBareHostname ||
+                isPrivateIpv4;
+              if (!isPrivateHost) {
+                return undefined;
+              }
+            }
+          } catch {
+            // invalid URL — fall through to synthetic auth
+          }
         }
         return {
           apiKey: DEFAULT_API_KEY,
