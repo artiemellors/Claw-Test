@@ -1,5 +1,6 @@
 import {
   createModelCatalogPresetAppliers,
+  isBundledPluginLoadableAndEnabled,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/provider-onboard";
 import {
@@ -29,7 +30,7 @@ export function applyPlamoProviderConfig(cfg: OpenClawConfig): OpenClawConfig {
 
 export function applyPlamoConfig(cfg: OpenClawConfig): OpenClawConfig {
   const next = plamoPresetAppliers.applyConfig(cfg);
-  if (next.acp?.backend || next.plugins?.entries?.acpx?.enabled === false) {
+  if (next.acp?.backend || !isBundledPluginLoadableAndEnabled(next, PLAMO_DEFAULT_ACP_BACKEND)) {
     return next;
   }
   return {

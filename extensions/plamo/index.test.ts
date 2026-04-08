@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
+import { normalizePlamoToolMarkupInMessage } from "./stream.js";
 
 type FakeWrappedStream = {
   result: () => Promise<unknown>;
@@ -520,6 +521,190 @@ describe("plamo provider plugin", () => {
         totalTokens: 17,
       },
       content: [{ type: "text", text: "ok" }],
+    });
+  });
+
+  it("tracks interleaved native tool-call deltas by index when follow-up chunks omit ids", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-index",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_read",
+                    type: "function",
+                    function: { name: "read", arguments: '{"path":"' },
+                  },
+                  {
+                    index: 1,
+                    id: "call_write",
+                    type: "function",
+                    function: { name: "write", arguments: '{"path":"' },
+                  },
+                ],
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-index",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 1,
+                    type: "function",
+                    function: { arguments: 'out.txt",' },
+                  },
+                  {
+                    index: 0,
+                    type: "function",
+                    function: { arguments: 'README.md",' },
+                  },
+                ],
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-index",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 1,
+                    type: "function",
+                    function: { arguments: '"content":"hi"}' },
+                  },
+                  {
+                    index: 0,
+                    type: "function",
+                    function: { arguments: '"mode":"r"}' },
+                  },
+                ],
+                finish_reason: "tool_calls",
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.end("data: [DONE]\n\n");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "tool test" }],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    const deltas: Array<{ contentIndex: number; delta: string }> = [];
+    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
+    try {
+      for await (const event of stream) {
+        if (event.type === "toolcall_delta") {
+          deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
+        }
+      }
+      result = await stream.result();
+    } finally {
+      server.close();
+    }
+
+    expect(deltas).toEqual([
+      { contentIndex: 0, delta: '{"path":"' },
+      { contentIndex: 1, delta: '{"path":"' },
+      { contentIndex: 1, delta: 'out.txt",' },
+      { contentIndex: 0, delta: 'README.md",' },
+      { contentIndex: 1, delta: '"content":"hi"}' },
+      { contentIndex: 0, delta: '"mode":"r"}' },
+    ]);
+    expect(result).toMatchObject({
+      stopReason: "toolUse",
+      content: [
+        {
+          type: "toolCall",
+          id: "call_read",
+          name: "read",
+          arguments: { path: "README.md", mode: "r" },
+        },
+        {
+          type: "toolCall",
+          id: "call_write",
+          name: "write",
+          arguments: { path: "out.txt", content: "hi" },
+        },
+      ],
+    });
+  });
+
+  it("preserves text-block ordering when normalizing inline PLaMo tool markup", () => {
+    const toolMarkup =
+      "<|plamo:begin_tool_requests:plamo|>" +
+      "<|plamo:begin_tool_request:plamo|>" +
+      "<|plamo:begin_tool_name:plamo|>read<|plamo:end_tool_name:plamo|>" +
+      '<|plamo:begin_tool_arguments:plamo|><|plamo:msg|>{"path":"README.md"}' +
+      "<|plamo:end_tool_arguments:plamo|>" +
+      "<|plamo:end_tool_request:plamo|>" +
+      "<|plamo:end_tool_requests:plamo|>";
+    const message = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        { type: "text", text: "First segment." },
+        { type: "thinking", thinking: "internal", thinkingSignature: "reasoning_content" },
+        { type: "text", text: `Second segment before tool.\n${toolMarkup}` },
+        { type: "text", text: "\nThird segment after tool." },
+      ],
+    };
+
+    normalizePlamoToolMarkupInMessage(message);
+
+    expect(message).toMatchObject({
+      stopReason: "toolUse",
+      content: [
+        { type: "text", text: "First segment." },
+        { type: "thinking", thinking: "internal", thinkingSignature: "reasoning_content" },
+        { type: "text", text: "Second segment before tool.\n" },
+        { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+        { type: "text", text: "\nThird segment after tool." },
+      ],
     });
   });
 
