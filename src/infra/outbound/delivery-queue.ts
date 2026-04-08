@@ -11,6 +11,7 @@ export {
   computeBackoffMs,
   isEntryEligibleForRecoveryRetry,
   isPermanentDeliveryError,
+  isTransientListenerDeliveryError,
   MAX_RETRIES,
   recoverPendingDeliveries,
 } from "./delivery-queue-recovery.js";
