@@ -236,6 +236,17 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
         isLoopbackAddress(remote),
       );
 
+    // Check if this is an internal health probe connection (loopback + self-origin + code 1000)
+    // These are false-positives that flood logs with WARN "closed before connect"
+    const isInternalProbeClose = (
+      remote: string | undefined,
+      origin: string | undefined,
+      code: number | undefined,
+    ) =>
+      isLoopbackAddress(remote) &&
+      origin === requestHost &&
+      code === 1000;
+
     socket.once("close", (code, reason) => {
       const durationMs = Date.now() - openedAt;
       const logForwardedFor = sanitizeLogValue(forwardedFor);
@@ -257,9 +268,9 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
         ...closeMeta,
       };
       if (!client) {
-        const logFn = isNoisySwiftPmHelperClose(requestUserAgent, remoteAddr)
-          ? logWsControl.debug
-          : logWsControl.warn;
+        const isNoisy = isNoisySwiftPmHelperClose(requestUserAgent, remoteAddr);
+        const isProbe = isInternalProbeClose(remoteAddr, logOrigin, code);
+        const logFn = isNoisy || isProbe ? logWsControl.debug : logWsControl.warn;
         logFn(
           `closed before connect conn=${connId} remote=${remoteAddr ?? "?"} fwd=${logForwardedFor || "n/a"} origin=${logOrigin || "n/a"} host=${logHost || "n/a"} ua=${logUserAgent || "n/a"} code=${code ?? "n/a"} reason=${logReason || "n/a"}`,
           closeContext,
