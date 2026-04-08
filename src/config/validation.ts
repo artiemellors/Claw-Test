@@ -350,22 +350,43 @@ export function collectUnsupportedSecretRefPolicyIssues(raw: unknown): ConfigVal
   return collectUnsupportedMutableSecretRefIssues(raw);
 }
 
+function formatBoundHint(record: UnknownIssueRecord | null): string | null {
+  if (!record) return null;
+  const code = typeof record.code === "string" ? record.code : "";
+  if (code === "too_big" && typeof record.maximum === "number") {
+    return record.inclusive !== false
+      ? `(maximum: ${record.maximum})`
+      : `(must be less than ${record.maximum})`;
+  }
+  if (code === "too_small" && typeof record.minimum === "number") {
+    return record.inclusive !== false
+      ? `(minimum: ${record.minimum})`
+      : `(must be greater than ${record.minimum})`;
+  }
+  return null;
+}
+
 function mapZodIssueToConfigIssue(issue: unknown): ConfigValidationIssue {
   const record = toIssueRecord(issue);
   const path = formatConfigPath(toConfigPathSegments(record?.path));
   const message = typeof record?.message === "string" ? record.message : "Invalid input";
   const allowedValuesSummary = summarizeAllowedValues(collectAllowedValuesFromUnknownIssue(issue));
 
-  if (!allowedValuesSummary) {
-    return { path, message };
+  if (allowedValuesSummary) {
+    return {
+      path,
+      message: appendAllowedValuesHint(message, allowedValuesSummary),
+      allowedValues: allowedValuesSummary.values,
+      allowedValuesHiddenCount: allowedValuesSummary.hiddenCount,
+    };
   }
 
-  return {
-    path,
-    message: appendAllowedValuesHint(message, allowedValuesSummary),
-    allowedValues: allowedValuesSummary.values,
-    allowedValuesHiddenCount: allowedValuesSummary.hiddenCount,
-  };
+  const boundHint = formatBoundHint(record);
+  if (boundHint) {
+    return { path, message: `${message} ${boundHint}` };
+  }
+
+  return { path, message };
 }
 
 function isWorkspaceAvatarPath(value: string, workspaceDir: string): boolean {
