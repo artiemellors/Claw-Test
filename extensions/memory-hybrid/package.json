@@ -1,0 +1,17 @@
+{
+  "name": "memory-hybrid",
+  "version": "2026.4.1",
+  "private": false,
+  "description": "SynaptoClaw: Advanced Cognitive Memory with 7-Channel Hybrid Scoring and Knowledge Graph",
+  "type": "module",
+  "dependencies": {
+    "@lancedb/lancedb": "^0.26.2",
+    "@sinclair/typebox": "0.34.48",
+    "openai": "^6.22.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

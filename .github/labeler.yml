@@ -337,6 +337,10 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/talk-voice/**"
+"extensions: memory-hybrid":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/memory-hybrid/**"
 "extensions: together":
   - changed-files:
       - any-glob-to-any-file:
