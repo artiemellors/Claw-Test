@@ -1,5 +1,31 @@
 import type { OpenClawConfig } from "../config/config.js";
+import type { AgentModelEntryConfig } from "../config/types.agent-defaults.js";
 import { findNormalizedProviderValue } from "./provider-id.js";
+import { modelKey } from "./model-selection.js";
+
+/** Context mode determines how aggressively context is trimmed for a model. */
+export type ContextMode = "full" | "light" | "safe";
+
+/**
+ * Resolve the `contextMode` for a given model from the agent config.
+ * Reads `agents.defaults.models[provider/model].params.contextMode`.
+ * Returns `"full"` when not configured.
+ */
+export function resolveModelContextMode(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  modelId: string;
+}): ContextMode {
+  const modelsMap = params.cfg?.agents?.defaults?.models as
+    | Record<string, AgentModelEntryConfig>
+    | undefined;
+  if (!modelsMap) return "full";
+  const key = modelKey(params.provider, params.modelId);
+  const entry = modelsMap[key] ?? modelsMap[params.modelId];
+  const raw = (entry?.params as Record<string, unknown> | undefined)?.contextMode;
+  if (raw === "safe" || raw === "light") return raw;
+  return "full";
+}
 
 export const CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000;
 export const CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000;
@@ -60,6 +86,8 @@ export type ContextWindowGuardResult = ContextWindowInfo & {
   shouldWarn: boolean;
   shouldBlock: boolean;
 };
+
+export { type ContextMode as FallbackContextMode };
 
 export function evaluateContextWindowGuard(params: {
   info: ContextWindowInfo;

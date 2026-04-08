@@ -58,6 +58,8 @@ import {
 } from "../../channel-tools.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../defaults.js";
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
+import type { ContextMode } from "../../context-window-guard.js";
+import { applyContextModeFilter } from "../extensions.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
@@ -459,10 +461,15 @@ export async function runEmbeddedAttempt(
       !isContinuationTurn &&
       params.bootstrapContextMode !== "lightweight" &&
       params.bootstrapContextRunKind !== "heartbeat";
-    const { bootstrapFiles: hookAdjustedBootstrapFiles, contextFiles } = isContinuationTurn
+    const fallbackContextMode = params.fallbackContextMode;
+    const bootstrapContextMode =
+      fallbackContextMode === "safe"
+        ? "lightweight"
+        : params.bootstrapContextMode;
+    const { bootstrapFiles: hookAdjustedBootstrapFiles, contextFiles: rawContextFiles } = isContinuationTurn
       ? {
           bootstrapFiles: [],
-          contextFiles: [],
+          contextFiles: [] as Awaited<ReturnType<typeof resolveBootstrapContextForRun>>["contextFiles"],
         }
       : await resolveBootstrapContextForRun({
           workspaceDir: effectiveWorkspace,
@@ -470,9 +477,17 @@ export async function runEmbeddedAttempt(
           sessionKey: params.sessionKey,
           sessionId: params.sessionId,
           warn: makeBootstrapWarn({ sessionLabel, warn: (message) => log.warn(message) }),
-          contextMode: params.bootstrapContextMode,
+          contextMode: bootstrapContextMode,
           runKind: params.bootstrapContextRunKind,
         });
+    const contextFiles =
+      fallbackContextMode && fallbackContextMode !== "full"
+        ? applyContextModeFilter({
+            contextMode: fallbackContextMode as ContextMode,
+            files: rawContextFiles,
+            contextWindowTokens: params.fallbackContextWindowTokens ?? params.contextTokenBudget,
+          })
+        : rawContextFiles;
     const bootstrapMaxChars = resolveBootstrapMaxChars(params.config);
     const bootstrapTotalMaxChars = resolveBootstrapTotalMaxChars(params.config);
     const bootstrapAnalysis = analyzeBootstrapBudget({

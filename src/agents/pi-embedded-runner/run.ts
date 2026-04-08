@@ -536,6 +536,43 @@ export async function runEmbeddedPiAgent(
         let authRetryPending = false;
         // Hoisted so the retry-limit error path can use the most recent API total.
         let lastTurnTotal: number | undefined;
+
+        // Inject degraded-mode notice when running in a fallback context mode
+        const fallbackContextMode = params.fallbackContextMode;
+        const resolvedExtraSystemPrompt = (() => {
+          if (!fallbackContextMode || fallbackContextMode === "full") return params.extraSystemPrompt;
+          const reasonCode = params.fallbackReasonCode ?? "unknown";
+          const httpStatusMap: Record<string, number | undefined> = {
+            rate_limit: 429,
+            rate_limited: 429,
+            overloaded: 503,
+            timeout: 408,
+            auth: 401,
+            auth_permanent: 403,
+            billing: 402,
+            format: 400,
+            model_not_found: 404,
+            session_expired: 410,
+            unknown: undefined,
+          };
+          const httpCode = httpStatusMap[reasonCode];
+          const reasonTag = httpCode ? `${reasonCode} (${httpCode})` : reasonCode;
+          const primaryModel = params.fallbackPrimaryModel ?? "primary model";
+          const fallbackModelName = params.fallbackModel ?? "fallback model";
+          const primaryCtx = params.fallbackPrimaryContextWindowTokens;
+          const fallbackCtx = params.fallbackContextWindowTokens;
+          const ctxLine = primaryCtx && fallbackCtx && fallbackCtx < primaryCtx
+            ? ` Context window changed from ${primaryCtx.toLocaleString()} to ${fallbackCtx.toLocaleString()} tokens (trimmed ${(primaryCtx - fallbackCtx).toLocaleString()} tokens to fit).`
+            : primaryCtx && fallbackCtx
+              ? ` Context window: ${fallbackCtx.toLocaleString()} tokens.`
+              : "";
+          const notice = fallbackContextMode === "safe"
+            ? `⚠️ FALLBACK ACTIVATED: ${reasonTag}. Switched from ${primaryModel} to ${fallbackModelName}.${ctxLine} Running in safe mode.`
+            : `⚠️ FALLBACK ACTIVATED: ${reasonTag}. Switched from ${primaryModel} to ${fallbackModelName}.${ctxLine}`;
+          const base = params.extraSystemPrompt ?? "";
+          return base ? `${notice}\n\n${base}` : notice;
+        })();
+
         while (true) {
           if (runLoopIterations >= MAX_RUN_LOOP_ITERATIONS) {
             const message =
@@ -621,7 +658,7 @@ export async function runEmbeddedPiAgent(
             config: params.config,
             allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
             contextEngine,
-            contextTokenBudget: ctxInfo.tokens,
+            contextTokenBudget: params.fallbackContextWindowTokens ?? ctxInfo.tokens,
             skillsSnapshot: params.skillsSnapshot,
             prompt,
             images: params.images,
@@ -669,7 +706,7 @@ export async function runEmbeddedPiAgent(
             onReasoningEnd: params.onReasoningEnd,
             onToolResult: params.onToolResult,
             onAgentEvent: params.onAgentEvent,
-            extraSystemPrompt: params.extraSystemPrompt,
+            extraSystemPrompt: resolvedExtraSystemPrompt,
             inputProvenance: params.inputProvenance,
             streamParams: params.streamParams,
             ownerNumbers: params.ownerNumbers,
@@ -811,7 +848,7 @@ export async function runEmbeddedPiAgent(
                     thinkLevel,
                     reasoningLevel: params.reasoningLevel,
                     bashElevated: params.bashElevated,
-                    extraSystemPrompt: params.extraSystemPrompt,
+                    extraSystemPrompt: resolvedExtraSystemPrompt,
                     ownerNumbers: params.ownerNumbers,
                   }),
                   ...(attempt.promptCache ? { promptCache: attempt.promptCache } : {}),
@@ -953,7 +990,7 @@ export async function runEmbeddedPiAgent(
                     thinkLevel,
                     reasoningLevel: params.reasoningLevel,
                     bashElevated: params.bashElevated,
-                    extraSystemPrompt: params.extraSystemPrompt,
+                    extraSystemPrompt: resolvedExtraSystemPrompt,
                     ownerNumbers: params.ownerNumbers,
                   }),
                   ...(attempt.promptCache ? { promptCache: attempt.promptCache } : {}),

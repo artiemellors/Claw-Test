@@ -40,6 +40,8 @@ import {
 } from "./model-selection.js";
 import type { FailoverReason } from "./pi-embedded-helpers.js";
 import { isLikelyContextOverflowError } from "./pi-embedded-helpers.js";
+import { type ContextMode, resolveModelContextMode, resolveContextWindowInfo } from "./context-window-guard.js";
+import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
 
 const log = createSubsystemLogger("model-fallback");
 
@@ -71,6 +73,18 @@ export function isFallbackSummaryError(err: unknown): err is FallbackSummaryErro
 
 export type ModelFallbackRunOptions = {
   allowTransientCooldownProbe?: boolean;
+  /** Resolved context mode for the fallback candidate. */
+  contextMode?: ContextMode;
+  /** Context window size (tokens) of the fallback candidate model. */
+  contextWindowTokens?: number;
+  /** Human-readable reason code for the fallback (e.g. "rate_limited"). */
+  fallbackReasonCode?: string;
+  /** Primary model identifier (provider/model) that failed. */
+  primaryModel?: string;
+  /** Primary model's context window size (tokens). */
+  primaryContextWindowTokens?: number;
+  /** Fallback model identifier (provider/model) being used. */
+  fallbackModel?: string;
 };
 
 type ModelFallbackRunFn<T> = (
@@ -771,6 +785,38 @@ export async function runWithModelFallback<T>(params: {
           profileCount: profileIds.length,
         });
       }
+    }
+
+    // Resolve context mode for fallback candidates — only apply degraded
+    // context when this is an actual fallback (not the primary attempt).
+    const candidateContextMode = resolveModelContextMode({
+      cfg: params.cfg,
+      provider: candidate.provider,
+      modelId: candidate.model,
+    });
+    if (candidateContextMode !== "full" && attempts.length > 0) {
+      if (!runOptions) runOptions = {};
+      runOptions.contextMode = candidateContextMode;
+      const ctxInfo = resolveContextWindowInfo({
+        cfg: params.cfg,
+        provider: candidate.provider,
+        modelId: candidate.model,
+        defaultTokens: DEFAULT_CONTEXT_TOKENS,
+      });
+      runOptions.contextWindowTokens = ctxInfo.tokens;
+      // Derive reason code from last failed attempt
+      const lastAttempt = attempts[attempts.length - 1];
+      runOptions.fallbackReasonCode = lastAttempt?.reason ?? "unknown";
+      // Thread model identity so the notice can show "model A → model B"
+      runOptions.primaryModel = `${params.provider}/${params.model}`;
+      runOptions.fallbackModel = `${candidate.provider}/${candidate.model}`;
+      const primaryCtxInfo = resolveContextWindowInfo({
+        cfg: params.cfg,
+        provider: params.provider,
+        modelId: params.model,
+        defaultTokens: DEFAULT_CONTEXT_TOKENS,
+      });
+      runOptions.primaryContextWindowTokens = primaryCtxInfo.tokens;
     }
 
     const attemptRun = await runFallbackAttempt({
