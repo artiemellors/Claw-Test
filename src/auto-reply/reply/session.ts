@@ -96,6 +96,7 @@ function resolveStaleSessionEndReason(params: {
   entry: SessionEntry | undefined;
   freshness?: SessionFreshness;
   now: number;
+  resetMode?: string;
 }): PluginHookSessionEndReason | undefined {
   if (!params.entry || !params.freshness) {
     return undefined;
@@ -104,6 +105,9 @@ function resolveStaleSessionEndReason(params: {
     params.freshness.dailyResetAt != null && params.entry.updatedAt < params.freshness.dailyResetAt;
   const staleIdle =
     params.freshness.idleExpiresAt != null && params.now > params.freshness.idleExpiresAt;
+  if (params.resetMode === "adaptive" && staleIdle && staleDaily) {
+    return "adaptive";
+  }
   if (staleIdle) {
     return "idle";
   }
@@ -421,6 +425,7 @@ export async function initSessionState(params: {
         entry,
         freshness: entryFreshness,
         now,
+        resetMode: resetPolicy.mode,
       });
   clearBootstrapSnapshotOnSessionRollover({
     sessionKey,
