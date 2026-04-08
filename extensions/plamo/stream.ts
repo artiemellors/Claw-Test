@@ -469,7 +469,7 @@ function parseUsage(rawUsage: OpenAIStyleUsage | null | undefined, model: Runtim
   const cachedTokens = toFiniteNumber(rawUsage.prompt_tokens_details?.cached_tokens);
   const reasoningTokens = toFiniteNumber(rawUsage.completion_tokens_details?.reasoning_tokens);
   const input = toFiniteNumber(rawUsage.prompt_tokens) - cachedTokens;
-  const output = toFiniteNumber(rawUsage.completion_tokens) + reasoningTokens;
+  const output = toFiniteNumber(rawUsage.completion_tokens);
   const usage: Usage = {
     input,
     output,
