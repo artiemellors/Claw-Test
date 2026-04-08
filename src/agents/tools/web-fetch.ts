@@ -249,6 +249,8 @@ type WebFetchRuntimeParams = {
   readabilityEnabled: boolean;
   lookupFn?: LookupFn;
   resolveProviderFallback: () => ReturnType<typeof resolveWebFetchDefinition>;
+  dangerouslyAllowPrivateNetwork?: boolean;
+  assumeProxyEnvironment?: boolean;
 };
 
 function normalizeProviderFinalUrl(value: unknown): string | undefined {
@@ -360,8 +362,12 @@ async function maybeFetchProviderWebFetchPayload(
 }
 
 async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string, unknown>> {
+  const cachePolicyKey = JSON.stringify({
+    dangerouslyAllowPrivateNetwork: params.dangerouslyAllowPrivateNetwork === true,
+    assumeProxyEnvironment: params.assumeProxyEnvironment === true,
+  });
   const cacheKey = normalizeCacheKey(
-    `fetch:${params.url}:${params.extractMode}:${params.maxChars}`,
+    `fetch:${params.url}:${params.extractMode}:${params.maxChars}:${cachePolicyKey}`,
   );
   const cached = readCache(FETCH_CACHE, cacheKey);
   if (cached) {
@@ -383,11 +389,21 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
   let release: (() => Promise<void>) | null = null;
   let finalUrl = params.url;
   try {
+    const policy =
+      params.dangerouslyAllowPrivateNetwork || params.assumeProxyEnvironment
+        ? {
+            ...(params.dangerouslyAllowPrivateNetwork
+              ? { dangerouslyAllowPrivateNetwork: true }
+              : {}),
+            ...(params.assumeProxyEnvironment ? { assumeProxyEnvironment: true } : {}),
+          }
+        : undefined;
     const result = await fetchWithWebToolsNetworkGuard({
       url: params.url,
       maxRedirects: params.maxRedirects,
       timeoutSeconds: params.timeoutSeconds,
       lookupFn: params.lookupFn,
+      ...(policy ? { policy } : {}),
       init: {
         headers: {
           Accept: "text/markdown, text/html;q=0.9, */*;q=0.1",
@@ -591,6 +607,10 @@ export function createWebFetchTool(options?: {
     }
     return providerFallbackCache;
   };
+  const assumeProxyEnvironment =
+    options?.config?.tools?.web?.fetch?.ssrfPolicy?.assumeProxyEnvironment === true;
+  const dangerouslyAllowPrivateNetwork =
+    options?.config?.tools?.web?.fetch?.ssrfPolicy?.dangerouslyAllowPrivateNetwork === true;
   return {
     label: "Web Fetch",
     name: "web_fetch",
@@ -619,6 +639,8 @@ export function createWebFetchTool(options?: {
         readabilityEnabled,
         lookupFn: options?.lookupFn,
         resolveProviderFallback,
+        dangerouslyAllowPrivateNetwork,
+        assumeProxyEnvironment,
       });
       return jsonResult(result);
     },
