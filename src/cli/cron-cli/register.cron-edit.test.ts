@@ -5,7 +5,6 @@
  * semantics, in particular for staggerMs inheritance and synthesis.
  */
 import { describe, expect, it } from "vitest";
-
 // Re-export the private helper for testing via a thin wrapper.
 // We import the register module and extract via a test-only export shim.
 // Since computeDisplayAfterSchedule is not exported, we test it indirectly
@@ -15,7 +14,6 @@ import { describe, expect, it } from "vitest";
 // For now, test through the observable diff output produced by the module.
 // The key invariant: cron→cron edits that omit staggerMs must NOT add a
 // synthesized staggerMs entry in the diff preview.
-
 import { beforeEach, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -30,10 +28,29 @@ vi.mock("../../cron/client.js", () => ({
   }),
 }));
 
+vi.mock("../gateway-rpc.js", async () => {
+  const actual = await vi.importActual<typeof import("../gateway-rpc.js")>("../gateway-rpc.js");
+  return {
+    ...actual,
+    callGatewayFromCli: async (method: string, _opts: unknown, params?: unknown) => {
+      if (method === "cron.list") {
+        return { jobs: await hoisted.listMock() };
+      }
+      if (method === "cron.update") {
+        return hoisted.updateMock(params);
+      }
+      return { ok: true, params };
+    },
+  };
+});
+
 vi.mock("../../runtime.js", () => ({
   defaultRuntime: {
     log: vi.fn(),
-    error: vi.fn(),
+    error: vi.fn((message: unknown) => {
+      process.stderr.write(String(message));
+    }),
+    writeJson: vi.fn(),
     exit: vi.fn(),
   },
 }));
@@ -79,23 +96,21 @@ describe("cron edit diff preview — stagger synthesis", () => {
 
     // Capture stderr output (where the diff preview is printed)
     const stderrLines: string[] = [];
-    const stderrSpy = vi
-      .spyOn(process.stderr, "write")
-      .mockImplementation((chunk: unknown) => {
-        if (typeof chunk === "string") stderrLines.push(chunk);
-        else if (Buffer.isBuffer(chunk)) stderrLines.push(chunk.toString());
-        return true;
-      });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      if (typeof chunk === "string") {
+        stderrLines.push(chunk);
+      } else if (Buffer.isBuffer(chunk)) {
+        stderrLines.push(chunk.toString());
+      }
+      return true;
+    });
 
     let caughtError: unknown;
     try {
       const { registerCronEdit } = await import("./register.cron-edit.js");
       const { defaultRuntime } = await import("../../runtime.js");
 
-      await registerCronEdit(
-        ["cron", "edit", "job-1", "--cron", "0 10 * * *"],
-        defaultRuntime,
-      );
+      await registerCronEdit(["cron", "edit", "job-1", "--cron", "0 10 * * *"], defaultRuntime);
     } catch (err) {
       caughtError = err;
     } finally {
@@ -133,23 +148,21 @@ describe("cron edit diff preview — stagger synthesis", () => {
     hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
 
     const stderrLines: string[] = [];
-    const stderrSpy = vi
-      .spyOn(process.stderr, "write")
-      .mockImplementation((chunk: unknown) => {
-        if (typeof chunk === "string") stderrLines.push(chunk);
-        else if (Buffer.isBuffer(chunk)) stderrLines.push(chunk.toString());
-        return true;
-      });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      if (typeof chunk === "string") {
+        stderrLines.push(chunk);
+      } else if (Buffer.isBuffer(chunk)) {
+        stderrLines.push(chunk.toString());
+      }
+      return true;
+    });
 
     let caughtError: unknown;
     try {
       const { registerCronEdit } = await import("./register.cron-edit.js");
       const { defaultRuntime } = await import("../../runtime.js");
 
-      await registerCronEdit(
-        ["cron", "edit", "job-1", "--cron", "0 10 * * *"],
-        defaultRuntime,
-      );
+      await registerCronEdit(["cron", "edit", "job-1", "--cron", "0 10 * * *"], defaultRuntime);
     } catch (err) {
       caughtError = err;
     } finally {
@@ -170,13 +183,9 @@ describe("cron edit diff preview — stagger synthesis", () => {
     // The existing staggerMs (120_000 ms = 2m) should be reflected in the
     // after-value (unchanged), not silently dropped or synthesized anew.
     const diffOutput = stderrLines.join("\n");
-    // schedule line should not show staggerMs as changed if only expr changed
-    // (stagger is preserved, so it should appear equal on both sides if shown at all)
-    // We just verify no "→" diff line surfaces for staggerMs.
-    const staggerDiffLine = diffOutput
-      .split("\n")
-      .find((l) => l.includes("stagger") && l.includes("→"));
-    expect(staggerDiffLine).toBeUndefined();
+    // schedule changes are rendered as whole-object diffs, so the preserved
+    // staggerMs should appear on both sides of the schedule line.
+    expect(diffOutput.match(/"staggerMs":120000/g)).toHaveLength(2);
   });
 });
 
@@ -208,13 +217,14 @@ describe("cron edit diff preview — delivery / main-session side-effect", () =>
     hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
 
     const stderrLines: string[] = [];
-    const stderrSpy = vi
-      .spyOn(process.stderr, "write")
-      .mockImplementation((chunk: unknown) => {
-        if (typeof chunk === "string") stderrLines.push(chunk);
-        else if (Buffer.isBuffer(chunk)) stderrLines.push(chunk.toString());
-        return true;
-      });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      if (typeof chunk === "string") {
+        stderrLines.push(chunk);
+      } else if (Buffer.isBuffer(chunk)) {
+        stderrLines.push(chunk.toString());
+      }
+      return true;
+    });
 
     let caughtError: unknown;
     try {
@@ -267,13 +277,14 @@ describe("cron edit diff preview — delivery / main-session side-effect", () =>
     hoisted.updateMock.mockRejectedValue(new Error("update-rejected-in-test"));
 
     const stderrLines: string[] = [];
-    const stderrSpy = vi
-      .spyOn(process.stderr, "write")
-      .mockImplementation((chunk: unknown) => {
-        if (typeof chunk === "string") stderrLines.push(chunk);
-        else if (Buffer.isBuffer(chunk)) stderrLines.push(chunk.toString());
-        return true;
-      });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      if (typeof chunk === "string") {
+        stderrLines.push(chunk);
+      } else if (Buffer.isBuffer(chunk)) {
+        stderrLines.push(chunk.toString());
+      }
+      return true;
+    });
 
     let caughtError: unknown;
     try {
@@ -286,10 +297,7 @@ describe("cron edit diff preview — delivery / main-session side-effect", () =>
       // Since we cannot easily invoke --webhook-to through the CLI, we verify the
       // negative: a pure schedule edit on a webhook main job should NOT show a
       // spurious "cleared" delivery line.
-      await registerCronEdit(
-        ["cron", "edit", "job-1", "--cron", "0 10 * * *"],
-        defaultRuntime,
-      );
+      await registerCronEdit(["cron", "edit", "job-1", "--cron", "0 10 * * *"], defaultRuntime);
     } catch (err) {
       caughtError = err;
     } finally {
