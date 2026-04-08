@@ -45,12 +45,33 @@ importers:
       '@aws-sdk/credential-provider-node':
         specifier: 3.972.29
         version: 3.972.29
+      '@aws/bedrock-token-generator':
+        specifier: ^1.1.0
+        version: 1.1.0
+      '@buape/carbon':
+        specifier: 0.14.0
+        version: 0.14.0(@discordjs/opus@0.10.0)(hono@4.12.10)(opusscript@0.1.1)
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
+      '@google/genai':
+        specifier: ^1.48.0
+        version: 1.48.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))
+      '@grammyjs/runner':
+        specifier: ^2.0.3
+        version: 2.0.3(grammy@1.42.0)
+      '@grammyjs/transformer-throttler':
+        specifier: ^1.2.1
+        version: 1.2.1(grammy@1.42.0)
       '@homebridge/ciao':
         specifier: ^1.3.6
         version: 1.3.6
+      '@lancedb/lancedb':
+        specifier: ^0.27.2
+        version: 0.27.2(apache-arrow@18.1.0)
+      '@larksuiteoapi/node-sdk':
+        specifier: ^1.60.0
+        version: 1.60.0
       '@line/bot-sdk':
         specifier: ^11.0.0
         version: 11.0.0
@@ -84,6 +105,12 @@ importers:
       '@sinclair/typebox':
         specifier: 0.34.49
         version: 0.34.49
+      '@slack/bolt':
+        specifier: ^4.6.0
+        version: 4.6.0(@types/express@5.0.6)
+      '@slack/web-api':
+        specifier: ^7.15.0
+        version: 7.15.0
       ajv:
         specifier: ^8.18.0
         version: 8.18.0
@@ -114,12 +141,24 @@ importers:
       gaxios:
         specifier: 7.1.4
         version: 7.1.4
+      google-auth-library:
+        specifier: ^10.6.2
+        version: 10.6.2
+      grammy:
+        specifier: ^1.42.0
+        version: 1.42.0
       hono:
         specifier: 4.12.10
         version: 4.12.10
+      https-proxy-agent:
+        specifier: ^9.0.0
+        version: 9.0.0
       ipaddr.js:
         specifier: ^2.3.0
         version: 2.3.0
+      jimp:
+        specifier: ^1.6.0
+        version: 1.6.0
       jiti:
         specifier: ^2.6.1
         version: 2.6.1
@@ -136,17 +175,26 @@ importers:
         specifier: ^5.3.2
         version: 5.3.2
       markdown-it:
-        specifier: ^14.1.1
+        specifier: 14.1.1
         version: 14.1.1
       matrix-js-sdk:
         specifier: 41.3.0-rc.0
         version: 41.3.0-rc.0
+      mpg123-decoder:
+        specifier: ^1.0.3
+        version: 1.0.3
       node-edge-tts:
         specifier: ^1.2.10
         version: 1.2.10
       node-llama-cpp:
         specifier: 3.18.1
         version: 3.18.1(typescript@6.0.2)
+      openai:
+        specifier: ^6.33.0
+        version: 6.33.0(ws@8.20.0)(zod@4.3.6)
+      opusscript:
+        specifier: ^0.1.1
+        version: 0.1.1
       osc-progress:
         specifier: ^0.3.0
         version: 0.3.0
@@ -165,6 +213,9 @@ importers:
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
+      silk-wasm:
+        specifier: ^3.7.1
+        version: 3.7.1
       sqlite-vec:
         specifier: 0.1.9
         version: 0.1.9
@@ -175,7 +226,7 @@ importers:
         specifier: ^4.10.2
         version: 4.10.2
       undici:
-        specifier: ^8.0.2
+        specifier: 8.0.2
         version: 8.0.2
       uuid:
         specifier: ^13.0.0
@@ -257,6 +308,9 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2(@opentelemetry/api@1.9.1)(@types/node@25.5.2)(@vitest/browser-playwright@4.1.2)(jsdom@29.0.1(@noble/hashes@2.0.1))(vite@8.0.5(@emnapi/core@1.8.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.2)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
     optionalDependencies:
+      '@discordjs/opus':
+        specifier: ^0.10.0
+        version: 0.10.0
       '@matrix-org/matrix-sdk-crypto-nodejs':
         specifier: ^0.4.0
         version: 0.4.0
@@ -9807,7 +9861,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.20.1
-      '@types/node': 25.5.0
+      '@types/node': 25.5.2
       '@types/retry': 0.12.0
       axios: 1.13.6
       eventemitter3: 5.0.4
