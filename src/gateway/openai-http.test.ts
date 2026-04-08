@@ -728,9 +728,9 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         } as never);
         const json = await postSyncUserMessage("usage");
         expect(json.usage).toEqual({
-          prompt_tokens: 33,
+          prompt_tokens: 30,
           completion_tokens: 5,
-          total_tokens: 38,
+          total_tokens: 35,
         });
       }
 
@@ -752,7 +752,31 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
         expect(json.usage).toEqual({
           prompt_tokens: 10,
           completion_tokens: 5,
-          total_tokens: 100,
+          total_tokens: 15,
+        });
+      }
+
+      {
+        agentCommand.mockClear();
+        agentCommand.mockResolvedValueOnce({
+          payloads: [{ text: "usage non-finite" }],
+          meta: {
+            agentMeta: {
+              usage: {
+                input: Number.POSITIVE_INFINITY,
+                output: Number.NaN,
+                cacheRead: 2,
+                cacheWrite: Number.POSITIVE_INFINITY,
+                total: Number.NaN,
+              },
+            },
+          },
+        } as never);
+        const json = await postSyncUserMessage("usage");
+        expect(json.usage).toEqual({
+          prompt_tokens: 2,
+          completion_tokens: 0,
+          total_tokens: 2,
         });
       }
 

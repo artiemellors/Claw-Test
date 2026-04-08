@@ -501,15 +501,16 @@ function resolveChatCompletionUsage(result: unknown): {
   completion_tokens: number;
   total_tokens: number;
 } {
-  const usage = resolveRawAgentUsage(result);
+  const usage = normalizeUsage(resolveRawAgentUsage(result));
 
+  // Keep the wire-format aligned with OpenAI chat completions:
+  // prompt_tokens includes prompt input plus cache-read reuse, but not cache-write overhead.
   const input = usage?.input ?? 0;
   const output = usage?.output ?? 0;
   const cacheRead = usage?.cacheRead ?? 0;
-  const cacheWrite = usage?.cacheWrite ?? 0;
-  const promptTokens = input + cacheRead + cacheWrite;
+  const promptTokens = input + cacheRead;
   const completionTokens = output;
-  const totalTokens = usage?.total ?? promptTokens + completionTokens;
+  const totalTokens = promptTokens + completionTokens;
 
   return {
     prompt_tokens: Math.max(0, promptTokens),
