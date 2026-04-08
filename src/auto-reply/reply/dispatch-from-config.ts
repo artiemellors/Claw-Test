@@ -938,6 +938,7 @@ export async function dispatchReplyFromConfig(params: {
                 } else {
                   // Fallback timeout protection when no abort signal is available
                   // (e.g., compaction notice path). Use 10s timeout to match MAX_HUMAN_DELAY_MS.
+                  // Make timeout non-fatal for no-context callers (followup runners, etc.)
                   let timeoutId: NodeJS.Timeout | undefined;
                   try {
                     await Promise.race([
@@ -948,6 +949,15 @@ export async function dispatchReplyFromConfig(params: {
                         }, 10_000);
                       }),
                     ]);
+                  } catch (err) {
+                    // Log timeout but continue - no-context callers shouldn't fail on slow delivery
+                    if (err instanceof Error && err.message.includes("delivery timeout")) {
+                      console.warn(
+                        `[dispatch-from-config] ${err.message}, delivery may continue in background`,
+                      );
+                    } else {
+                      throw err; // Re-throw non-timeout errors
+                    }
                   } finally {
                     if (timeoutId) {
                       clearTimeout(timeoutId);
