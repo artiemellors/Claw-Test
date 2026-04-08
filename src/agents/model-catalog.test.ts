@@ -368,6 +368,78 @@ describe("loadModelCatalog", () => {
     expect(matches[0]?.name).toBe("Kilo Auto");
   });
 
+  it("filters phantom native providers shadowed by aggregator-qualified model ids", async () => {
+    mockPiDiscoveryModels([
+      {
+        id: "gemini-3-flash-preview",
+        provider: "google",
+        name: "Gemini 3 Flash Preview",
+      },
+      {
+        id: "google/gemini-3-flash-preview",
+        provider: "openrouter",
+        name: "Gemini 3 Flash Preview",
+      },
+    ]);
+
+    const result = await loadModelCatalog({
+      config: {
+        models: {
+          providers: {
+            openrouter: {},
+          },
+        },
+      } as OpenClawConfig,
+    });
+
+    expect(result).toEqual([
+      {
+        id: "google/gemini-3-flash-preview",
+        name: "Gemini 3 Flash Preview",
+        provider: "openrouter",
+      },
+    ]);
+  });
+
+  it("keeps direct providers that are explicitly configured alongside aggregators", async () => {
+    mockPiDiscoveryModels([
+      {
+        id: "gemini-3-flash-preview",
+        provider: "google",
+        name: "Gemini 3 Flash Preview",
+      },
+      {
+        id: "google/gemini-3-flash-preview",
+        provider: "openrouter",
+        name: "Gemini 3 Flash Preview",
+      },
+    ]);
+
+    const result = await loadModelCatalog({
+      config: {
+        models: {
+          providers: {
+            google: {},
+            openrouter: {},
+          },
+        },
+      } as OpenClawConfig,
+    });
+
+    expect(result).toEqual([
+      {
+        id: "gemini-3-flash-preview",
+        name: "Gemini 3 Flash Preview",
+        provider: "google",
+      },
+      {
+        id: "google/gemini-3-flash-preview",
+        name: "Gemini 3 Flash Preview",
+        provider: "openrouter",
+      },
+    ]);
+  });
+
   it("matches models across canonical provider aliases", () => {
     expect(
       findModelInCatalog([{ provider: "z.ai", id: "glm-5", name: "GLM-5" }], "z-ai", "glm-5"),

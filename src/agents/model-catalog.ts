@@ -48,6 +48,52 @@ const defaultImportPiSdk = () => import("./pi-model-discovery-runtime.js");
 let importPiSdk = defaultImportPiSdk;
 let modelSuppressionPromise: Promise<typeof import("./model-suppression.runtime.js")> | undefined;
 
+function getConfiguredProviderIds(config?: OpenClawConfig): Set<string> {
+  return new Set(
+    Object.keys(config?.models?.providers ?? {})
+      .map((provider) => normalizeProviderId(provider))
+      .filter(Boolean),
+  );
+}
+
+function isShadowedByQualifiedAggregatorEntry(
+  entry: ModelCatalogEntry,
+  candidate: ModelCatalogEntry,
+): boolean {
+  const providerId = normalizeProviderId(entry.provider);
+  if (!providerId || normalizeProviderId(candidate.provider) === providerId) {
+    return false;
+  }
+  const candidateId = candidate.id.trim();
+  const slash = candidateId.indexOf("/");
+  if (slash <= 0) {
+    return false;
+  }
+  const candidatePrefix = normalizeProviderId(candidateId.slice(0, slash));
+  const candidateModelId = candidateId.slice(slash + 1).trim().toLowerCase();
+  return candidatePrefix === providerId && candidateModelId === entry.id.trim().toLowerCase();
+}
+
+function filterShadowedProviderEntries(
+  entries: ModelCatalogEntry[],
+  config?: OpenClawConfig,
+): ModelCatalogEntry[] {
+  if (entries.length <= 1) {
+    return entries;
+  }
+  const configuredProviderIds = getConfiguredProviderIds(config);
+  return entries.filter((entry) => {
+    const providerId = normalizeProviderId(entry.provider);
+    if (!providerId || configuredProviderIds.has(providerId)) {
+      return true;
+    }
+    return !entries.some(
+      (candidate) =>
+        candidate !== entry && isShadowedByQualifiedAggregatorEntry(entry, candidate),
+    );
+  });
+}
+
 function shouldLogModelCatalogTiming(): boolean {
   return process.env.OPENCLAW_DEBUG_INGRESS_TIMING === "1";
 }
@@ -182,13 +228,15 @@ export async function loadModelCatalog(params?: {
         }
       }
       logStage("plugin-models-merged", `entries=${models.length}`);
+      const filteredModels = filterShadowedProviderEntries(models, cfg);
+      logStage("provider-shadows-filtered", `entries=${filteredModels.length}`);
 
-      if (models.length === 0) {
+      if (filteredModels.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
         modelCatalogPromise = null;
       }
 
-      const sorted = sortModels(models);
+      const sorted = sortModels(filteredModels);
       logStage("complete", `entries=${sorted.length}`);
       return sorted;
     } catch (error) {
