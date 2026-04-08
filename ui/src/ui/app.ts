@@ -799,7 +799,10 @@ export class OpenClawApp extends LitElement {
     });
     if (this.client && this.connected) {
       try {
-        const result = (await this.client.request("sessions.create", { key: newKey })) as {
+        const result = (await this.client.request("sessions.create", {
+          key: newKey,
+          label: name,
+        })) as {
           ok: boolean;
           key?: string;
         };
