@@ -574,14 +574,18 @@ function trimNormalizedPlamoMessageParts(
   parts: ParsedPlamoMessagePart[],
 ): ParsedPlamoMessagePart[] {
   const next = [...parts];
-  const firstTextIndex = next.findIndex((part) => part.type === "text");
-  if (firstTextIndex !== -1) {
-    const trimmed = next[firstTextIndex].text.trimStart();
-    if (trimmed) {
-      next[firstTextIndex] = { type: "text", text: trimmed };
-    } else {
-      next.splice(firstTextIndex, 1);
+  for (let index = 0; index < next.length; index += 1) {
+    const part = next[index];
+    if (part.type !== "text") {
+      continue;
     }
+    const trimmed = part.text.trimStart();
+    if (trimmed) {
+      next[index] = { type: "text", text: trimmed };
+    } else {
+      next.splice(index, 1);
+    }
+    break;
   }
 
   for (let index = next.length - 1; index >= 0; index -= 1) {
