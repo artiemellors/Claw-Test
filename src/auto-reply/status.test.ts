@@ -123,6 +123,70 @@ describe("buildStatusMessage", () => {
     expect(normalized).toContain("Reasoning: on");
   });
 
+  it("shows plugin status lines only when verbose is enabled", () => {
+    const visible = normalizeTestText(
+      buildStatusMessage({
+        agent: {
+          model: "anthropic/pi:opus",
+        },
+        sessionEntry: {
+          sessionId: "abc",
+          updatedAt: 0,
+          verboseLevel: "on",
+          pluginDebugEntries: [
+            { pluginId: "active-memory", lines: ["🧩 Active Memory: timeout 15s recent"] },
+          ],
+        },
+        sessionKey: "agent:main:main",
+        queue: { mode: "collect", depth: 0 },
+      }),
+    );
+    const hidden = normalizeTestText(
+      buildStatusMessage({
+        agent: {
+          model: "anthropic/pi:opus",
+        },
+        sessionEntry: {
+          sessionId: "abc",
+          updatedAt: 0,
+          verboseLevel: "off",
+          pluginDebugEntries: [
+            { pluginId: "active-memory", lines: ["🧩 Active Memory: timeout 15s recent"] },
+          ],
+        },
+        sessionKey: "agent:main:main",
+        queue: { mode: "collect", depth: 0 },
+      }),
+    );
+
+    expect(visible).toContain("Active Memory: timeout 15s recent");
+    expect(hidden).not.toContain("Active Memory: timeout 15s recent");
+  });
+
+  it("merges legacy and structured plugin debug lines in verbose status", () => {
+    const visible = normalizeTestText(
+      buildStatusMessage({
+        agent: {
+          model: "anthropic/pi:opus",
+        },
+        sessionEntry: {
+          sessionId: "abc",
+          updatedAt: 0,
+          verboseLevel: "on",
+          pluginDebugEntries: [
+            { pluginId: "active-memory", lines: ["🧩 Active Memory: ok 842ms recent 1 mem"] },
+          ],
+          pluginStatusLines: ["Legacy Plugin: warmed cache"],
+        },
+        sessionKey: "agent:main:main",
+        queue: { mode: "collect", depth: 0 },
+      }),
+    );
+
+    expect(visible).toContain("Active Memory: ok 842ms recent 1 mem");
+    expect(visible).toContain("Legacy Plugin: warmed cache");
+  });
+
   it("shows fast mode when enabled", () => {
     const text = buildStatusMessage({
       agent: {
