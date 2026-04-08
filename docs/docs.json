@@ -189,6 +189,10 @@
       "destination": "/providers/qianfan"
     },
     {
+      "source": "/gmicloud",
+      "destination": "/providers/gmicloud"
+    },
+    {
       "source": "/mattermost",
       "destination": "/channels/mattermost"
     },
@@ -1247,6 +1251,7 @@
                   "providers/fal",
                   "providers/github-copilot",
                   "providers/glm",
+                  "providers/gmicloud",
                   "providers/google",
                   "providers/groq",
                   "providers/huggingface",
