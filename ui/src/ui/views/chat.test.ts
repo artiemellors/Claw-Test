@@ -62,6 +62,7 @@ function createChatHeaderState(
     model?: string | null;
     modelProvider?: string | null;
     thinkingLevel?: string | null;
+    effectiveThinkingDefault?: string | null;
     models?: ModelCatalogEntry[];
     omitSessionFromList?: boolean;
   } = {},
@@ -110,6 +111,8 @@ function createChatHeaderState(
       });
       if (result.sessions[0]) {
         result.sessions[0].thinkingLevel = currentThinkingLevel ?? undefined;
+        result.sessions[0].effectiveThinkingDefault =
+          overrides.effectiveThinkingDefault ?? undefined;
       }
       return result;
     }
@@ -137,6 +140,8 @@ function createChatHeaderState(
       });
       if (result.sessions[0]) {
         result.sessions[0].thinkingLevel = currentThinkingLevel ?? undefined;
+        result.sessions[0].effectiveThinkingDefault =
+          overrides.effectiveThinkingDefault ?? undefined;
       }
       return result;
     })(),
@@ -959,10 +964,11 @@ describe("chat view", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the default thinking level in the chat header picker", async () => {
+  it("shows the backend-resolved default thinking level in the chat header picker", async () => {
     const { state } = createChatHeaderState({
       model: "gpt-5",
       modelProvider: "openai",
+      effectiveThinkingDefault: "high",
     });
     const container = document.createElement("div");
     render(renderChatSessionSelect(state), container);
@@ -972,7 +978,7 @@ describe("chat view", () => {
     );
     expect(thinkingSelect).not.toBeNull();
     expect(thinkingSelect?.value).toBe("");
-    expect(thinkingSelect?.options[0]?.textContent?.trim()).toBe("Default (off)");
+    expect(thinkingSelect?.options[0]?.textContent?.trim()).toBe("Default (high)");
   });
 
   it("patches the current session thinking level from the chat header picker", async () => {
