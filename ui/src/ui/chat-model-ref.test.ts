@@ -105,4 +105,38 @@ describe("chat-model-ref helpers", () => {
       reason: "ambiguous",
     });
   });
+
+  // Regression tests for #53758: provider prefix stripping on multi-segment model ids.
+  // The server stores OpenRouter model refs as model="xiaomi/mimo-v2-pro" + provider="openrouter".
+  // The model part contains a slash but is NOT a fully-qualified provider/model ref.
+  it("preserves provider prefix for multi-segment openrouter model ids (catalog hit)", () => {
+    const openrouterCatalog = createModelCatalog({
+      id: "xiaomi/mimo-v2-pro",
+      name: "Mimo v2 Pro",
+      provider: "openrouter",
+    });
+    expect(
+      resolvePreferredServerChatModel("xiaomi/mimo-v2-pro", "openrouter", openrouterCatalog),
+    ).toEqual({
+      value: "openrouter/xiaomi/mimo-v2-pro",
+      source: "catalog",
+    });
+  });
+
+  it("preserves provider prefix for multi-segment openrouter model ids (catalog miss)", () => {
+    expect(resolvePreferredServerChatModel("xiaomi/mimo-v2-pro", "openrouter", [])).toEqual({
+      value: "openrouter/xiaomi/mimo-v2-pro",
+      source: "server",
+      reason: "missing",
+    });
+  });
+
+  // P2 review: prevent double-prefix when model is already fully qualified.
+  it("does not double-prefix when model already contains provider prefix", () => {
+    expect(resolvePreferredServerChatModel("openai/gpt-5-mini", "openai", [])).toEqual({
+      value: "openai/gpt-5-mini",
+      source: "server",
+      reason: "missing",
+    });
+  });
 });

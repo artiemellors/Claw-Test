@@ -114,6 +114,38 @@ export function resolvePreferredServerChatModel(
     return { value: "", source: "empty", reason: "empty" };
   }
 
+  // The server stores model refs split into separate `model` and `provider` fields.
+  // The model part may contain slashes (e.g. "xiaomi/mimo-v2-pro" from openrouter),
+  // which createChatModelOverride() would incorrectly classify as "qualified",
+  // silently dropping the provider prefix. (#53758)
+  //
+  // When provider is available, bypass the "qualified" short-circuit in
+  // resolveChatModelOverride and treat the model part as raw regardless of
+  // whether it contains slashes. This allows the catalog lookup to correct a
+  // stale server provider (the deepseek/zai case) while ensuring the server-
+  // supplied provider is always used as the authoritative fallback.
+  const trimmedProvider = typeof provider === "string" ? provider.trim() : "";
+  if (trimmedProvider) {
+    // Force "raw" treatment so we always look the model up in the catalog by id.
+    const rawOverride: ChatModelOverride = { kind: "raw", value: trimmedModel };
+    const catalogResolution = resolveChatModelOverride(rawOverride, catalog);
+    if (catalogResolution.source === "catalog") {
+      return catalogResolution;
+    }
+
+    // Catalog missed or was ambiguous — use the authoritative server-supplied pair.
+    // Guard against double-prefix: if model already starts with the provider prefix
+    // (e.g. from a legacy/qualified server row), don't prepend provider again.
+    if (trimmedModel.startsWith(`${trimmedProvider}/`)) {
+      return { value: trimmedModel, source: "server", reason: catalogResolution.reason };
+    }
+    return {
+      value: buildQualifiedChatModelValue(trimmedModel, trimmedProvider),
+      source: "server",
+      reason: catalogResolution.reason,
+    };
+  }
+
   const overrideResolution = resolveChatModelOverride(
     createChatModelOverride(trimmedModel),
     catalog,
