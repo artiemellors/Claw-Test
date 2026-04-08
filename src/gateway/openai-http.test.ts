@@ -692,6 +692,72 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
 
       {
         agentCommand.mockClear();
+        agentCommand.mockResolvedValueOnce({
+          payloads: [{ text: "usage basic" }],
+          meta: {
+            agentMeta: {
+              usage: {
+                input: 42,
+                output: 17,
+              },
+            },
+          },
+        } as never);
+        const json = await postSyncUserMessage("usage");
+        expect(json.usage).toEqual({
+          prompt_tokens: 42,
+          completion_tokens: 17,
+          total_tokens: 59,
+        });
+      }
+
+      {
+        agentCommand.mockClear();
+        agentCommand.mockResolvedValueOnce({
+          payloads: [{ text: "usage cache" }],
+          meta: {
+            agentMeta: {
+              usage: {
+                input: 10,
+                output: 5,
+                cacheRead: 20,
+                cacheWrite: 3,
+              },
+            },
+          },
+        } as never);
+        const json = await postSyncUserMessage("usage");
+        expect(json.usage).toEqual({
+          prompt_tokens: 33,
+          completion_tokens: 5,
+          total_tokens: 38,
+        });
+      }
+
+      {
+        agentCommand.mockClear();
+        agentCommand.mockResolvedValueOnce({
+          payloads: [{ text: "usage total" }],
+          meta: {
+            agentMeta: {
+              usage: {
+                input: 10,
+                output: 5,
+                total: 100,
+              },
+            },
+          },
+        } as never);
+        const json = await postSyncUserMessage("usage");
+        expect(json.usage).toEqual({
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 100,
+        });
+      }
+
+      {
+        agentCommand.mockClear();
         agentCommand.mockResolvedValueOnce({ payloads: [{ text: "" }] } as never);
         const json = await postSyncUserMessage("hi");
         const choice0 = (json.choices as Array<Record<string, unknown>>)[0] ?? {};
@@ -792,6 +858,8 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
           .filter((v): v is string => typeof v === "string")
           .join("");
         expect(allContent).toBe("hello");
+        const usageChunks = jsonChunks.filter((c) => "usage" in c);
+        expect(usageChunks).toHaveLength(0);
       }
 
       {
@@ -867,6 +935,162 @@ describe("OpenAI-compatible HTTP API (e2e)", () => {
     } finally {
       // shared server
     }
+  });
+
+  it("includes usage in final stream chunk when stream_options.include_usage=true", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce((async (opts: unknown) => {
+      const runId = (opts as { runId?: string } | undefined)?.runId ?? "";
+      emitAgentEvent({ runId, stream: "assistant", data: { delta: "he" } });
+      emitAgentEvent({ runId, stream: "assistant", data: { delta: "llo" } });
+      return {
+        payloads: [{ text: "hello" }],
+        meta: {
+          agentMeta: {
+            usage: {
+              input: 12,
+              output: 5,
+              cacheRead: 3,
+              cacheWrite: 0,
+              total: 20,
+            },
+          },
+        },
+      };
+    }) as never);
+
+    const res = await postChatCompletions(port, {
+      stream: true,
+      stream_options: { include_usage: true },
+      model: "openclaw",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(200);
+
+    const text = await res.text();
+    const data = parseSseDataLines(text);
+    expect(data[data.length - 1]).toBe("[DONE]");
+    const jsonChunks = data
+      .filter((d) => d !== "[DONE]")
+      .map((d) => JSON.parse(d) as Record<string, unknown>);
+
+    const usageChunk = jsonChunks.find((chunk) => "usage" in chunk);
+    expect(usageChunk?.usage).toEqual({
+      prompt_tokens: 15,
+      completion_tokens: 5,
+      total_tokens: 20,
+    });
+    expect(usageChunk?.choices).toEqual([]);
+  });
+
+  it("finalizes stream when lifecycle end arrives before usage is available", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce(
+      ((opts: unknown) =>
+        new Promise((resolve) => {
+          const runId = (opts as { runId?: string } | undefined)?.runId ?? "";
+          emitAgentEvent({ runId, stream: "assistant", data: { delta: "hello" } });
+          emitAgentEvent({ runId, stream: "lifecycle", data: { phase: "end" } });
+          setTimeout(() => {
+            resolve({
+              payloads: [{ text: "hello" }],
+              meta: {
+                agentMeta: {
+                  usage: { input: 7, output: 3, total: 10 },
+                },
+              },
+            });
+          }, 100);
+        })) as never,
+    );
+
+    const res = await postChatCompletions(port, {
+      stream: true,
+      stream_options: { include_usage: true },
+      model: "openclaw",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(200);
+
+    const text = await res.text();
+    const data = parseSseDataLines(text);
+    expect(data[data.length - 1]).toBe("[DONE]");
+    const jsonChunks = data
+      .filter((d) => d !== "[DONE]")
+      .map((d) => JSON.parse(d) as Record<string, unknown>);
+    const usageChunk = jsonChunks.find((chunk) => "usage" in chunk);
+    expect(usageChunk?.usage).toEqual({
+      prompt_tokens: 7,
+      completion_tokens: 3,
+      total_tokens: 10,
+    });
+  });
+
+  it("finalizes usage-enabled streams even when usage never arrives", async () => {
+    const port = enabledPort;
+    let sawAbort = false;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce(
+      ((opts: unknown) =>
+        new Promise(() => {
+          const runId = (opts as { runId?: string } | undefined)?.runId ?? "";
+          const abortSignal = (opts as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+          abortSignal?.addEventListener("abort", () => {
+            sawAbort = true;
+          });
+          emitAgentEvent({ runId, stream: "assistant", data: { delta: "hello" } });
+          emitAgentEvent({ runId, stream: "lifecycle", data: { phase: "end" } });
+        })) as never,
+    );
+
+    const res = await postChatCompletions(port, {
+      stream: true,
+      stream_options: { include_usage: true },
+      model: "openclaw",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(200);
+
+    const text = await res.text();
+    const data = parseSseDataLines(text);
+    expect(data[data.length - 1]).toBe("[DONE]");
+    const jsonChunks = data
+      .filter((d) => d !== "[DONE]")
+      .map((d) => JSON.parse(d) as Record<string, unknown>);
+    const usageChunks = jsonChunks.filter((chunk) => "usage" in chunk);
+    expect(usageChunks).toHaveLength(0);
+    expect(sawAbort).toBe(true);
+  });
+
+  it("does not block stream finalization on usage when include_usage is not requested", async () => {
+    const port = enabledPort;
+    agentCommand.mockClear();
+    agentCommand.mockImplementationOnce(
+      ((opts: unknown) =>
+        new Promise(() => {
+          const runId = (opts as { runId?: string } | undefined)?.runId ?? "";
+          emitAgentEvent({ runId, stream: "assistant", data: { delta: "hello" } });
+          emitAgentEvent({ runId, stream: "lifecycle", data: { phase: "end" } });
+        })) as never,
+    );
+
+    const res = await postChatCompletions(port, {
+      stream: true,
+      model: "openclaw",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(res.status).toBe(200);
+
+    const text = await res.text();
+    const data = parseSseDataLines(text);
+    expect(data[data.length - 1]).toBe("[DONE]");
+    const jsonChunks = data
+      .filter((d) => d !== "[DONE]")
+      .map((d) => JSON.parse(d) as Record<string, unknown>);
+    const usageChunks = jsonChunks.filter((chunk) => "usage" in chunk);
+    expect(usageChunks).toHaveLength(0);
   });
 
   it("treats shared-secret bearer callers as owner operators", async () => {

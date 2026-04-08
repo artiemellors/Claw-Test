@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ImageContent } from "../agents/command/types.js";
+import { normalizeUsage } from "../agents/usage.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
 import type { GatewayHttpChatCompletionsConfig } from "../config/types.gateway.js";
 import { emitAgentEvent, onAgentEvent } from "../infra/agent-events.js";
-import { logWarn } from "../logger.js";
+import { logInfo, logWarn } from "../logger.js";
 import { estimateBase64DecodedBytes } from "../media/base64.js";
 import {
   DEFAULT_INPUT_IMAGE_MAX_BYTES,
@@ -57,6 +58,8 @@ type OpenAiChatMessage = {
 type OpenAiChatCompletionRequest = {
   model?: unknown;
   stream?: unknown;
+  // Naming/style reference: src/agents/openai-transport-stream.ts:1262-1273
+  stream_options?: unknown;
   messages?: unknown;
   user?: unknown;
 };
@@ -65,6 +68,7 @@ const DEFAULT_OPENAI_CHAT_COMPLETIONS_BODY_BYTES = 20 * 1024 * 1024;
 const IMAGE_ONLY_USER_MESSAGE = "User sent image(s) with no text.";
 const DEFAULT_OPENAI_MAX_IMAGE_PARTS = 8;
 const DEFAULT_OPENAI_MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
+const STREAM_USAGE_FINALIZE_GRACE_MS = 1_000;
 const DEFAULT_OPENAI_IMAGE_LIMITS: InputImageLimits = {
   allowUrl: false,
   allowedMimes: new Set(DEFAULT_INPUT_IMAGE_MIMES),
@@ -160,6 +164,40 @@ function writeAssistantContentChunk(
         finish_reason: params.finishReason,
       },
     ],
+  });
+}
+
+function writeAssistantStopChunk(res: ServerResponse, params: { runId: string; model: string }) {
+  writeSse(res, {
+    id: params.runId,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model: params.model,
+    choices: [
+      {
+        index: 0,
+        delta: {},
+        finish_reason: "stop",
+      },
+    ],
+  });
+}
+
+function writeUsageChunk(
+  res: ServerResponse,
+  params: {
+    runId: string;
+    model: string;
+    usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  },
+) {
+  writeSse(res, {
+    id: params.runId,
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model: params.model,
+    choices: [],
+    usage: params.usage,
   });
 }
 
@@ -421,6 +459,147 @@ function resolveAgentResponseText(result: unknown): string {
   return content || "No response from OpenClaw.";
 }
 
+type AgentUsageMeta = {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  total?: number;
+};
+
+function shouldLogOpenAiUsageDebug(): boolean {
+  const raw = process.env.OPENCLAW_DEBUG_OPENAI_USAGE;
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function stringifyForLog(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return JSON.stringify({ error: "stringify_failed", type: typeof value });
+  }
+}
+
+function resolveRawAgentUsage(result: unknown): AgentUsageMeta | undefined {
+  return (
+    result as {
+      meta?: {
+        agentMeta?: {
+          usage?: AgentUsageMeta;
+        };
+      };
+    } | null
+  )?.meta?.agentMeta?.usage;
+}
+
+function resolveChatCompletionUsage(result: unknown): {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+} {
+  const usage = resolveRawAgentUsage(result);
+
+  const input = usage?.input ?? 0;
+  const output = usage?.output ?? 0;
+  const cacheRead = usage?.cacheRead ?? 0;
+  const cacheWrite = usage?.cacheWrite ?? 0;
+  const promptTokens = input + cacheRead + cacheWrite;
+  const completionTokens = output;
+  const totalTokens = usage?.total ?? promptTokens + completionTokens;
+
+  return {
+    prompt_tokens: Math.max(0, promptTokens),
+    completion_tokens: Math.max(0, completionTokens),
+    total_tokens: Math.max(0, totalTokens),
+  };
+}
+
+function resolveIncludeUsageForStreaming(payload: OpenAiChatCompletionRequest): boolean {
+  // Keep parsing aligned with OpenAI wire-format field names.
+  // Flow reference: src/agents/openai-transport-stream.ts:1262-1273
+  const streamOptions = payload.stream_options;
+  if (!streamOptions || typeof streamOptions !== "object" || Array.isArray(streamOptions)) {
+    return false;
+  }
+  return (streamOptions as { include_usage?: unknown }).include_usage === true;
+}
+
+function logOpenAiUsageDebug(params: {
+  runId: string;
+  model: string;
+  sessionKey: string;
+  messageChannel: string;
+  senderIsOwner: boolean;
+  stream: boolean;
+  prompt: { message: string; extraSystemPrompt?: string };
+  images: ImageContent[];
+  payloadMessages: unknown;
+  result: unknown;
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+}) {
+  if (!shouldLogOpenAiUsageDebug()) {
+    return;
+  }
+
+  const rawUsage = resolveRawAgentUsage(params.result);
+  const normalized = normalizeUsage(rawUsage);
+  const input = rawUsage?.input ?? 0;
+  const output = rawUsage?.output ?? 0;
+  const cacheRead = rawUsage?.cacheRead ?? 0;
+  const cacheWrite = rawUsage?.cacheWrite ?? 0;
+  const fallbackTotal = input + output + cacheRead + cacheWrite;
+  const payloads = (params.result as { payloads?: Array<{ text?: string }> } | null)?.payloads;
+  const meta = (params.result as { meta?: unknown } | null)?.meta;
+
+  const debugRecord = {
+    run: {
+      runId: params.runId,
+      model: params.model,
+      sessionKey: params.sessionKey,
+      messageChannel: params.messageChannel,
+      senderIsOwner: params.senderIsOwner,
+      stream: params.stream,
+    },
+    request: {
+      messageCount: Array.isArray(params.payloadMessages) ? params.payloadMessages.length : 0,
+      userPromptChars: params.prompt.message.length,
+      extraSystemPromptChars: params.prompt.extraSystemPrompt?.length ?? 0,
+      imageCount: params.images.length,
+    },
+    result: {
+      payloadCount: Array.isArray(payloads) ? payloads.length : 0,
+      payloadTextChars: Array.isArray(payloads)
+        ? payloads.reduce((sum, p) => sum + (typeof p?.text === "string" ? p.text.length : 0), 0)
+        : 0,
+      rawUsage,
+      normalizedUsage: normalized,
+      usageComputation: {
+        input,
+        output,
+        cacheRead,
+        cacheWrite,
+        fallbackTotal,
+        rawTotal: rawUsage?.total,
+      },
+      usageResponse: params.usage,
+      consistency: {
+        responseSum: params.usage.prompt_tokens + params.usage.completion_tokens,
+        responseEqualsTotal:
+          params.usage.prompt_tokens + params.usage.completion_tokens === params.usage.total_tokens,
+        rawTotalEqualsResponseTotal:
+          typeof rawUsage?.total === "number" ? rawUsage.total === params.usage.total_tokens : null,
+      },
+      meta,
+    },
+  };
+
+  logInfo(`openai-compat: usage-debug ${stringifyForLog(debugRecord)}`);
+}
+
 export async function handleOpenAiHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -451,6 +630,7 @@ export async function handleOpenAiHttpRequest(
 
   const payload = coerceRequest(handled.body);
   const stream = Boolean(payload.stream);
+  const streamIncludeUsage = stream && resolveIncludeUsageForStreaming(payload);
   const model = typeof payload.model === "string" ? payload.model : "openclaw";
   const user = typeof payload.user === "string" ? payload.user : undefined;
 
@@ -526,6 +706,20 @@ export async function handleOpenAiHttpRequest(
       }
 
       const content = resolveAgentResponseText(result);
+      const usage = resolveChatCompletionUsage(result);
+      logOpenAiUsageDebug({
+        runId,
+        model,
+        sessionKey,
+        messageChannel,
+        senderIsOwner,
+        stream: false,
+        prompt,
+        images,
+        payloadMessages: payload.messages,
+        result,
+        usage,
+      });
 
       sendJson(res, 200, {
         id: runId,
@@ -539,7 +733,7 @@ export async function handleOpenAiHttpRequest(
             finish_reason: "stop",
           },
         ],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage,
       });
     } catch (err) {
       if (abortController.signal.aborted) {
@@ -558,9 +752,68 @@ export async function handleOpenAiHttpRequest(
   setSseHeaders(res);
 
   let wroteRole = false;
+  let wroteStopChunk = false;
   let sawAssistantDelta = false;
+  let finalUsage:
+    | {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+      }
+    | undefined;
+  let finalizeRequested = false;
+  let finalizeWithoutUsage = false;
   let closed = false;
   let stopWatchingDisconnect = () => {};
+  let usageFinalizeTimer: NodeJS.Timeout | undefined;
+
+  const clearUsageFinalizeTimer = () => {
+    if (usageFinalizeTimer) {
+      clearTimeout(usageFinalizeTimer);
+      usageFinalizeTimer = undefined;
+    }
+  };
+
+  // Streaming finalize pattern intentionally mirrors OpenResponses:
+  // request finalize on lifecycle, but only close after final usage is ready.
+  // Flow reference: src/gateway/openresponses-http.ts:807-882 (finalize gate)
+  // and src/gateway/openresponses-http.ts:949-955,981,1075 (request/finalize timing).
+  const maybeFinalize = () => {
+    if (closed || !finalizeRequested) {
+      return;
+    }
+    if (streamIncludeUsage && !finalUsage && !finalizeWithoutUsage) {
+      return;
+    }
+    closed = true;
+    clearUsageFinalizeTimer();
+    stopWatchingDisconnect();
+    unsubscribe();
+    if (!wroteStopChunk) {
+      writeAssistantStopChunk(res, { runId, model });
+      wroteStopChunk = true;
+    }
+    if (streamIncludeUsage && finalUsage) {
+      writeUsageChunk(res, { runId, model, usage: finalUsage });
+    }
+    writeDone(res);
+    res.end();
+  };
+
+  const requestFinalize = () => {
+    if (!finalizeRequested) {
+      finalizeRequested = true;
+    }
+    if (streamIncludeUsage && !finalUsage && !finalizeWithoutUsage && !usageFinalizeTimer) {
+      usageFinalizeTimer = setTimeout(() => {
+        usageFinalizeTimer = undefined;
+        finalizeWithoutUsage = true;
+        abortController.abort();
+        maybeFinalize();
+      }, STREAM_USAGE_FINALIZE_GRACE_MS);
+    }
+    maybeFinalize();
+  };
 
   const unsubscribe = onAgentEvent((evt) => {
     if (evt.runId !== runId) {
@@ -594,17 +847,14 @@ export async function handleOpenAiHttpRequest(
     if (evt.stream === "lifecycle") {
       const phase = evt.data?.phase;
       if (phase === "end" || phase === "error") {
-        closed = true;
-        stopWatchingDisconnect();
-        unsubscribe();
-        writeDone(res);
-        res.end();
+        requestFinalize();
       }
     }
   });
 
   stopWatchingDisconnect = watchClientDisconnect(req, res, abortController, () => {
     closed = true;
+    clearUsageFinalizeTimer();
     unsubscribe();
   });
 
@@ -615,6 +865,22 @@ export async function handleOpenAiHttpRequest(
       if (closed) {
         return;
       }
+
+      finalUsage = resolveChatCompletionUsage(result);
+      clearUsageFinalizeTimer();
+      logOpenAiUsageDebug({
+        runId,
+        model,
+        sessionKey,
+        messageChannel,
+        senderIsOwner,
+        stream: true,
+        prompt,
+        images,
+        payloadMessages: payload.messages,
+        result,
+        usage: finalUsage,
+      });
 
       if (!sawAssistantDelta) {
         if (!wroteRole) {
@@ -632,6 +898,7 @@ export async function handleOpenAiHttpRequest(
           finishReason: null,
         });
       }
+      requestFinalize();
     } catch (err) {
       if (closed || abortController.signal.aborted) {
         return;
@@ -643,18 +910,25 @@ export async function handleOpenAiHttpRequest(
         content: "Error: internal error",
         finishReason: "stop",
       });
+      wroteStopChunk = true;
+      finalUsage = {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      };
       emitAgentEvent({
         runId,
         stream: "lifecycle",
         data: { phase: "error" },
       });
+      requestFinalize();
     } finally {
       if (!closed) {
-        closed = true;
-        stopWatchingDisconnect();
-        unsubscribe();
-        writeDone(res);
-        res.end();
+        emitAgentEvent({
+          runId,
+          stream: "lifecycle",
+          data: { phase: "end" },
+        });
       }
     }
   })();
