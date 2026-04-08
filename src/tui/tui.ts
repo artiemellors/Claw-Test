@@ -242,6 +242,7 @@ export async function runTui(opts: TuiOptions) {
   let connectionStatus = "connecting";
   let statusTimeout: NodeJS.Timeout | null = null;
   let statusTimer: NodeJS.Timeout | null = null;
+  let errorElapsed: string | null = null;
   let statusStartedAt: number | null = null;
   let lastActivityStatus = activityStatus;
 
@@ -492,6 +493,8 @@ export async function runTui(opts: TuiOptions) {
   };
 
   const busyStates = new Set(["sending", "waiting", "streaming", "running"]);
+  const STALE_BUSY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  let lastBusyEventAt: number | null = null;
   let statusText: Text | null = null;
   let statusLoader: Loader | null = null;
 
@@ -500,8 +503,12 @@ export async function runTui(opts: TuiOptions) {
     if (totalSeconds < 60) {
       return `${totalSeconds}s`;
     }
-    const minutes = Math.floor(totalSeconds / 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
     return `${minutes}m ${seconds}s`;
   };
 
@@ -558,12 +565,35 @@ export async function runTui(opts: TuiOptions) {
     statusLoader.setMessage(`${activityStatus} • ${elapsed} | ${connectionStatus}`);
   };
 
+  const checkStaleBusy = () => {
+    if (!lastBusyEventAt || !busyStates.has(activityStatus)) {
+      return false;
+    }
+    if (Date.now() - lastBusyEventAt > STALE_BUSY_TIMEOUT_MS) {
+      statusStartedAt = null;
+      lastBusyEventAt = null;
+      activityStatus = "idle";
+      state.activeChatRunId = null;
+      state.pendingOptimisticUserMessage = false;
+      stopStatusTimer();
+      stopWaitingTimer();
+      ensureStatusText();
+      statusText?.setText(theme.dim(`${connectionStatus} | idle (stale run timed out)`));
+      tui.requestRender();
+      return true;
+    }
+    return false;
+  };
+
   const startStatusTimer = () => {
     if (statusTimer) {
       return;
     }
     statusTimer = setInterval(() => {
       if (!busyStates.has(activityStatus)) {
+        return;
+      }
+      if (checkStaleBusy()) {
         return;
       }
       updateBusyStatusMessage();
@@ -595,8 +625,11 @@ export async function runTui(opts: TuiOptions) {
       if (activityStatus !== "waiting") {
         return;
       }
+      if (checkStaleBusy()) {
+        return;
+      }
       updateBusyStatusMessage();
-    }, 120);
+    }, 1000);
   };
 
   const stopWaitingTimer = () => {
@@ -610,7 +643,9 @@ export async function runTui(opts: TuiOptions) {
 
   const renderStatus = () => {
     const isBusy = busyStates.has(activityStatus);
+    const isError = activityStatus === "error" || activityStatus.startsWith("error:");
     if (isBusy) {
+      errorElapsed = null;
       if (!statusStartedAt || lastActivityStatus !== activityStatus) {
         statusStartedAt = Date.now();
       }
@@ -623,7 +658,26 @@ export async function runTui(opts: TuiOptions) {
         startStatusTimer();
       }
       updateBusyStatusMessage();
+    } else if (isError) {
+      // Keep elapsed visible across re-renders while in error state.
+      // Capture on first entry, then preserve until state transitions away.
+      stopWaitingTimer();
+      statusLoader?.stop();
+      statusLoader = null;
+      ensureStatusText();
+      if (statusStartedAt) {
+        errorElapsed = formatElapsed(statusStartedAt);
+        statusStartedAt = null;
+      }
+      const elapsed = errorElapsed ?? "";
+      const errorLabel = activityStatus;
+      const text = elapsed
+        ? `${connectionStatus} | ${errorLabel} (${elapsed})`
+        : `${connectionStatus} | ${errorLabel}`;
+      statusText?.setText(theme.dim(text));
+      stopStatusTimer();
     } else {
+      errorElapsed = null;
       statusStartedAt = null;
       stopStatusTimer();
       stopWaitingTimer();
@@ -650,8 +704,15 @@ export async function runTui(opts: TuiOptions) {
     }
   };
 
+  const touchBusyActivity = () => {
+    lastBusyEventAt = Date.now();
+  };
+
   const setActivityStatus = (text: string) => {
     activityStatus = text;
+    if (busyStates.has(text)) {
+      lastBusyEventAt = Date.now();
+    }
     renderStatus();
   };
 
@@ -736,6 +797,7 @@ export async function runTui(opts: TuiOptions) {
     tui,
     state,
     setActivityStatus,
+    touchBusyActivity,
     refreshSessionInfo,
     loadHistory,
     noteLocalRunId,
@@ -921,6 +983,9 @@ export async function runTui(opts: TuiOptions) {
 
   client.onGap = (info) => {
     setConnectionStatus(`event gap: expected ${info.expected}, got ${info.received}`, 5000);
+    // Don't force idle here — a gap only means some events were missed, not that
+    // the run finished. Long-running tool execution can have gaps without the run
+    // being done. The 5-minute stale busy timeout handles the truly stuck case.
     tui.requestRender();
   };
 
