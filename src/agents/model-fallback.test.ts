@@ -12,6 +12,7 @@ import { isAnthropicBillingError } from "./live-auth-keys.js";
 import { LiveSessionModelSwitchError } from "./live-model-switch-error.js";
 import { runWithImageModelFallback, runWithModelFallback } from "./model-fallback.js";
 import { makeModelFallbackCfg } from "./test-helpers/model-fallback-config-fixture.js";
+import { stripAnsi } from "../terminal/ansi.js";
 
 const makeCfg = makeModelFallbackCfg;
 
@@ -581,9 +582,10 @@ describe("runWithModelFallback", () => {
       });
 
       expect(result.result).toBe("ok");
-      const warning = warnSpy.mock.calls
+      const rawWarning = warnSpy.mock.calls
         .map((call) => call[0] as string)
         .find((value) => value.includes('Model "openai/gpt-6spoof" not found'));
+      const warning = stripAnsi(rawWarning ?? "");
       expect(warning).toContain('Model "openai/gpt-6spoof" not found');
       expect(warning).not.toContain("\u001B");
       expect(warning).not.toContain("\n");
