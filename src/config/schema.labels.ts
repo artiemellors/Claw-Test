@@ -329,6 +329,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.workspace": "Workspace",
   "agents.defaults.repoRoot": "Repo Root",
   "agents.defaults.contextInjection": "Context Injection",
+  "agents.defaults.bootstrapTier": "Bootstrap Tier",
   "agents.defaults.bootstrapMaxChars": "Bootstrap Max Chars",
   "agents.defaults.bootstrapTotalMaxChars": "Bootstrap Total Max Chars",
   "agents.defaults.bootstrapPromptTruncationWarning": "Bootstrap Prompt Truncation Warning",
