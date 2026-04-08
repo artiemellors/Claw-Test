@@ -815,17 +815,26 @@ async function runVideoGenerate(params: { prompt: string; model?: string; output
     modelOverride: params.model,
   });
   const outputs = await Promise.all(
-    result.videos.map(async (video, index) => ({
-      ...(await writeOutputAsset({
-        buffer: video.buffer,
-        mimeType: video.mimeType,
-        originalFilename: video.fileName,
-        outputPath: params.output,
-        outputIndex: index,
-        outputCount: result.videos.length,
-        subdir: "generated",
-      })),
-    })),
+    result.videos.map(async (video, index) => {
+      // url-only asset: provider returned a pre-signed URL instead of raw bytes
+      if (!video.buffer && video.url) {
+        return { path: video.url, mimeType: video.mimeType, size: 0 };
+      }
+      if (!video.buffer) {
+        throw new Error(`Video asset at index ${index} has neither buffer nor url`);
+      }
+      return {
+        ...(await writeOutputAsset({
+          buffer: video.buffer,
+          mimeType: video.mimeType,
+          originalFilename: video.fileName,
+          outputPath: params.output,
+          outputIndex: index,
+          outputCount: result.videos.length,
+          subdir: "generated",
+        })),
+      };
+    }),
   );
   return {
     ok: true,
