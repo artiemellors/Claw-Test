@@ -1085,6 +1085,15 @@ export async function handleFeishuMessage(params: {
       isTopicSession || configReplyInThread ? (ctx.rootId ?? ctx.messageId) : ctx.messageId;
     const threadReply = isGroup ? (groupSession?.threadReply ?? false) : false;
 
+    // Resolve replyToMode: controls whether replies are attached to the
+    // triggering message or sent as standalone messages.
+    // - "off": always send as new top-level messages (skipReplyTo = true)
+    // - "all": always reply to the triggering message
+    // - "first" / undefined: default behavior (reply in groups, skip in DMs)
+    const replyToMode = account.config?.replyToMode;
+    const skipReplyToInMessages =
+      replyToMode === "off" ? true : replyToMode === "all" ? false : !isGroup;
+
     if (broadcastAgents) {
       // Cross-account dedup: in multi-account setups, Feishu delivers the same
       // event to every bot account in the group. Only one account should handle
@@ -1142,7 +1151,7 @@ export async function handleFeishuMessage(params: {
             chatId: ctx.chatId,
             allowReasoningPreview,
             replyToMessageId: replyTargetMessageId,
-            skipReplyToInMessages: !isGroup,
+            skipReplyToInMessages,
             replyInThread,
             rootId: ctx.rootId,
             threadReply,
@@ -1251,7 +1260,7 @@ export async function handleFeishuMessage(params: {
         chatId: ctx.chatId,
         allowReasoningPreview,
         replyToMessageId: replyTargetMessageId,
-        skipReplyToInMessages: !isGroup,
+        skipReplyToInMessages,
         replyInThread,
         rootId: ctx.rootId,
         threadReply,
