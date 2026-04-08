@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { streamSimple } from "@mariozechner/pi-ai";
 import { describe, expect, it, vi } from "vitest";
+import { createOpenAICompletionsTransportStreamFn } from "../../src/agents/openai-transport-stream.js";
 import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
@@ -55,12 +56,13 @@ function createWrappedPlamoStream(
   options?: {
     extraParams?: Record<string, unknown>;
     modelId?: string;
+    streamFn?: unknown;
   },
 ) {
   const wrapped = provider.wrapStreamFn?.({
     provider: "plamo",
     modelId: options?.modelId ?? "plamo-3.0-prime-beta",
-    streamFn: streamSimple as never,
+    streamFn: (options?.streamFn ?? streamSimple) as never,
     extraParams: options?.extraParams ?? {},
   } as never);
   if (!wrapped) {
@@ -618,6 +620,158 @@ describe("plamo provider plugin", () => {
 
     const [model] = catalog.provider.models;
     const wrapped = createWrappedPlamoStream(provider);
+    const stream = await wrapped(
+      {
+        ...model,
+        provider: "plamo",
+        api: "openai-completions",
+        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      } as never,
+      {
+        systemPrompt: "system prompt",
+        messages: [{ role: "user", content: "tool test" }],
+      } as never,
+      {
+        apiKey: "test-key",
+      } as never,
+    );
+
+    const deltas: Array<{ contentIndex: number; delta: string }> = [];
+    let result: Awaited<ReturnType<typeof stream.result>> | undefined;
+    try {
+      for await (const event of stream) {
+        if (event.type === "toolcall_delta") {
+          deltas.push({ contentIndex: event.contentIndex, delta: event.delta });
+        }
+      }
+      result = await stream.result();
+    } finally {
+      server.close();
+    }
+
+    expect(deltas).toEqual([
+      { contentIndex: 0, delta: '{"path":"' },
+      { contentIndex: 1, delta: '{"path":"' },
+      { contentIndex: 1, delta: 'out.txt",' },
+      { contentIndex: 0, delta: 'README.md",' },
+      { contentIndex: 1, delta: '"content":"hi"}' },
+      { contentIndex: 0, delta: '"mode":"r"}' },
+    ]);
+    expect(result).toMatchObject({
+      stopReason: "toolUse",
+      content: [
+        {
+          type: "toolCall",
+          id: "call_read",
+          name: "read",
+          arguments: { path: "README.md", mode: "r" },
+        },
+        {
+          type: "toolCall",
+          id: "call_write",
+          name: "write",
+          arguments: { path: "out.txt", content: "hi" },
+        },
+      ],
+    });
+  });
+
+  it("keeps using the native parser when the base stream fn is the OpenAI completions transport", async () => {
+    const { provider, catalog } = await loadPlamoCatalog();
+
+    const server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-index-transport",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_read",
+                    type: "function",
+                    function: { name: "read", arguments: '{"path":"' },
+                  },
+                  {
+                    index: 1,
+                    id: "call_write",
+                    type: "function",
+                    function: { name: "write", arguments: '{"path":"' },
+                  },
+                ],
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-index-transport",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 1,
+                    type: "function",
+                    function: { arguments: 'out.txt",' },
+                  },
+                  {
+                    index: 0,
+                    type: "function",
+                    function: { arguments: 'README.md",' },
+                  },
+                ],
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: "chatcmpl-tool-index-transport",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 1,
+                    type: "function",
+                    function: { arguments: '"content":"hi"}' },
+                  },
+                  {
+                    index: 0,
+                    type: "function",
+                    function: { arguments: '"mode":"r"}' },
+                  },
+                ],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+        })}\n\n`,
+      );
+      res.end("data: [DONE]\n\n");
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("expected tcp server address");
+    }
+
+    const [model] = catalog.provider.models;
+    const wrapped = createWrappedPlamoStream(provider, {
+      streamFn: createOpenAICompletionsTransportStreamFn(),
+    });
     const stream = await wrapped(
       {
         ...model,

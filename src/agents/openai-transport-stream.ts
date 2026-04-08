@@ -39,6 +39,7 @@ import { transformTransportMessages } from "./transport-message-transform.js";
 import { mergeTransportMetadata, sanitizeTransportPayloadText } from "./transport-stream-shared.js";
 
 const DEFAULT_AZURE_OPENAI_API_VERSION = "2024-12-01-preview";
+const OPENAI_COMPLETIONS_TRANSPORT_STREAM = Symbol("openclaw.openai-completions-transport-stream");
 
 type BaseStreamOptions = {
   temperature?: number;
@@ -435,7 +436,7 @@ async function processResponsesStream(
       const item = event.item as Record<string, unknown>;
       if (item.type === "reasoning" && currentBlock?.type === "thinking") {
         const summary = Array.isArray(item.summary)
-          ? item.summary.map((part) => String((part as { text?: string }).text ?? "")).join("\n\n")
+          ? item.summary.map((part) => (part as { text?: string }).text ?? "").join("\n\n")
           : "";
         currentBlock.thinking = summary;
         currentBlock.thinkingSignature = JSON.stringify(item);
@@ -451,8 +452,8 @@ async function processResponsesStream(
         currentBlock.text = content
           .map((part) =>
             (part as { type?: string; text?: string; refusal?: string }).type === "output_text"
-              ? String((part as { text?: string }).text ?? "")
-              : String((part as { refusal?: string }).refusal ?? ""),
+              ? ((part as { text?: string }).text ?? "")
+              : ((part as { refusal?: string }).refusal ?? ""),
           )
           .join("");
         currentBlock.textSignature = encodeTextSignatureV1(
@@ -930,7 +931,7 @@ function createOpenAICompletionsClient(
 }
 
 export function createOpenAICompletionsTransportStreamFn(): StreamFn {
-  return (model, context, options) => {
+  const streamFn: StreamFn = (model, context, options) => {
     const eventStream = createAssistantMessageEventStream();
     const stream = eventStream as unknown as { push(event: unknown): void; end(): void };
     void (async () => {
@@ -982,6 +983,19 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
     })();
     return eventStream as unknown as ReturnType<StreamFn>;
   };
+  Object.defineProperty(streamFn, OPENAI_COMPLETIONS_TRANSPORT_STREAM, {
+    value: true,
+  });
+  return streamFn;
+}
+
+export function isOpenAICompletionsTransportStreamFn(streamFn: StreamFn | undefined): boolean {
+  return Boolean(
+    streamFn &&
+    (streamFn as { [OPENAI_COMPLETIONS_TRANSPORT_STREAM]?: unknown })[
+      OPENAI_COMPLETIONS_TRANSPORT_STREAM
+    ] === true,
+  );
 }
 
 async function processOpenAICompletionsStream(

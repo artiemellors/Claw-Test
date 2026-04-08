@@ -16,6 +16,9 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import { convertMessages } from "@mariozechner/pi-ai/openai-completions";
+import { isOpenAICompletionsTransportStreamFn } from "../../src/agents/openai-transport-stream.js";
+import { getModelProviderRequestTransport } from "../../src/agents/provider-request-config.js";
+import { buildGuardedModelFetch } from "../../src/agents/provider-transport-fetch.js";
 
 const PLAMO_BEGIN_TOOL_REQUEST = "<|plamo:begin_tool_request:plamo|>";
 const PLAMO_END_TOOL_REQUEST = "<|plamo:end_tool_request:plamo|>";
@@ -70,6 +73,7 @@ type OpenAIStyleToolCall = {
 
 type OpenAIStyleChunkDelta = {
   content?: unknown;
+  finish_reason?: unknown;
   reasoning?: unknown;
   reasoning_content?: unknown;
   reasoning_text?: unknown;
@@ -737,6 +741,7 @@ function createNativePlamoStream(
   model: RuntimeModel,
   context: RuntimeContext,
   options: RuntimeOptions,
+  requestFetch: typeof fetch = fetch,
 ): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream();
   const output: AssistantMessage = {
@@ -756,7 +761,7 @@ function createNativePlamoStream(
       const payload = await resolvePlamoStreamingPayload(model, context, options);
       dumpPlamoPayload("streaming", payload);
       const apiKey = resolvePlamoApiKey(model, options);
-      const response = await fetch(buildChatCompletionsUrl(model.baseUrl), {
+      const response = await requestFetch(buildChatCompletionsUrl(model.baseUrl), {
         method: "POST",
         headers: buildRequestHeaders(model, apiKey, options),
         body: JSON.stringify(payload),
@@ -863,15 +868,16 @@ function createNativePlamoStream(
         if (!chunk.usage && choice.usage) {
           output.usage = parseUsage(choice.usage, model);
         }
-        if (choice.finish_reason) {
-          const finishReasonResult = mapStopReason(choice.finish_reason);
+
+        const delta = choice.delta && typeof choice.delta === "object" ? choice.delta : null;
+        const finishReason = choice.finish_reason ?? delta?.finish_reason;
+        if (finishReason) {
+          const finishReasonResult = mapStopReason(finishReason);
           output.stopReason = finishReasonResult.stopReason;
           if (finishReasonResult.errorMessage) {
             output.errorMessage = finishReasonResult.errorMessage;
           }
         }
-
-        const delta = choice.delta && typeof choice.delta === "object" ? choice.delta : null;
         if (!delta) {
           continue;
         }
@@ -1177,14 +1183,35 @@ function wrapStreamNormalizePlamoToolMarkup(
   return stream;
 }
 
+function shouldUseNativePlamoStream(baseStreamFn: StreamFn | undefined): boolean {
+  if (!baseStreamFn || baseStreamFn === streamSimple) {
+    return true;
+  }
+  return isOpenAICompletionsTransportStreamFn(baseStreamFn);
+}
+
+function shouldUseTransportAwarePlamoFetch(
+  model: RuntimeModel,
+  baseStreamFn: StreamFn | undefined,
+): boolean {
+  if (!isOpenAICompletionsTransportStreamFn(baseStreamFn)) {
+    return false;
+  }
+  const request = getModelProviderRequestTransport(model as object);
+  return Boolean(request?.proxy || request?.tls);
+}
+
 export function createPlamoToolCallWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
     const sanitizedContext = sanitizePlamoReplayMessages(context);
 
-    if (underlying === streamSimple) {
+    if (shouldUseNativePlamoStream(baseStreamFn)) {
+      const requestFetch = shouldUseTransportAwarePlamoFetch(model, baseStreamFn)
+        ? buildGuardedModelFetch(model as never)
+        : fetch;
       return wrapStreamNormalizePlamoToolMarkup(
-        createNativePlamoStream(model, sanitizedContext, options),
+        createNativePlamoStream(model, sanitizedContext, options, requestFetch),
       );
     }
 
