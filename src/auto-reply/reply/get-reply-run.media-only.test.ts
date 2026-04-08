@@ -63,10 +63,16 @@ vi.mock("../command-detection.js", () => ({
 
 vi.mock("./agent-runner.runtime.js", () => ({
   runReplyAgent: vi.fn().mockResolvedValue({ text: "ok" }),
+  cancelContinuationTimer: vi.fn(),
+  clearDelegatePending: vi.fn(),
 }));
 
 vi.mock("./body.js", () => ({
   applySessionHints: vi.fn().mockImplementation(async ({ baseBody }) => baseBody),
+}));
+
+vi.mock("./context-pressure.js", () => ({
+  checkContextPressure: vi.fn().mockReturnValue({ fired: false, band: 0 }),
 }));
 
 vi.mock("./groups.js", () => ({

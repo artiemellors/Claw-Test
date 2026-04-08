@@ -5377,8 +5377,8 @@ packages:
     resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
     engines: {node: '>= 8'}
 
-  koffi@2.15.4:
-    resolution: {integrity: sha512-6l7xxt8heHWQ63WyGd8ofne4TrzhqeKHhvSlI3GnxMIHp3PlDrOPyZbW5YNINXNma1qrKkpM/PGLY8U0V8Hxbw==}
+  koffi@2.15.2:
+    resolution: {integrity: sha512-r9tjJLVRSOhCRWdVyQlF3/Ugzeg13jlzS4czS82MAgLff4W+BcYOW7g8Y62t9O5JYjYOLAjAovAZDNlDfZNu+g==}
 
   lie@3.3.0:
     resolution: {integrity: sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ==}
@@ -8942,7 +8942,7 @@ snapshots:
       marked: 15.0.12
       mime-types: 3.0.2
     optionalDependencies:
-      koffi: 2.15.4
+      koffi: 2.15.2
 
   '@matrix-org/matrix-sdk-crypto-nodejs@0.4.0':
     dependencies:
@@ -12095,7 +12095,7 @@ snapshots:
 
   klona@2.0.6: {}
 
-  koffi@2.15.4:
+  koffi@2.15.2:
     optional: true
 
   lie@3.3.0:

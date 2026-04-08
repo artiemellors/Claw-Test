@@ -289,7 +289,7 @@ describe("timeout-triggered compaction", () => {
     expect(mockedCompactDirect).not.toHaveBeenCalled();
   });
 
-  it("falls through to failover rotation after max timeout compaction attempts", async () => {
+  it("falls through to timeout handling after max timeout compaction attempts", async () => {
     // First attempt: timeout with high prompt usage (150k / 200k = 75%)
     mockedRunEmbeddedAttempt.mockResolvedValueOnce(
       makeAttemptResult({
@@ -339,7 +339,7 @@ describe("timeout-triggered compaction", () => {
     // Both compaction attempts used; third timeout falls through.
     expect(mockedCompactDirect).toHaveBeenCalledTimes(2);
     expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
-    // Falls through to timeout error payload (failover rotation path)
+    // Falls through to timeout error payload once compaction retries are exhausted.
     expect(result.payloads?.[0]?.isError).toBe(true);
     expect(result.payloads?.[0]?.text).toContain("timed out");
   });
@@ -411,46 +411,27 @@ describe("timeout-triggered compaction", () => {
     expect(mockedRunPostCompactionSideEffects).toHaveBeenCalledTimes(1);
   });
 
-  it("counts compacted:false timeout compactions against the retry cap across profile rotation", async () => {
+  it("does not rotate profiles after compacted:false timeout compaction failure", async () => {
     useTwoAuthProfiles();
-    // Attempt 1 (profile-a): timeout → compaction #1 fails → rotate to profile-b
-    mockedRunEmbeddedAttempt
-      .mockResolvedValueOnce(
-        makeAttemptResult({
-          timedOut: true,
-          aborted: true,
-          lastAssistant: {
-            usage: { input: 150000 },
-          } as never,
-        }),
-      )
-      // Attempt 2 (profile-b): timeout → compaction #2 fails → cap exhausted → rotation
-      .mockResolvedValueOnce(
-        makeAttemptResult({
-          timedOut: true,
-          aborted: true,
-          lastAssistant: {
-            usage: { input: 150000 },
-          } as never,
-        }),
-      );
-    mockedCompactDirect
-      .mockResolvedValueOnce({
-        ok: false,
-        compacted: false,
-        reason: "nothing to compact",
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        compacted: false,
-        reason: "nothing to compact",
-      });
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        timedOut: true,
+        aborted: true,
+        lastAssistant: {
+          usage: { input: 150000 },
+        } as never,
+      }),
+    );
+    mockedCompactDirect.mockResolvedValueOnce({
+      ok: false,
+      compacted: false,
+      reason: "nothing to compact",
+    });
 
     const result = await runEmbeddedPiAgent(overflowBaseRunParams);
 
-    expect(mockedCompactDirect).toHaveBeenCalledTimes(2);
-    expect(mockedCompactDirect).toHaveBeenNthCalledWith(
-      1,
+    expect(mockedCompactDirect).toHaveBeenCalledTimes(1);
+    expect(mockedCompactDirect).toHaveBeenCalledWith(
       expect.objectContaining({
         runtimeContext: expect.objectContaining({
           authProfileId: "profile-a",
@@ -459,59 +440,35 @@ describe("timeout-triggered compaction", () => {
         }),
       }),
     );
-    expect(mockedCompactDirect).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        runtimeContext: expect.objectContaining({
-          authProfileId: "profile-b",
-          attempt: 2,
-          maxAttempts: 2,
-        }),
-      }),
-    );
-    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
-    expect(result.payloads?.[0]?.isError).toBe(true);
-    expect(result.payloads?.[0]?.text).toContain("timed out");
-  });
-
-  it("counts thrown timeout compactions against the retry cap across profile rotation", async () => {
-    useTwoAuthProfiles();
-    // Attempt 1 (profile-a): timeout → compaction #1 throws → rotate to profile-b
-    mockedRunEmbeddedAttempt
-      .mockResolvedValueOnce(
-        makeAttemptResult({
-          timedOut: true,
-          aborted: true,
-          lastAssistant: {
-            usage: { input: 150000 },
-          } as never,
-        }),
-      )
-      // Attempt 2 (profile-b): timeout → compaction #2 throws → cap exhausted → rotation
-      .mockResolvedValueOnce(
-        makeAttemptResult({
-          timedOut: true,
-          aborted: true,
-          lastAssistant: {
-            usage: { input: 150000 },
-          } as never,
-        }),
-      );
-    mockedCompactDirect
-      .mockRejectedValueOnce(new Error("engine crashed"))
-      .mockRejectedValueOnce(new Error("engine crashed again"));
-
-    const result = await runEmbeddedPiAgent(overflowBaseRunParams);
-
-    expect(mockedCompactDirect).toHaveBeenCalledTimes(2);
-    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
     expect(mockedRunEmbeddedAttempt).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ authProfileId: "profile-a" }),
     );
+    expect(result.payloads?.[0]?.isError).toBe(true);
+    expect(result.payloads?.[0]?.text).toContain("timed out");
+  });
+
+  it("does not rotate profiles after thrown timeout compaction failure", async () => {
+    useTwoAuthProfiles();
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        timedOut: true,
+        aborted: true,
+        lastAssistant: {
+          usage: { input: 150000 },
+        } as never,
+      }),
+    );
+    mockedCompactDirect.mockRejectedValueOnce(new Error("engine crashed"));
+
+    const result = await runEmbeddedPiAgent(overflowBaseRunParams);
+
+    expect(mockedCompactDirect).toHaveBeenCalledTimes(1);
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
     expect(mockedRunEmbeddedAttempt).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ authProfileId: "profile-b" }),
+      1,
+      expect.objectContaining({ authProfileId: "profile-a" }),
     );
     expect(result.payloads?.[0]?.isError).toBe(true);
     expect(result.payloads?.[0]?.text).toContain("timed out");

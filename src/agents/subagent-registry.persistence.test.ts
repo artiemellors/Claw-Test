@@ -19,6 +19,7 @@ import {
   getSubagentRunByChildSessionKey,
   initSubagentRegistry,
   listSubagentRunsForRequester,
+  registerSubagentRun,
   resetSubagentRegistryForTests,
 } from "./subagent-registry.js";
 import {
@@ -232,6 +233,110 @@ describe("subagent registry persistence", () => {
       endedAt,
       outcome: { status: "ok" },
     } as never);
+
+    const store = await readSessionStore(storePath);
+    const persisted = store["agent:main:subagent:timing"];
+    expect(persisted?.endedAt).toBe(endedAt);
+    expect(persisted?.runtimeMs).toBe(500);
+    expect(persisted?.status).toBe("done");
+    expect(persisted?.startedAt).toBeGreaterThanOrEqual(startedAt);
+    expect(persisted?.startedAt).toBeLessThanOrEqual(endedAt);
+  });
+
+  it("persists silent announce metadata and replays it after restart", async () => {
+    tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-subagent-"));
+    process.env.OPENCLAW_STATE_DIR = tempStateDir;
+
+    const { callGateway } = await import("../gateway/call.js");
+    let releaseInitialWait:
+      | ((value: { status: "ok"; startedAt: number; endedAt: number }) => void)
+      | undefined;
+    vi.mocked(callGateway)
+      .mockImplementationOnce(
+        async () =>
+          await new Promise((resolve) => {
+            releaseInitialWait = resolve as typeof releaseInitialWait;
+          }),
+      )
+      .mockResolvedValueOnce({
+        status: "ok",
+        startedAt: 111,
+        endedAt: 222,
+      });
+
+    registerSubagentRun({
+      runId: "run-silent",
+      childSessionKey: "agent:main:subagent:silent-test",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "quiet enrichment",
+      cleanup: "keep",
+      silentAnnounce: true,
+      wakeOnReturn: true,
+    });
+    await writeChildSessionEntry({
+      sessionKey: "agent:main:subagent:silent-test",
+      sessionId: "sess-silent",
+    });
+
+    const registryPath = path.join(tempStateDir, "subagents", "runs.json");
+    const run = await readPersistedRun<{
+      silentAnnounce?: boolean;
+      wakeOnReturn?: boolean;
+    }>(registryPath, "run-silent");
+    expect(run).toMatchObject({
+      silentAnnounce: true,
+      wakeOnReturn: true,
+    });
+
+    resetSubagentRegistryForTests({ persist: false });
+    initSubagentRegistry();
+    releaseInitialWait?.({
+      status: "ok",
+      startedAt: 111,
+      endedAt: 222,
+    });
+
+    await flushQueuedRegistryWork();
+
+    expect(announceSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        childRunId: "run-silent",
+        silentAnnounce: true,
+        wakeOnReturn: true,
+      }),
+    );
+  });
+
+  it("persists completed subagent timing into the child session entry", async () => {
+    tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-subagent-"));
+    process.env.OPENCLAW_STATE_DIR = tempStateDir;
+
+    const { callGateway } = await import("../gateway/call.js");
+    const now = Date.now();
+    const startedAt = now;
+    const endedAt = now + 500;
+    vi.mocked(callGateway).mockResolvedValueOnce({
+      status: "ok",
+      startedAt,
+      endedAt,
+    });
+
+    const storePath = await writeChildSessionEntry({
+      sessionKey: "agent:main:subagent:timing",
+      sessionId: "sess-timing",
+      updatedAt: startedAt - 1,
+    });
+    registerSubagentRun({
+      runId: "run-session-timing",
+      childSessionKey: "agent:main:subagent:timing",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "persist timing",
+      cleanup: "keep",
+    });
+
+    await flushQueuedRegistryWork();
 
     const store = await readSessionStore(storePath);
     const persisted = store["agent:main:subagent:timing"];
