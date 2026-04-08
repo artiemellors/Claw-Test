@@ -198,6 +198,7 @@ export const MessagesSchema = z
       .strict()
       .optional(),
     suppressToolErrors: z.boolean().optional(),
+    suppressApiErrors: z.boolean().optional(),
     tts: TtsConfigSchema,
   })
   .strict()
