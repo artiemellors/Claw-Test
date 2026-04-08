@@ -8,7 +8,7 @@ import {
 import { resolveWorkspaceRoot } from "../agents/workspace-dir.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { FsRoot } from "../config/types.tools.js";
-import { readLocalFileSafely, readPathWithinRoot } from "../infra/fs-safe.js";
+import { readLocalFileSafely, readPathWithinRoot, SafeOpenError } from "../infra/fs-safe.js";
 import type { OutboundMediaAccess, OutboundMediaReadFile } from "./load-options.js";
 import { getAgentScopedMediaLocalRootsForSources } from "./local-roots.js";
 
@@ -81,8 +81,13 @@ function createRootScopedReadFile(roots: FsRoot[], workspaceDir?: string): Outbo
       try {
         const result = await readPathWithinRoot({ rootDir: rootPath, filePath: resolvedPath });
         return result.buffer;
-      } catch {
-        continue; // not inside this root — try next
+      } catch (err) {
+        // Only continue to next root if the path is outside this root.
+        // Preserve real in-root errors (permission, not-found, alias escape).
+        if (err instanceof SafeOpenError && err.code === "outside-workspace") {
+          continue;
+        }
+        throw err;
       }
     }
     throw new Error(
