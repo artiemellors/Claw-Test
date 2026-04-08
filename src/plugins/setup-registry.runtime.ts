@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import { normalizeProviderId } from "../agents/provider-id.js";
-import { loadPluginManifestRegistry } from "./manifest-registry.js";
+import { listBundledPluginMetadata } from "./bundled-plugin-metadata.js";
 
 type SetupRegistryRuntimeModule = Pick<
   typeof import("./setup-registry.js"),
@@ -18,25 +18,16 @@ const require = createRequire(import.meta.url);
 const SETUP_REGISTRY_RUNTIME_CANDIDATES = ["./setup-registry.js", "./setup-registry.ts"] as const;
 
 let setupRegistryRuntimeModule: SetupRegistryRuntimeModule | undefined;
-let bundledSetupCliBackendsCache: SetupCliBackendRuntimeEntry[] | undefined;
 
-function resolveBundledSetupCliBackends(): SetupCliBackendRuntimeEntry[] {
-  if (bundledSetupCliBackendsCache) {
-    return bundledSetupCliBackendsCache;
-  }
-  bundledSetupCliBackendsCache = loadPluginManifestRegistry({ cache: true })
-    .plugins.filter((plugin) => plugin.origin === "bundled" && plugin.cliBackends.length > 0)
-    .flatMap((plugin) =>
-      plugin.cliBackends.map(
-        (backendId) =>
-          ({
-            pluginId: plugin.id,
-            backend: { id: backendId },
-          }) satisfies SetupCliBackendRuntimeEntry,
-      ),
-    );
-  return bundledSetupCliBackendsCache;
-}
+const BUNDLED_SETUP_CLI_BACKENDS = listBundledPluginMetadata().flatMap((entry) =>
+  (entry.manifest.cliBackends ?? []).map(
+    (backendId) =>
+      ({
+        pluginId: entry.manifest.id,
+        backend: { id: backendId },
+      }) satisfies SetupCliBackendRuntimeEntry,
+  ),
+);
 
 function loadSetupRegistryRuntime(): SetupRegistryRuntimeModule | null {
   if (setupRegistryRuntimeModule) {
@@ -59,7 +50,7 @@ export function resolvePluginSetupCliBackendRuntime(params: { backend: string })
     return runtime.resolvePluginSetupCliBackend(params);
   }
   const normalized = normalizeProviderId(params.backend);
-  return resolveBundledSetupCliBackends().find(
+  return BUNDLED_SETUP_CLI_BACKENDS.find(
     (entry) => normalizeProviderId(entry.backend.id) === normalized,
   );
 }
