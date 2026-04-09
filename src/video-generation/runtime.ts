@@ -243,7 +243,10 @@ export async function generateVideo(
       if (
         !supportedDurations &&
         typeof maxDuration === "number" &&
-        requestedDuration > maxDuration
+        // Compare the normalized (rounded) duration, not the raw float, since
+        // resolveVideoGenerationOverrides applies Math.round before sending to the provider.
+        // A request for 4.4s against maxDurationSeconds=4 rounds to 4 and is valid.
+        Math.round(requestedDuration) > maxDuration
       ) {
         const error = `${candidate.provider}/${candidate.model} supports at most ${maxDuration}s per video, ${requestedDuration}s requested; skipping`;
         attempts.push({ provider: candidate.provider, model: candidate.model, error });
