@@ -19,6 +19,7 @@ Docs: https://docs.openclaw.ai
 - Daemon/gateway install: preserve safe custom service env vars on forced reinstall, merge prior custom PATH segments behind the managed service PATH, and stop removed managed env keys from persisting as custom carryover. (#63136) Thanks @WarrenJones.
 - Config validation: surface the actual offending field for strict-schema union failures in bindings, including top-level unexpected keys on the matching ACP branch. (#40841) Thanks @Hollychou924.
 - QQBot/security: replace raw `fetch()` in the image-size probe with SSRF-guarded `fetchRemoteMedia`, fix `resolveRepoRoot()` to walk up to `.git` instead of hardcoding two parent levels, and refresh the raw-fetch allowlist to match the corrected scan. (#63495) Thanks @dims.
+- Sessions/model selection: preserve catalog-backed session model labels and keep already-qualified session model refs stable when catalog metadata is unavailable, so Control UI model selection survives reloads without bogus provider-prefixed values. (#61382) Thanks @Mule-ME.
 
 ## 2026.4.9
 
