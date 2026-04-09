@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
   parseInlineDirectives,
+  splitTrailingDirective,
   stripInlineDirectiveTagsForDelivery,
   stripInlineDirectiveTagsForDisplay,
   stripInlineDirectiveTagsFromMessageForDisplay,
+  stripTrailingDirective,
 } from "./directive-tags.js";
 
 describe("stripInlineDirectiveTagsForDisplay", () => {
@@ -237,5 +239,101 @@ describe("stripInlineDirectiveTagsFromMessageForDisplay", () => {
     };
     const result = stripInlineDirectiveTagsFromMessageForDisplay(input);
     expect(result).toEqual(input);
+  });
+});
+
+describe("splitTrailingDirective", () => {
+  test("returns text unchanged when no [[ is present", () => {
+    const result = splitTrailingDirective("hello world");
+    expect(result).toEqual({ text: "hello world", tail: "" });
+  });
+
+  test("returns text unchanged when [[ is fully closed with ]]", () => {
+    const result = splitTrailingDirective("hello [[reply_to_current]] world");
+    expect(result).toEqual({ text: "hello [[reply_to_current]] world", tail: "" });
+  });
+
+  test("splits unclosed [[ at the end of text", () => {
+    const result = splitTrailingDirective("hello [[reply_to");
+    expect(result).toEqual({ text: "hello ", tail: "[[reply_to" });
+  });
+
+  test("splits unclosed [[ with no content after it", () => {
+    const result = splitTrailingDirective("hello [[");
+    expect(result).toEqual({ text: "hello ", tail: "[[" });
+  });
+
+  test("ignores [[ inside a fenced code block", () => {
+    const input = "text\n```\n[[some_code\n```";
+    const result = splitTrailingDirective(input);
+    expect(result).toEqual({ text: input, tail: "" });
+  });
+
+  test("splits unclosed [[ outside fence even when [[ exists inside fence", () => {
+    const input = "text\n```\n[[inside_fence]]\n```\nafter [[unclosed";
+    const result = splitTrailingDirective(input);
+    expect(result).toEqual({
+      text: "text\n```\n[[inside_fence]]\n```\nafter ",
+      tail: "[[unclosed",
+    });
+  });
+
+  test("handles empty string", () => {
+    const result = splitTrailingDirective("");
+    expect(result).toEqual({ text: "", tail: "" });
+  });
+
+  test("handles text with only [[", () => {
+    const result = splitTrailingDirective("[[");
+    expect(result).toEqual({ text: "", tail: "[[" });
+  });
+
+  test("does not split when multiple directives are all closed", () => {
+    const input = "[[reply_to_current]] hello [[audio_as_voice]]";
+    const result = splitTrailingDirective(input);
+    expect(result).toEqual({ text: input, tail: "" });
+  });
+
+  test("treats ]] inside a fenced code block as unclosed and splits", () => {
+    const input = "hello [[pending\n```\nsome ]] code\n```";
+    const result = splitTrailingDirective(input);
+    expect(result).toEqual({
+      text: "hello ",
+      tail: "[[pending\n```\nsome ]] code\n```",
+    });
+  });
+
+  test("finds closing ]] after a fenced block that also contains ]]", () => {
+    const input = "hello [[pending\n```\nsome ]] code\n```\nrest]]";
+    const result = splitTrailingDirective(input);
+    expect(result).toEqual({ text: input, tail: "" });
+  });
+});
+
+describe("stripTrailingDirective", () => {
+  test("strips unclosed [[ from the end", () => {
+    expect(stripTrailingDirective("hello [[reply_to")).toBe("hello ");
+  });
+
+  test("strips a lone trailing [", () => {
+    expect(stripTrailingDirective("hello [")).toBe("hello ");
+  });
+
+  test("returns text unchanged when fully closed", () => {
+    expect(stripTrailingDirective("hello [[reply_to_current]] world")).toBe(
+      "hello [[reply_to_current]] world",
+    );
+  });
+
+  test("returns text unchanged when no directive markers present", () => {
+    expect(stripTrailingDirective("hello world")).toBe("hello world");
+  });
+
+  test("strips lone [ after a closed directive", () => {
+    expect(stripTrailingDirective("hello [[done]] next [")).toBe("hello [[done]] next ");
+  });
+
+  test("handles empty string", () => {
+    expect(stripTrailingDirective("")).toBe("");
   });
 });
