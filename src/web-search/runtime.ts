@@ -4,8 +4,10 @@ import type {
   PluginWebSearchProviderEntry,
   WebSearchProviderToolDefinition,
 } from "../plugins/types.js";
-import { resolvePluginWebSearchProviders } from "../plugins/web-search-providers.runtime.js";
-import { resolveRuntimeWebSearchProviders } from "../plugins/web-search-providers.runtime.js";
+import {
+  resolvePluginWebSearchProviders,
+  resolveRuntimeWebSearchProviders,
+} from "../plugins/web-search-providers.runtime.js";
 import { sortWebSearchProvidersForAutoDetect } from "../plugins/web-search-providers.shared.js";
 import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime-web-tools-state.js";
 import type { RuntimeWebSearchMetadata } from "../secrets/runtime-web-tools.types.js";
@@ -301,24 +303,72 @@ export async function runWebSearch(
 ): Promise<{ provider: string; result: Record<string, unknown> }> {
   const search = resolveSearchConfig(params.config);
   const runtimeWebSearch = params.runtimeWebSearch ?? getActiveRuntimeWebToolsMetadata()?.search;
+  const configuredFallbacks: string[] =
+    search && "fallbacks" in search && Array.isArray(search.fallbacks)
+      ? search.fallbacks.filter((id): id is string => typeof id === "string")
+      : [];
+  const preferRuntimeProviders = params.preferRuntimeProviders ?? true;
+  let lastError: unknown;
+
+  // Get candidates first so we can call hasExplicitWebSearchSelection with populated providers
   const candidates = resolveWebSearchCandidates({
     ...params,
     runtimeWebSearch,
-    preferRuntimeProviders: params.preferRuntimeProviders ?? true,
+    preferRuntimeProviders: preferRuntimeProviders,
   });
   if (candidates.length === 0) {
     throw new Error("web_search is disabled or no provider is available.");
   }
-  const allowFallback = !hasExplicitWebSearchSelection({
+  const hasExplicitProvider = hasExplicitWebSearchSelection({
     search,
     runtimeWebSearch,
     providerId: params.providerId,
     providers: candidates,
   });
-  let lastError: unknown;
+
+  // Caller-provided providerId always fails fast, ignores config fallbacks
+  const providerIdExplicitlyProvided = Boolean(params.providerId?.trim());
+
+  // Resolve the explicit primary provider from config (not runtime ordering) for fallback mode
+  const configuredPrimaryProviderId =
+    search && "provider" in search && typeof search.provider === "string"
+      ? normalizeLowercaseStringOrEmpty(search.provider)
+      : candidates[0]?.id ?? "";
+  const configuredPrimaryProvider = candidates.find(
+    (p) => p.id === configuredPrimaryProviderId,
+  );
+
+  // When explicit + fallbacks: primary provider first, then fallbacks (deduped); otherwise use candidates
+  // Only enter fallback path if the configured primary actually exists in candidates
+  const canUseExplicitFallbacks =
+    hasExplicitProvider &&
+    configuredFallbacks.length > 0 &&
+    !providerIdExplicitlyProvided &&
+    configuredPrimaryProvider != null;
+  const effectiveCandidates = canUseExplicitFallbacks
+    ? [
+        configuredPrimaryProvider,
+        ...configuredFallbacks
+          .map((id) => candidates.find((p) => p.id === normalizeLowercaseStringOrEmpty(id)))
+          .filter(
+            (p): p is PluginWebSearchProviderEntry =>
+              p != null && p.id !== configuredPrimaryProviderId,
+          )
+          .reduce<PluginWebSearchProviderEntry[]>((deduped, p) => {
+            if (p && !deduped.some((d) => d.id === p.id)) {
+              deduped.push(p);
+            }
+            return deduped;
+          }, []),
+      ].filter((p): p is PluginWebSearchProviderEntry => p != null)
+    : candidates;
+
+  // Enable fallback only when at least one fallback resolves to a usable provider
+  const allowFallback =
+    !hasExplicitProvider || (canUseExplicitFallbacks && effectiveCandidates.length > 1);
   let sawUnavailableProvider = false;
 
-  for (const candidate of candidates) {
+  for (const candidate of effectiveCandidates) {
     try {
       const definition = candidate.createTool({
         config: params.config,
