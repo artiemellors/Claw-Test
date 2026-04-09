@@ -9,6 +9,7 @@ import type {
   PluginHookBeforePromptBuildResult,
 } from "../../../plugins/types.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../../../routing/session-key.js";
+import type { PromptBuildScopeEnvelope } from "../../../shared/prompt-build-scope-envelope.js";
 import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { buildActiveMusicGenerationTaskPromptContextForSession } from "../../music-generation-task-status.js";
@@ -23,7 +24,7 @@ import type { EmbeddedRunAttemptParams } from "./types.js";
 export type PromptBuildHookRunner = {
   hasHooks: (hookName: "before_prompt_build" | "before_agent_start") => boolean;
   runBeforePromptBuild: (
-    event: { prompt: string; messages: unknown[] },
+    event: { prompt: string; messages: unknown[]; scopeEnvelope?: PromptBuildScopeEnvelope },
     ctx: PluginHookAgentContext,
   ) => Promise<PluginHookBeforePromptBuildResult | undefined>;
   runBeforeAgentStart: (
@@ -35,6 +36,7 @@ export type PromptBuildHookRunner = {
 export async function resolvePromptBuildHookResult(params: {
   prompt: string;
   messages: unknown[];
+  scopeEnvelope?: PromptBuildScopeEnvelope;
   hookCtx: PluginHookAgentContext;
   hookRunner?: PromptBuildHookRunner | null;
   legacyBeforeAgentStartResult?: PluginHookBeforeAgentStartResult;
@@ -45,6 +47,7 @@ export async function resolvePromptBuildHookResult(params: {
           {
             prompt: params.prompt,
             messages: params.messages,
+            scopeEnvelope: params.scopeEnvelope,
           },
           params.hookCtx,
         )

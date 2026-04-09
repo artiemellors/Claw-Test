@@ -1649,6 +1649,7 @@ export async function runEmbeddedAttempt(
         const hookResult = await resolvePromptBuildHookResult({
           prompt: params.prompt,
           messages: activeSession.messages,
+          scopeEnvelope: params.sessionEntry?.scopeEnvelope,
           hookCtx,
           hookRunner,
           legacyBeforeAgentStartResult: params.legacyBeforeAgentStartResult,

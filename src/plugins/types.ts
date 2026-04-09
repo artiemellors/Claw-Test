@@ -60,6 +60,7 @@ import type {
   RuntimeWebSearchMetadata,
 } from "../secrets/runtime-web-tools.types.js";
 import type { SecurityAuditFinding } from "../security/audit.js";
+import type { PromptBuildScopeEnvelope } from "../shared/prompt-build-scope-envelope.js";
 import type {
   SpeechDirectiveTokenParseContext,
   SpeechDirectiveTokenParseResult,
@@ -2417,6 +2418,8 @@ export type PluginHookBeforePromptBuildEvent = {
   prompt: string;
   /** Session messages prepared for this run. */
   messages: unknown[];
+  /** Optional structured scope/task envelope prepared upstream for prompt-build-time consumers. */
+  scopeEnvelope?: PromptBuildScopeEnvelope;
 };
 
 export type PluginHookBeforePromptBuildResult = {

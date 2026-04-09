@@ -1,6 +1,29 @@
 import { Type } from "@sinclair/typebox";
 import { NonEmptyString, SessionLabelString } from "./primitives.js";
 
+export const PromptBuildScopeEnvelopeSchema = Type.Object(
+  {
+    workspaceKind: Type.Union([
+      Type.Literal("personal_workspace"),
+      Type.Literal("topic_workspace"),
+      Type.Literal("multi_user_shared_space"),
+    ]),
+    scopeOwner: Type.Union([
+      Type.Literal("session"),
+      Type.Literal("channel"),
+      Type.Literal("thread"),
+      Type.Literal("topic_kb"),
+      Type.Literal("active_task"),
+    ]),
+    topicKey: Type.Optional(NonEmptyString),
+    topicAliases: Type.Optional(Type.Array(NonEmptyString)),
+    taskId: Type.Optional(NonEmptyString),
+    statePath: Type.Optional(NonEmptyString),
+    statusDocPath: Type.Optional(NonEmptyString),
+  },
+  { additionalProperties: false },
+);
+
 export const SessionCompactionCheckpointReasonSchema = Type.Union([
   Type.Literal("manual"),
   Type.Literal("auto-threshold"),
@@ -167,6 +190,7 @@ export const SessionsPatchParamsSchema = Type.Object(
     groupActivation: Type.Optional(
       Type.Union([Type.Literal("mention"), Type.Literal("always"), Type.Null()]),
     ),
+    scopeEnvelope: Type.Optional(Type.Union([PromptBuildScopeEnvelopeSchema, Type.Null()])),
   },
   { additionalProperties: false },
 );

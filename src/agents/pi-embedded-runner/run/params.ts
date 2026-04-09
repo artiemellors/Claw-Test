@@ -3,6 +3,7 @@ import type { ReplyOperation } from "../../../auto-reply/reply/reply-run-registr
 import type { ReasoningLevel, ThinkLevel, VerboseLevel } from "../../../auto-reply/thinking.js";
 import type { ReplyPayload } from "../../../auto-reply/types.js";
 import type { OpenClawConfig } from "../../../config/config.js";
+import type { SessionEntry } from "../../../config/sessions/types.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { enqueueCommand } from "../../../process/command-queue.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
@@ -30,6 +31,7 @@ export type EmbeddedRunTrigger = "cron" | "heartbeat" | "manual" | "memory" | "o
 export type RunEmbeddedPiAgentParams = {
   sessionId: string;
   sessionKey?: string;
+  sessionEntry?: SessionEntry;
   agentId?: string;
   messageChannel?: string;
   messageProvider?: string;
