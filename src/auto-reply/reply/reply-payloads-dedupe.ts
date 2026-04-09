@@ -116,7 +116,7 @@ function targetsMatchForSuppression(params: {
   return params.targetKey === params.originTarget;
 }
 
-export function shouldSuppressMessagingToolReplies(params: {
+export function hasSentToSameOriginTarget(params: {
   messageProvider?: string;
   messagingToolSentTargets?: MessagingToolSend[];
   originatingTo?: string;
@@ -158,4 +158,17 @@ export function shouldSuppressMessagingToolReplies(params: {
       targetThreadId: target.threadId,
     });
   });
+}
+
+export function shouldSuppressMessagingToolReplies(params: {
+  messageProvider?: string;
+  messagingToolSentTargets?: MessagingToolSend[];
+  originatingTo?: string;
+  accountId?: string;
+}): boolean {
+  if (!hasSentToSameOriginTarget(params)) {
+    return false;
+  }
+  const sentTargets = params.messagingToolSentTargets ?? [];
+  return sentTargets.some((target) => target.sentText);
 }

@@ -641,9 +641,14 @@ export function handleToolExecutionStart(
         if (sendTarget) {
           ctx.state.pendingMessagingTargets.set(toolCallId, sendTarget);
         }
-        // Field names vary by tool: Discord/Slack use "content", sessions_send uses "message"
-        const text = (argsRecord.content as string) ?? (argsRecord.message as string);
-        if (text && typeof text === "string") {
+        // Field names vary by tool: Discord/Slack use "content", sessions_send uses "message",
+        // Telegram also accepts "caption" for media sends with text.
+        const rawText =
+          (argsRecord.content as string) ??
+          (argsRecord.message as string) ??
+          (argsRecord.caption as string);
+        const text = typeof rawText === "string" ? rawText.trim() : "";
+        if (text) {
           ctx.state.pendingMessagingTexts.set(toolCallId, text);
           ctx.log.debug(`Tracking pending messaging text: tool=${toolName} len=${text.length}`);
         }
@@ -808,7 +813,10 @@ export async function handleToolExecutionEnd(
   if (pendingTarget) {
     ctx.state.pendingMessagingTargets.delete(toolCallId);
     if (!isToolError) {
-      ctx.state.messagingToolSentTargets.push(pendingTarget);
+      ctx.state.messagingToolSentTargets.push({
+        ...pendingTarget,
+        sentText: Boolean(pendingText),
+      });
       ctx.trimMessagingToolSent();
     }
   }
