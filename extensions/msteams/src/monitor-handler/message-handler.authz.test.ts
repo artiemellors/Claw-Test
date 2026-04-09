@@ -5,7 +5,7 @@ import type { MSTeamsMessageHandlerDeps } from "../monitor-handler.js";
 import { setMSTeamsRuntime } from "../runtime.js";
 import { createMSTeamsMessageHandler } from "./message-handler.js";
 
-type HandlerInput = Parameters<ReturnType<typeof createMSTeamsMessageHandler>>[0];
+type HandlerInput = Parameters<ReturnType<typeof createMSTeamsMessageHandler>["handleTeamsMessage"]>[0];
 type TestThreadUser = {
   id?: string;
   displayName: string;
@@ -85,10 +85,18 @@ describe("msteams monitor handler authz", () => {
           resolveInboundDebounceMs: () => 0,
           createInboundDebouncer: <T>(params: {
             onFlush: (entries: T[]) => Promise<void>;
-          }): { enqueue: (entry: T) => Promise<void> } => ({
+          }): {
+            enqueue: (entry: T) => Promise<void>;
+            flushKey: (_key: string) => Promise<boolean>;
+            flushAll: () => Promise<number>;
+            unregister: () => void;
+          } => ({
             enqueue: async (entry: T) => {
               await params.onFlush([entry]);
             },
+            flushKey: async (_key: string) => false,
+            flushAll: async () => 0,
+            unregister: () => {},
           }),
         },
         pairing: {
@@ -310,8 +318,8 @@ describe("msteams monitor handler authz", () => {
   async function dispatchQuoteContextWithParent(parent: GraphThreadMessage) {
     mockThreadContext({ parent });
     const { deps } = createDeps(createThreadAllowlistConfig({ groupAllowFrom: ["alice-aad"] }));
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(createChannelThreadActivity({ attachments: [createQuoteAttachment()] }));
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(createChannelThreadActivity({ attachments: [createQuoteAttachment()] }));
     return runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mock.calls[0]?.[0]
       ?.ctxPayload;
   }
@@ -328,8 +336,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(createAttackerGroupActivity({ text: "" }));
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(createAttackerGroupActivity({ text: "" }));
 
     expect(readAllowFromStore).toHaveBeenCalledWith({
       channel: "msteams",
@@ -357,8 +365,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(
       createAttackerGroupActivity({
         channelData: {
           team: { id: "team123", name: "Team 123" },
@@ -380,8 +388,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler({
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage({
       activity: {
         id: "msg-pairing",
         type: "message",
@@ -413,7 +421,7 @@ describe("msteams monitor handler authz", () => {
         attachments: [],
       },
       sendActivity: vi.fn(async () => undefined),
-    } as unknown as Parameters<typeof handler>[0]);
+    } as unknown as Parameters<typeof handleTeamsMessage>[0]);
 
     expect(upsertPairingRequest).toHaveBeenCalledWith({
       channel: "msteams",
@@ -460,8 +468,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(createAttackerPersonalActivity("msg-drop-dm"));
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(createAttackerPersonalActivity("msg-drop-dm"));
 
     expect(deps.log.info).toHaveBeenCalledWith(
       "dropping dm (not allowlisted)",
@@ -485,8 +493,8 @@ describe("msteams monitor handler authz", () => {
       },
     } as OpenClawConfig);
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(createAttackerGroupActivity());
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(createAttackerGroupActivity());
 
     expect(deps.log.info).toHaveBeenCalledWith(
       "dropping group message (groupPolicy: allowlist, no allowlist)",
@@ -519,8 +527,8 @@ describe("msteams monitor handler authz", () => {
 
     const { deps } = createDeps(createThreadAllowlistConfig({ groupAllowFrom: ["alice-aad"] }));
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(createChannelThreadActivity());
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(createChannelThreadActivity());
 
     const dispatched =
       runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mock.calls[0]?.[0];
@@ -560,8 +568,8 @@ describe("msteams monitor handler authz", () => {
       }),
     );
 
-    const handler = createMSTeamsMessageHandler(deps);
-    await handler(createChannelThreadActivity());
+    const { handleTeamsMessage } = createMSTeamsMessageHandler(deps);
+    await handleTeamsMessage(createChannelThreadActivity());
 
     const dispatched =
       runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher.mock.calls[0]?.[0];
