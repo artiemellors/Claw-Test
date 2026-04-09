@@ -8,6 +8,8 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Gateway/startup: start channels and plugin sidecars before attaching WebSocket RPC handlers so slow synchronous `chat.history` work can no longer block channel startup (reported in #63450), and enforce the pre-auth WebSocket upgrade budget before the no-handler 503 path so upgrade floods cannot bypass connection limits during that window. (#63480) Thanks @neeravmakwana.
+
 ## 2026.4.9-beta.1
 
 ### Changes
