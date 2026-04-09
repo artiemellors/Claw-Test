@@ -392,11 +392,12 @@ export class MetricsCollector {
       this.cleanupOldEvents();
     }, 60 * 60 * 1000); // Clean every hour
   }
-
-  private cleanupOldEvents(): void {
-    const cutoff = Date.now() - this.retentionMs;
-    const beforeCount = this.events.length;
-    this.events = this.events.filter(event => event.timestamp >= cutoff);
+  private startCleanupTimer(): void {
+    const handle = setInterval(() => {
+      this.cleanupOldEvents();
+    }, 60 * 60 * 1000); // Clean every hour
+    handle.unref(); // Don't prevent process exit
+  }
     
     if (this.events.length < beforeCount) {
       this.log.info(`Cleaned up ${beforeCount - this.events.length} old metric events`);
