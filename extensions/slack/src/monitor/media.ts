@@ -4,6 +4,7 @@ import type { FetchLike } from "openclaw/plugin-sdk/media-runtime";
 import { fetchRemoteMedia } from "openclaw/plugin-sdk/media-runtime";
 import { saveMediaBuffer } from "openclaw/plugin-sdk/media-runtime";
 import { resolveRequestUrl } from "openclaw/plugin-sdk/request-url";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import type { SlackAttachment, SlackFile } from "../types.js";
 
 function isSlackHostname(hostname: string): boolean {
@@ -80,11 +81,16 @@ function createSlackMediaFetch(token: string): FetchLike {
     if (!url) {
       throw new Error("Unsupported fetch input: expected string, URL, or Request");
     }
-    const request = createSlackMediaRequest(url, token, init, { requireSlackHost });
+    const isFirstRequest = requireSlackHost;
     requireSlackHost = false;
+    const request = createSlackMediaRequest(url, token, init, {
+      requireSlackHost: isFirstRequest,
+    });
     return fetch(request.url, request.init);
   };
 }
+
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
 /**
  * Fetches a URL with Authorization header, handling cross-origin redirects.
@@ -93,40 +99,24 @@ function createSlackMediaFetch(token: string): FetchLike {
  * while continuing to drop the header for non-Slack redirects.
  */
 export async function fetchWithSlackAuth(url: string, token: string): Promise<Response> {
-  let currentUrl = url;
-  let requireSlackHost = true;
-  let redirectCount = 0;
-  const visited = new Set<string>();
-
-  while (true) {
-    const request = createSlackMediaRequest(currentUrl, token, undefined, { requireSlackHost });
-    requireSlackHost = false;
-
-    const response = await fetch(request.url, request.init);
-    if (response.status < 300 || response.status >= 400) {
-      return response;
-    }
-
-    const redirectUrl = response.headers.get("location");
-    if (!redirectUrl) {
-      return response;
-    }
-
-    const resolvedUrl = new URL(redirectUrl, request.url);
-    if (resolvedUrl.protocol !== "https:") {
-      return response;
-    }
-
-    const nextUrl = resolvedUrl.toString();
-    if (visited.has(nextUrl)) {
-      throw new Error("Redirect loop detected while fetching Slack media");
-    }
-    visited.add(nextUrl);
-    redirectCount += 1;
-    if (redirectCount > 3) {
-      throw new Error("Too many redirects while fetching Slack media");
-    }
-    currentUrl = nextUrl;
+  const { response, release } = await fetchWithSsrFGuard({
+    url,
+    fetchImpl: createSlackMediaFetch(token),
+    maxRedirects: 3,
+    policy: SLACK_MEDIA_SSRF_POLICY,
+    auditContext: "slack-media-auth",
+  });
+  try {
+    const bodyBytes = NULL_BODY_STATUSES.has(response.status)
+      ? null
+      : await response.arrayBuffer();
+    return new Response(bodyBytes, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } finally {
+    await release();
   }
 }
 

@@ -18,6 +18,7 @@ import {
 // Store original fetch
 const originalFetch = globalThis.fetch;
 let mockFetch: ReturnType<typeof vi.fn<FetchMock>>;
+const originalResolvePinnedHostnameWithPolicy = ssrf.resolvePinnedHostnameWithPolicy;
 const createSavedMedia = (filePath: string, contentType: string): SavedMedia => ({
   id: "saved-media-id",
   path: filePath,
@@ -32,11 +33,16 @@ describe("fetchWithSlackAuth", () => {
       async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(),
     );
     globalThis.fetch = withFetchPreconnect(mockFetch);
+    const lookupMock = vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    vi.spyOn(ssrf, "resolvePinnedHostnameWithPolicy").mockImplementation((hostname, params) =>
+      originalResolvePinnedHostnameWithPolicy(hostname, { ...params, lookupFn: lookupMock }),
+    );
   });
 
   afterEach(() => {
     // Restore original fetch
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   it("sends Authorization header on initial request with manual redirect", async () => {
@@ -47,9 +53,16 @@ describe("fetchWithSlackAuth", () => {
     });
     mockFetch.mockResolvedValueOnce(mockResponse);
 
-    const result = await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
+    const result = await fetchWithSlackAuth(
+      "https://files.slack.com/test.jpg",
+      "xoxb-test-token",
+    );
 
-    expect(result).toBe(mockResponse);
+    expect(result.status).toBe(200);
+    expect(result.headers.get("content-type")).toBe("image/jpeg");
+    await expect(result.arrayBuffer()).resolves.toSatisfy(
+      (body) => Buffer.from(body).toString("utf8") === "image data",
+    );
 
     // Verify fetch was called with correct params
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -87,9 +100,12 @@ describe("fetchWithSlackAuth", () => {
 
     mockFetch.mockResolvedValueOnce(redirectResponse).mockResolvedValueOnce(fileResponse);
 
-    const result = await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
+    const result = await fetchWithSlackAuth(
+      "https://files.slack.com/test.jpg",
+      "xoxb-test-token",
+    );
 
-    expect(result).toBe(fileResponse);
+    expect(result.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // First call should have Authorization header and manual redirect
@@ -153,9 +169,12 @@ describe("fetchWithSlackAuth", () => {
 
     mockFetch.mockResolvedValueOnce(redirectResponse).mockResolvedValueOnce(fileResponse);
 
-    const result = await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
+    const result = await fetchWithSlackAuth(
+      "https://files.slack.com/test.jpg",
+      "xoxb-test-token",
+    );
 
-    expect(result).toBe(fileResponse);
+    expect(result.status).toBe(200);
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,
       "https://example.com/presigned-url?sig=abc123",
@@ -173,10 +192,9 @@ describe("fetchWithSlackAuth", () => {
 
     mockFetch.mockResolvedValueOnce(redirectResponse);
 
-    const result = await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
-
-    // Should return the redirect response directly
-    expect(result).toBe(redirectResponse);
+    await expect(
+      fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token"),
+    ).rejects.toThrow(/missing location header/i);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -187,9 +205,13 @@ describe("fetchWithSlackAuth", () => {
 
     mockFetch.mockResolvedValueOnce(errorResponse);
 
-    const result = await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
+    const result = await fetchWithSlackAuth(
+      "https://files.slack.com/test.jpg",
+      "xoxb-test-token",
+    );
 
-    expect(result).toBe(errorResponse);
+    expect(result.status).toBe(404);
+    await expect(result.text()).resolves.toBe("Not Found");
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -216,6 +238,33 @@ describe("fetchWithSlackAuth", () => {
     expect(new Headers(mockFetch.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
       "Bearer xoxb-test-token",
     );
+  });
+
+  it("blocks redirect targets that fail Slack media SSRF policy", async () => {
+    const redirectResponse = new Response(null, {
+      status: 302,
+      headers: { location: "https://cdn.slack-edge.com/presigned-url?sig=abc123" },
+    });
+
+    vi.spyOn(ssrf, "resolvePinnedHostnameWithPolicy").mockImplementation(
+      async (hostname, params) => {
+        const normalized = hostname.trim().toLowerCase().replace(/\.$/, "");
+        if (normalized === "cdn.slack-edge.com") {
+          throw new Error("Blocked: resolves to private/internal/special-use IP address");
+        }
+        return await originalResolvePinnedHostnameWithPolicy(hostname, {
+          ...params,
+          lookupFn: async () => [{ address: "93.184.216.34", family: 4 }],
+        });
+      },
+    );
+
+    mockFetch.mockResolvedValueOnce(redirectResponse);
+
+    await expect(
+      fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token"),
+    ).rejects.toThrow(/private\/internal\/special-use/i);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 
