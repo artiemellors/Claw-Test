@@ -38,6 +38,7 @@ const loadMediaUnderstandingRuntime = createLazyRuntimeModule(
 const loadModelAuthRuntime = createLazyRuntimeModule(
   () => import("./runtime-model-auth.runtime.js"),
 );
+const loadAcpRuntime = createLazyRuntimeModule(() => import("./runtime-acp.runtime.js"));
 
 function createRuntimeTts(): PluginRuntime["tts"] {
   const bindTtsRuntime = createLazyRuntimeMethodBinder(loadTtsRuntime);
@@ -114,6 +115,14 @@ function createRuntimeModelAuth(): PluginRuntime["modelAuth"] {
         provider: params.provider,
         cfg: params.cfg,
       }),
+  };
+}
+
+function createRuntimeAcp(): PluginRuntime["acp"] {
+  const bindAcpRuntime = createLazyRuntimeMethodBinder(loadAcpRuntime);
+  return {
+    spawn: bindAcpRuntime((runtime) => runtime.spawnPluginAcp),
+    prompt: bindAcpRuntime((runtime) => runtime.promptPluginAcp),
   };
 }
 
@@ -227,6 +236,7 @@ export function createPluginRuntime(_options: CreatePluginRuntimeOptions = {}): 
     channel: createRuntimeChannel(),
     events: createRuntimeEvents(),
     logging: createRuntimeLogging(),
+    acp: createRuntimeAcp(),
     state: { resolveStateDir },
     tasks,
     taskFlow,
