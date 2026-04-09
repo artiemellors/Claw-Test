@@ -134,6 +134,7 @@ import {
   createOpenAIServiceTierWrapper,
   createOpenAIStringContentWrapper,
   createOpenAITextVerbosityWrapper,
+  createOpenAIThinkingLevelWrapper,
   resolveOpenAIFastMode,
   resolveOpenAIServiceTier,
   resolveOpenAITextVerbosity,
@@ -173,7 +174,9 @@ function createTestOpenAIProviderWrapper(
   });
   streamFn = createOpenAIStringContentWrapper(streamFn);
   return createOpenAIResponsesContextManagementWrapper(
-    createOpenAIReasoningCompatibilityWrapper(streamFn),
+    createOpenAIReasoningCompatibilityWrapper(
+      createOpenAIThinkingLevelWrapper(streamFn, params.context.thinkingLevel),
+    ),
     params.context.extraParams,
   );
 }
