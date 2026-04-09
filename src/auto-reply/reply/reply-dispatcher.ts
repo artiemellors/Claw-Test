@@ -24,6 +24,12 @@ type ReplyDispatchDeliverer = (
 
 const DEFAULT_HUMAN_DELAY_MIN_MS = 800;
 const DEFAULT_HUMAN_DELAY_MAX_MS = 2500;
+/**
+ * Hard ceiling for human-delay so that custom configs with unbounded minMs/maxMs
+ * cannot exceed the block-reply pipeline timeout (default 15 s).  10 s leaves a
+ * comfortable 5 s budget for transport delivery within a single pipeline tick.
+ */
+const MAX_HUMAN_DELAY_MS = 10_000;
 
 /** Generate a random delay within the configured range. */
 function getHumanDelay(config: HumanDelayConfig | undefined): number {
@@ -36,9 +42,9 @@ function getHumanDelay(config: HumanDelayConfig | undefined): number {
   const max =
     mode === "custom" ? (config?.maxMs ?? DEFAULT_HUMAN_DELAY_MAX_MS) : DEFAULT_HUMAN_DELAY_MAX_MS;
   if (max <= min) {
-    return min;
+    return Math.min(min, MAX_HUMAN_DELAY_MS);
   }
-  return min + generateSecureInt(max - min + 1);
+  return Math.min(min + generateSecureInt(max - min + 1), MAX_HUMAN_DELAY_MS);
 }
 
 export type ReplyDispatcherOptions = {
@@ -77,7 +83,20 @@ type ReplyDispatcherWithTypingResult = {
 
 export type ReplyDispatcher = {
   sendToolResult: (payload: ReplyPayload) => boolean;
-  sendBlockReply: (payload: ReplyPayload) => boolean;
+  /**
+   * Enqueue a block reply for delivery.
+   *
+   * Returns `false` when the payload is dropped (empty/silent).
+   * Returns `true` when delivery was successfully enqueued (fire-and-forget).
+   * Returns a `Promise<true>` when awaitable delivery is available and resolves when the queued delivery
+   * (and all preceding deliveries) complete.  Callers on the same-channel path
+   * should `await` this to guarantee the block text reaches the user before
+   * tool execution continues.
+   *
+   * Because a fulfilled `Promise` is truthy, existing boolean-style checks
+   * (`if (delivered)`) remain correct without changes.
+   */
+  sendBlockReply: (payload: ReplyPayload) => boolean | Promise<true>;
   sendFinalReply: (payload: ReplyPayload) => boolean;
   waitForIdle: () => Promise<void>;
   getQueuedCounts: () => Record<ReplyDispatchKind, number>;
@@ -217,7 +236,14 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
 
   return {
     sendToolResult: (payload) => enqueue("tool", payload),
-    sendBlockReply: (payload) => enqueue("block", payload),
+    sendBlockReply: (payload) => {
+      if (!enqueue("block", payload)) {
+        return false;
+      }
+      // Return the delivery chain so same-channel callers can await delivery.
+      // Resolve to true to preserve backward compatibility for await-and-branch patterns.
+      return sendChain.then(() => true as const);
+    },
     sendFinalReply: (payload) => enqueue("final", payload),
     waitForIdle: () => sendChain,
     getQueuedCounts: () => ({ ...queuedCounts }),
