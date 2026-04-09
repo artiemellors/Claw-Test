@@ -196,6 +196,17 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
           capability: "video",
           transport: "http",
         });
+      // Seedance 1.0 has separate T2V and I2V model IDs (e.g. seedance-1-0-lite-t2v-250428 vs
+      // seedance-1-0-lite-i2v-250428). When input images are provided with a T2V model, auto-
+      // switch to the corresponding I2V variant so the API does not reject with task_type mismatch.
+      // 1.5 Pro uses a single model ID for both modes and is unaffected by this substitution.
+      const hasInputImages = (req.inputImages?.length ?? 0) > 0;
+      const requestedModel = normalizeOptionalString(req.model) || DEFAULT_BYTEPLUS_VIDEO_MODEL;
+      const resolvedModel =
+        hasInputImages && requestedModel.includes("-t2v-")
+          ? requestedModel.replace("-t2v-", "-i2v-")
+          : requestedModel;
+
       const content: Array<Record<string, unknown>> = [{ type: "text", text: req.prompt }];
       const imageUrl = resolveBytePlusImageUrl(req);
       if (imageUrl) {
@@ -206,7 +217,7 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
         });
       }
       const body: Record<string, unknown> = {
-        model: normalizeOptionalString(req.model) || DEFAULT_BYTEPLUS_VIDEO_MODEL,
+        model: resolvedModel,
         content,
       };
       const aspectRatio = normalizeOptionalString(req.aspectRatio);
@@ -280,7 +291,7 @@ export function buildBytePlusVideoGenerationProvider(): VideoGenerationProvider 
         });
         return {
           videos: [video],
-          model: completed.model ?? req.model ?? DEFAULT_BYTEPLUS_VIDEO_MODEL,
+          model: completed.model ?? resolvedModel,
           metadata: {
             taskId,
             status: completed.status,
