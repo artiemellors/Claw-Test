@@ -791,6 +791,7 @@ export function createAgentEventHandler({
     jobState: "done" | "error",
     error?: unknown,
     stopReason?: string,
+    errorKind?: string,
   ) => {
     const { text, shouldSuppressSilent } = resolveBufferedChatTextState(clientRunId, sourceRunId);
     // Flush any throttled delta so streaming clients receive the complete text
@@ -828,6 +829,7 @@ export function createAgentEventHandler({
       seq,
       state: "error" as const,
       errorMessage: error ? formatForLog(error) : undefined,
+      ...(errorKind && { errorKind: errorKind }),
     };
     broadcast("chat", payload);
     nodeSendToSession(sessionKey, "chat", payload);
