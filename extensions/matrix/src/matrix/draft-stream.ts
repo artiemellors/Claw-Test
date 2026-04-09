@@ -28,7 +28,7 @@ export type MatrixDraftStream = {
   /** Ensure the last pending update has been sent. */
   flush: () => Promise<void>;
   /** Flush and mark this block as done. Returns the event ID if a message was sent. */
-  stop: () => Promise<string | undefined>;
+  stop: (opts?: { finalizeLive?: boolean }) => Promise<string | undefined>;
   /** Reset state for the next text block (after tool calls). */
   reset: () => void;
   /** The event ID of the current draft message, if any. */
@@ -140,14 +140,20 @@ export function createMatrixDraftStream(params: {
 
   log?.(`draft-stream: ready (throttleMs=${DEFAULT_THROTTLE_MS})`);
 
-  const stop = async (): Promise<string | undefined> => {
+  const stop = async (opts: { finalizeLive?: boolean } = {}): Promise<string | undefined> => {
     // Flush before marking stopped so the loop can drain pending text.
     await loop.flush();
     stopped = true;
     // Send a final edit without the MSC4357 live marker to signal that
     // the stream is complete. Supporting clients will stop the streaming
     // animation and display the final content.
-    if (useLive && !liveFinalized && currentEventId && lastSentText) {
+    if (
+      (opts.finalizeLive ?? true) &&
+      useLive &&
+      !liveFinalized &&
+      currentEventId &&
+      lastSentText
+    ) {
       liveFinalized = true;
       try {
         await editMessageMatrix(roomId, currentEventId, lastSentText, {
