@@ -23,10 +23,15 @@ import {
 } from "../../infra/outbound/agent-delivery.js";
 import { shouldDowngradeDeliveryToSessionOnly } from "../../infra/outbound/best-effort-delivery.js";
 import { resolveMessageChannelSelection } from "../../infra/outbound/channel-selection.js";
+import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
 import { classifySessionKeyShape, normalizeAgentId } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import { normalizeInputProvenance, type InputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../../shared/string-coerce.js";
 import { createRunningTaskRun } from "../../tasks/task-executor.js";
 import {
   normalizeDeliveryContext,
@@ -39,7 +44,7 @@ import {
   normalizeMessageChannel,
 } from "../../utils/message-channel.js";
 import { resolveAssistantIdentity } from "../assistant-identity.js";
-import { parseMessageWithAttachments } from "../chat-attachments.js";
+import { MediaOffloadError, parseMessageWithAttachments } from "../chat-attachments.js";
 import { resolveAssistantAvatarUrl } from "../control-ui-shared.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
 import { GATEWAY_CLIENT_CAPS, hasGatewayClientCap } from "../protocol/client-info.js";
@@ -58,6 +63,8 @@ import {
   loadGatewaySessionRow,
   loadSessionEntry,
   migrateAndPruneGatewaySessionStoreKey,
+  resolveGatewayModelSupportsImages,
+  resolveSessionModelRef,
 } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
 import { waitForAgentJob } from "./agent-job.js";
@@ -174,6 +181,8 @@ function emitSessionsChanged(
             startedAt: sessionRow.startedAt,
             endedAt: sessionRow.endedAt,
             runtimeMs: sessionRow.runtimeMs,
+            compactionCheckpointCount: sessionRow.compactionCheckpointCount,
+            latestCompactionCheckpoint: sessionRow.latestCompactionCheckpoint,
           }
         : {}),
     },
@@ -189,12 +198,16 @@ function dispatchAgentRunFromGateway(params: {
   respond: GatewayRequestHandlerOptions["respond"];
   context: GatewayRequestHandlerOptions["context"];
 }) {
-  if (params.ingressOpts.sessionKey?.trim()) {
+  const inputProvenance = normalizeInputProvenance(params.ingressOpts.inputProvenance);
+  const shouldTrackTask =
+    params.ingressOpts.sessionKey?.trim() && inputProvenance?.kind !== "inter_session";
+  if (shouldTrackTask) {
     try {
       createRunningTaskRun({
         runtime: "cli",
         sourceId: params.runId,
-        requesterSessionKey: params.ingressOpts.sessionKey,
+        ownerKey: params.ingressOpts.sessionKey,
+        scopeKind: "session",
         requesterOrigin: normalizeDeliveryContext({
           channel: params.ingressOpts.channel,
           to: params.ingressOpts.to,
@@ -297,6 +310,8 @@ export const agentHandlers: GatewayRequestHandlers = {
       groupSpace?: string;
       lane?: string;
       extraSystemPrompt?: string;
+      bootstrapContextMode?: "full" | "lightweight";
+      bootstrapContextRunKind?: "default" | "heartbeat" | "cron";
       internalEvents?: AgentInternalEvent[];
       idempotencyKey: string;
       timeout?: number;
@@ -346,16 +361,53 @@ export const agentHandlers: GatewayRequestHandlers = {
 
     let message = (request.message ?? "").trim();
     let images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+    let imageOrder: PromptImageOrderEntry[] = [];
     if (normalizedAttachments.length > 0) {
+      const requestedSessionKeyRaw =
+        typeof request.sessionKey === "string" && request.sessionKey.trim()
+          ? request.sessionKey.trim()
+          : undefined;
+
+      let baseProvider: string | undefined;
+      let baseModel: string | undefined;
+      if (requestedSessionKeyRaw) {
+        const { cfg: sessCfg, entry: sessEntry } = loadSessionEntry(requestedSessionKeyRaw);
+        const modelRef = resolveSessionModelRef(sessCfg, sessEntry, undefined);
+        baseProvider = modelRef.provider;
+        baseModel = modelRef.model;
+      }
+      const effectiveProvider = providerOverride || baseProvider;
+      const effectiveModel = modelOverride || baseModel;
+      const supportsImages = await resolveGatewayModelSupportsImages({
+        loadGatewayModelCatalog: context.loadGatewayModelCatalog,
+        provider: effectiveProvider,
+        model: effectiveModel,
+      });
+
       try {
         const parsed = await parseMessageWithAttachments(message, normalizedAttachments, {
           maxBytes: 5_000_000,
           log: context.logGateway,
+          supportsImages,
         });
         message = parsed.message.trim();
         images = parsed.images;
+        imageOrder = parsed.imageOrder;
+        // offloadedRefs are appended as text markers to `message`; the agent
+        // runner will resolve them via detectAndLoadPromptImages.
       } catch (err) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(err)));
+        // MediaOffloadError indicates a server-side storage fault (ENOSPC, EPERM,
+        // etc.). Map it to UNAVAILABLE so clients can retry without treating it as
+        // a bad request. All other errors are input-validation failures → 4xx.
+        const isServerFault = err instanceof MediaOffloadError;
+        respond(
+          false,
+          undefined,
+          errorShape(
+            isServerFault ? ErrorCodes.UNAVAILABLE : ErrorCodes.INVALID_REQUEST,
+            String(err),
+          ),
+        );
         return;
       }
     }
@@ -380,7 +432,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
     }
 
-    const agentIdRaw = typeof request.agentId === "string" ? request.agentId.trim() : "";
+    const agentIdRaw = normalizeOptionalString(request.agentId) ?? "";
     const agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : undefined;
     if (agentId) {
       const knownAgents = listAgentIds(cfg);
@@ -397,10 +449,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
     }
 
-    const requestedSessionKeyRaw =
-      typeof request.sessionKey === "string" && request.sessionKey.trim()
-        ? request.sessionKey.trim()
-        : undefined;
+    const requestedSessionKeyRaw = normalizeOptionalString(request.sessionKey);
     if (
       requestedSessionKeyRaw &&
       classifySessionKeyShape(requestedSessionKeyRaw) === "malformed_agent"
@@ -435,7 +484,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         return;
       }
     }
-    let resolvedSessionId = request.sessionId?.trim() || undefined;
+    let resolvedSessionId = normalizeOptionalString(request.sessionId);
     let sessionEntry: SessionEntry | undefined;
     let bestEffortDeliver = requestedBestEffortDeliver ?? false;
     let cfgForAgent: ReturnType<typeof loadConfig> | undefined;
@@ -453,7 +502,8 @@ export const agentHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      const resetReason = resetCommandMatch[1]?.toLowerCase() === "new" ? "new" : "reset";
+      const resetReason =
+        normalizeOptionalLowercaseString(resetCommandMatch[1]) === "new" ? "new" : "reset";
       const resetResult = await runSessionResetFromAgent({
         key: requestedSessionKey,
         reason: resetReason,
@@ -464,7 +514,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
       requestedSessionKey = resetResult.key;
       resolvedSessionId = resetResult.sessionId ?? resolvedSessionId;
-      const postResetMessage = resetCommandMatch[2]?.trim() ?? "";
+      const postResetMessage = normalizeOptionalString(resetCommandMatch[2]) ?? "";
       if (postResetMessage) {
         message = postResetMessage;
       } else {
@@ -491,7 +541,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       isNewSession = !entry;
       const now = Date.now();
       const sessionId = entry?.sessionId ?? randomUUID();
-      const labelValue = request.label?.trim() || entry?.label;
+      const labelValue = normalizeOptionalString(request.label) || entry?.label;
       const sessionAgent = resolveAgentIdFromSessionKey(canonicalKey);
       spawnedByValue = canonicalizeSpawnedByForAgent(cfg, sessionAgent, entry?.spawnedBy);
       let inheritedGroup:
@@ -607,25 +657,11 @@ export const agentHandlers: GatewayRequestHandlers = {
 
     const wantsDelivery = request.deliver === true;
     const explicitTo =
-      typeof request.replyTo === "string" && request.replyTo.trim()
-        ? request.replyTo.trim()
-        : typeof request.to === "string" && request.to.trim()
-          ? request.to.trim()
-          : undefined;
-    const explicitThreadId =
-      typeof request.threadId === "string" && request.threadId.trim()
-        ? request.threadId.trim()
-        : undefined;
-    const turnSourceChannel =
-      typeof request.channel === "string" && request.channel.trim()
-        ? request.channel.trim()
-        : undefined;
-    const turnSourceTo =
-      typeof request.to === "string" && request.to.trim() ? request.to.trim() : undefined;
-    const turnSourceAccountId =
-      typeof request.accountId === "string" && request.accountId.trim()
-        ? request.accountId.trim()
-        : undefined;
+      normalizeOptionalString(request.replyTo) ?? normalizeOptionalString(request.to);
+    const explicitThreadId = normalizeOptionalString(request.threadId);
+    const turnSourceChannel = normalizeOptionalString(request.channel);
+    const turnSourceTo = normalizeOptionalString(request.to);
+    const turnSourceAccountId = normalizeOptionalString(request.accountId);
     const deliveryPlan = resolveAgentDeliveryPlan({
       sessionEntry,
       requestedChannel: request.replyChannel ?? request.channel,
@@ -765,6 +801,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       ingressOpts: {
         message,
         images,
+        imageOrder,
         provider: providerOverride,
         model: modelOverride,
         to: resolvedTo,
@@ -794,6 +831,8 @@ export const agentHandlers: GatewayRequestHandlers = {
         runId,
         lane: request.lane,
         extraSystemPrompt: request.extraSystemPrompt,
+        bootstrapContextMode: request.bootstrapContextMode,
+        bootstrapContextRunKind: request.bootstrapContextRunKind,
         internalEvents: request.internalEvents,
         inputProvenance,
         // Internal-only: allow workspace override for spawned subagent runs.
@@ -825,8 +864,8 @@ export const agentHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const agentIdRaw = typeof p.agentId === "string" ? p.agentId.trim() : "";
-    const sessionKeyRaw = typeof p.sessionKey === "string" ? p.sessionKey.trim() : "";
+    const agentIdRaw = normalizeOptionalString(p.agentId) ?? "";
+    const sessionKeyRaw = normalizeOptionalString(p.sessionKey) ?? "";
     let agentId = agentIdRaw ? normalizeAgentId(agentIdRaw) : undefined;
     if (sessionKeyRaw) {
       if (classifySessionKeyShape(sessionKeyRaw) === "malformed_agent") {

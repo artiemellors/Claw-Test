@@ -1,21 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveDaemonContainerContext } from "../daemon/container-context.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 
-// Module under test imports these at module scope.
-vi.mock("../agents/skills-status.js", () => ({
+const mocks = vi.hoisted(() => ({
   buildWorkspaceSkillStatus: vi.fn(),
-}));
-vi.mock("../agents/skills-install.js", () => ({
   installSkill: vi.fn(),
-}));
-vi.mock("../daemon/container-context.js", () => ({
-  resolveDaemonContainerContext: vi.fn(),
-}));
-vi.mock("./onboard-helpers.js", () => ({
   detectBinary: vi.fn(),
+  resolveDaemonContainerContext: vi.fn(),
   resolveNodeManagerOptions: vi.fn(() => [
     { value: "npm", label: "npm" },
     { value: "pnpm", label: "pnpm" },
@@ -23,9 +15,21 @@ vi.mock("./onboard-helpers.js", () => ({
   ]),
 }));
 
-import { installSkill } from "../agents/skills-install.js";
-import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
-import { detectBinary } from "./onboard-helpers.js";
+// Module under test imports these at module scope.
+vi.mock("../agents/skills-status.js", () => ({
+  buildWorkspaceSkillStatus: mocks.buildWorkspaceSkillStatus,
+}));
+vi.mock("../agents/skills-install.js", () => ({
+  installSkill: mocks.installSkill,
+}));
+vi.mock("../daemon/container-context.js", () => ({
+  resolveDaemonContainerContext: mocks.resolveDaemonContainerContext,
+}));
+vi.mock("./onboard-helpers.js", () => ({
+  detectBinary: mocks.detectBinary,
+  resolveNodeManagerOptions: mocks.resolveNodeManagerOptions,
+}));
+
 import { setupSkills } from "./onboard-skills.js";
 
 function createBundledSkill(params: {
@@ -77,15 +81,15 @@ function createBundledSkill(params: {
 }
 
 function mockMissingBrewStatus(skills: Array<ReturnType<typeof createBundledSkill>>): void {
-  vi.mocked(detectBinary).mockResolvedValue(false);
-  vi.mocked(installSkill).mockResolvedValue({
+  mocks.detectBinary.mockResolvedValue(false);
+  mocks.installSkill.mockResolvedValue({
     ok: true,
     message: "Installed",
     stdout: "",
     stderr: "",
     code: 0,
   });
-  vi.mocked(buildWorkspaceSkillStatus).mockReturnValue({
+  mocks.buildWorkspaceSkillStatus.mockReturnValue({
     workspaceDir: "/tmp/ws",
     managedSkillsDir: "/tmp/managed",
     skills,
@@ -135,7 +139,7 @@ const runtime: RuntimeEnv = {
 
 describe("setupSkills", () => {
   afterEach(() => {
-    vi.mocked(resolveDaemonContainerContext).mockReturnValue(null);
+    mocks.resolveDaemonContainerContext.mockReturnValue(null);
   });
 
   it.skipIf(process.platform !== "linux")(
@@ -149,7 +153,7 @@ describe("setupSkills", () => {
           installLabel: "Install ffmpeg (brew)",
         }),
       ]);
-      vi.mocked(resolveDaemonContainerContext).mockReturnValue("docker");
+      mocks.resolveDaemonContainerContext.mockReturnValue("docker");
 
       const { prompter, notes } = createPrompter({});
       await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
@@ -181,7 +185,7 @@ describe("setupSkills", () => {
       }),
     ]);
 
-    vi.mocked(resolveDaemonContainerContext).mockReturnValue(null);
+    mocks.resolveDaemonContainerContext.mockReturnValue(null);
     const { prompter, notes } = createPrompter({ multiselect: ["__skip__"] });
     await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
 
@@ -207,7 +211,7 @@ describe("setupSkills", () => {
       }),
     ]);
 
-    vi.mocked(resolveDaemonContainerContext).mockReturnValue(null);
+    mocks.resolveDaemonContainerContext.mockReturnValue(null);
     const { prompter, notes } = createPrompter({ multiselect: ["video-frames"] });
     await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
 

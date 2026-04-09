@@ -1,6 +1,7 @@
 import type { Block, KnownBlock } from "@slack/web-api";
 import { reduceInteractiveReply } from "openclaw/plugin-sdk/interactive-runtime";
 import type { InteractiveReply } from "openclaw/plugin-sdk/interactive-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import { truncateSlackText } from "./truncate.js";
 
 export const SLACK_REPLY_BUTTON_ACTION_ID = "openclaw:reply_button";
@@ -18,7 +19,9 @@ function buildSlackReplySelectActionId(selectIndex: number): string {
   return `${SLACK_REPLY_SELECT_ACTION_ID}:${String(selectIndex)}`;
 }
 
-function resolveSlackButtonStyle(style: "primary" | "secondary" | "success" | "danger" | undefined) {
+function resolveSlackButtonStyle(
+  style: "primary" | "secondary" | "success" | "danger" | undefined,
+) {
   if (style === "primary" || style === "danger") {
     return style;
   }
@@ -86,12 +89,12 @@ export function buildSlackInteractiveBlocks(interactive?: InteractiveReply): Sla
           placeholder: {
             type: "plain_text",
             text: truncateSlackText(
-              block.placeholder?.trim() || "Choose an option",
+              normalizeOptionalString(block.placeholder) ?? "Choose an option",
               SLACK_PLAIN_TEXT_MAX,
             ),
             emoji: true,
           },
-          options: block.options.map((option, choiceIndex) => ({
+          options: block.options.map((option, _choiceIndex) => ({
             text: {
               type: "plain_text",
               text: truncateSlackText(option.label, SLACK_PLAIN_TEXT_MAX),

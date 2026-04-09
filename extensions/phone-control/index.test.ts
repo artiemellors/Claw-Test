@@ -35,7 +35,7 @@ function createApi(params: {
       },
     } as OpenClawPluginApi["runtime"],
     registerCommand: params.registerCommand,
-  }) as OpenClawPluginApi;
+  });
 }
 
 function createCommandContext(args: string): PluginCommandContext {
@@ -163,6 +163,26 @@ describe("phone-control plugin", () => {
       });
 
       expect(String(res?.text ?? "")).toContain("Phone control: disarmed.");
+      expect(writeConfigFile).not.toHaveBeenCalled();
+    });
+  });
+
+  it("regression: blocks non-webchat gateway callers with operator.write from arm/disarm", async () => {
+    await withRegisteredPhoneControl(async ({ command, writeConfigFile }) => {
+      const armRes = await command.handler({
+        ...createCommandContext("arm writes 30s"),
+        channel: "telegram",
+        gatewayClientScopes: ["operator.write"],
+      });
+      expect(String(armRes?.text ?? "")).toContain("requires operator.admin");
+      expect(writeConfigFile).not.toHaveBeenCalled();
+
+      const disarmRes = await command.handler({
+        ...createCommandContext("disarm"),
+        channel: "telegram",
+        gatewayClientScopes: ["operator.write"],
+      });
+      expect(String(disarmRes?.text ?? "")).toContain("requires operator.admin");
       expect(writeConfigFile).not.toHaveBeenCalled();
     });
   });

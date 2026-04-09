@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import type { SandboxBackendCommandResult } from "./backend.js";
 import { runDockerSandboxShellCommand } from "./docker-backend.js";
 import {
@@ -9,6 +10,7 @@ import {
 } from "./fs-bridge-mutation-helper.js";
 import { SandboxFsPathGuard } from "./fs-bridge-path-safety.js";
 import { buildStatPlan, type SandboxFsCommandPlan } from "./fs-bridge-shell-command-plans.js";
+import type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 import {
   buildSandboxFsMounts,
   resolveSandboxFsPathWithMounts,
@@ -23,44 +25,7 @@ type RunCommandOptions = {
   signal?: AbortSignal;
 };
 
-export type SandboxResolvedPath = {
-  hostPath?: string;
-  relativePath: string;
-  containerPath: string;
-};
-
-export type SandboxFsStat = {
-  type: "file" | "directory" | "other";
-  size: number;
-  mtimeMs: number;
-};
-
-export type SandboxFsBridge = {
-  resolvePath(params: { filePath: string; cwd?: string }): SandboxResolvedPath;
-  readFile(params: { filePath: string; cwd?: string; signal?: AbortSignal }): Promise<Buffer>;
-  writeFile(params: {
-    filePath: string;
-    cwd?: string;
-    data: Buffer | string;
-    encoding?: BufferEncoding;
-    mkdir?: boolean;
-    signal?: AbortSignal;
-  }): Promise<void>;
-  mkdirp(params: { filePath: string; cwd?: string; signal?: AbortSignal }): Promise<void>;
-  remove(params: {
-    filePath: string;
-    cwd?: string;
-    recursive?: boolean;
-    force?: boolean;
-    signal?: AbortSignal;
-  }): Promise<void>;
-  rename(params: { from: string; to: string; cwd?: string; signal?: AbortSignal }): Promise<void>;
-  stat(params: {
-    filePath: string;
-    cwd?: string;
-    signal?: AbortSignal;
-  }): Promise<SandboxFsStat | null>;
-};
+export type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 
 export function createSandboxFsBridge(params: { sandbox: SandboxContext }): SandboxFsBridge {
   return new SandboxFsBridgeImpl(params.sandbox);
@@ -326,7 +291,7 @@ function coerceStatType(typeRaw?: string): "file" | "directory" | "other" {
   if (!typeRaw) {
     return "other";
   }
-  const normalized = typeRaw.trim().toLowerCase();
+  const normalized = normalizeOptionalLowercaseString(typeRaw) ?? "";
   if (normalized.includes("directory")) {
     return "directory";
   }
