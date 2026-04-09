@@ -197,7 +197,7 @@ plugins should import their own local runtime code directly from their
 extension-owned modules.
 
 The same boundary applies to provider-named SDK seams in general: core should
-not import `openclaw/plugin-sdk/slack`, `.../discord`, `.../signal`,
+not import `extensions/slack/runtime-api.js`, `.../discord`, `.../signal`,
 `.../whatsapp`, or other channel-specific convenience barrels. If core needs a
 behavior, either consume the bundled plugin's own `api.ts` / `runtime-api.ts`
 barrel or promote the need into a narrow generic capability in the shared SDK.
