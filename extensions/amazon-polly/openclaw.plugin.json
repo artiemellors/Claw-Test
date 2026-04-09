@@ -1,0 +1,98 @@
+{
+  "id": "amazon-polly",
+  "contracts": {
+    "speechProviders": ["amazon-polly"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "description": "Enable or disable the Amazon Polly speech provider."
+      },
+      "voice": {
+        "type": "string",
+        "description": "Default Polly voice ID. Generative: Ruth, Matthew, Stephen. Neural: Joanna, Lupe, Amy, Brian, Léa, Vicki, Karl. See full list: https://docs.aws.amazon.com/polly/latest/dg/voicelist.html"
+      },
+      "engine": {
+        "type": "string",
+        "enum": ["generative", "neural", "standard", "long-form"],
+        "description": "Polly engine type. Generative is highest quality, neural is fastest, standard is cheapest."
+      },
+      "region": {
+        "type": "string",
+        "enum": [
+          "us-east-1", "us-west-2",
+          "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
+          "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2", "ap-south-1",
+          "ca-central-1", "sa-east-1",
+          "af-south-1", "me-south-1",
+          "us-gov-west-1"
+        ],
+        "description": "AWS region for Polly API calls. Choose the region closest to your deployment for lowest latency."
+      },
+      "languageCode": {
+        "type": "string",
+        "enum": [
+          "en-US", "en-GB", "en-AU", "en-IN", "en-NZ", "en-ZA", "en-IE",
+          "es-ES", "es-MX", "es-US",
+          "fr-FR", "fr-CA",
+          "de-DE", "de-AT",
+          "it-IT",
+          "pt-BR", "pt-PT",
+          "ja-JP",
+          "ko-KR",
+          "zh-CN",
+          "hi-IN",
+          "ar-AE",
+          "nl-NL", "nl-BE",
+          "pl-PL",
+          "ru-RU",
+          "sv-SE",
+          "nb-NO",
+          "da-DK",
+          "fi-FI",
+          "tr-TR",
+          "ca-ES",
+          "cy-GB",
+          "is-IS",
+          "ro-RO"
+        ],
+        "description": "BCP-47 language code. Required for bilingual voices. See: https://docs.aws.amazon.com/polly/latest/dg/SupportedLanguage.html"
+      },
+      "sampleRate": {
+        "type": "string",
+        "enum": ["8000", "16000", "22050", "24000"],
+        "description": "Audio sample rate in Hz. Default: 24000 for generative/long-form, 22050 for standard/neural."
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": {
+      "label": "Enabled",
+      "help": "Enable or disable Amazon Polly TTS."
+    },
+    "voice": {
+      "label": "Voice",
+      "help": "Polly voice ID. Use generative voices (Ruth, Matthew, Stephen) for best quality. Full list: https://docs.aws.amazon.com/polly/latest/dg/voicelist.html"
+    },
+    "engine": {
+      "label": "Engine",
+      "help": "Generative: most natural speech (~$30/1M chars). Neural: fast, good quality (~$16/1M chars). Standard: cheapest (~$4/1M chars). Long-form: optimized for articles/books."
+    },
+    "region": {
+      "label": "AWS Region",
+      "help": "Region for Polly API calls. Choose the region closest to your deployment. Note: generative engine is only available in us-east-1 and eu-west-1."
+    },
+    "languageCode": {
+      "label": "Language Code",
+      "help": "BCP-47 language code. Required for bilingual voices. Each voice supports specific languages — check the Polly voice list."
+    },
+    "sampleRate": {
+      "label": "Sample Rate",
+      "help": "Audio sample rate. 24000 Hz for generative/long-form engines. Standard/neural engines only accept 8000, 16000, or 22050.",
+      "advanced": true
+    }
+  }
+}
