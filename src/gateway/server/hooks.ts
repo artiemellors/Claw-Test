@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { CliDeps } from "../../cli/deps.js";
 import { loadConfig, type OpenClawConfig } from "../../config/config.js";
 import { resolveMainSessionKeyFromConfig } from "../../config/sessions.js";
-import { runCronIsolatedAgentTurn } from "../../cron/isolated-agent.js";
+import {
+  runCronIsolatedAgentTurn,
+  type RunCronAgentTurnResult,
+} from "../../cron/isolated-agent.js";
 import type { CronJob } from "../../cron/types.js";
 import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
@@ -12,6 +15,57 @@ import { type HookAgentDispatchPayload, type HooksConfigResolved } from "../hook
 import { createHooksRequestHandler, type HookClientIpConfig } from "../server-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
+
+/**
+ * Determines whether a shared hook result should be surfaced as a system
+ * event in the main session.  This replaces the previous `!result.delivered`
+ * gate with a richer compatibility bridge that respects explicit policy,
+ * `deliver:false` hooks, and the already-existing `deliveryAttempted` field.
+ */
+export function shouldAnnounceHookResultToMain(params: {
+  value: HookAgentDispatchPayload;
+  result: RunCronAgentTurnResult;
+}): boolean {
+  const { value, result } = params;
+
+  if (result.status !== "ok") {
+    return true;
+  }
+
+  if (typeof result.announceToMain === "boolean") {
+    return result.announceToMain;
+  }
+
+  if (value.deliver === false) {
+    return false;
+  }
+
+  if (result.delivered) {
+    return false;
+  }
+
+  // `deliveryAttempted` is intentionally broader than "an outbound send
+  // definitely happened": dispatchCronDelivery also sets it on handled/no-
+  // fallback paths (for example stale delivery skips and descendant/interim
+  // suppression) specifically to prevent redundant enqueueSystemEvent
+  // fallback.
+  if (result.deliveryAttempted) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Builds the prefix label for hook fallback system events.
+ * Avoids the "Hook Hook" symptom when the hook name defaults to "Hook".
+ */
+function formatHookPrefix(name: string | undefined, status: string): string {
+  const raw = name?.trim() || "Hook";
+  const lower = raw.toLowerCase();
+  const base = lower === "hook" || lower.startsWith("hook ") ? raw : `Hook ${raw}`;
+  return status === "ok" ? base : `${base} (${status})`;
+}
 
 export function resolveHookClientIpConfig(cfg: OpenClawConfig): HookClientIpConfig {
   return {
@@ -90,9 +144,8 @@ export function createGatewayHooksRequestHandler(params: {
           normalizeOptionalString(result.summary) ||
           normalizeOptionalString(result.error) ||
           result.status;
-        const prefix =
-          result.status === "ok" ? `Hook ${value.name}` : `Hook ${value.name} (${result.status})`;
-        if (!result.delivered) {
+        const prefix = formatHookPrefix(value.name, result.status);
+        if (shouldAnnounceHookResultToMain({ value, result })) {
           enqueueSystemEvent(`${prefix}: ${summary}`.trim(), {
             sessionKey: mainSessionKey,
           });
@@ -102,7 +155,7 @@ export function createGatewayHooksRequestHandler(params: {
         }
       } catch (err) {
         logHooks.warn(`hook agent failed: ${String(err)}`);
-        enqueueSystemEvent(`Hook ${value.name} (error): ${String(err)}`, {
+        enqueueSystemEvent(`${formatHookPrefix(value.name, "error")}: ${String(err)}`, {
           sessionKey: mainSessionKey,
         });
         if (value.wakeMode === "now") {
