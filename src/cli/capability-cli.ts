@@ -822,7 +822,7 @@ async function runVideoGenerate(params: { prompt: string; model?: string; output
       // For url-only assets, download the video so --output writes a real local file.
       let videoBuffer = video.buffer;
       if (!videoBuffer && video.url) {
-        const res = await fetch(video.url);
+        const res = await fetch(video.url, { signal: AbortSignal.timeout(120_000) });
         if (!res.ok) {
           throw new Error(`Failed to download video from ${video.url}: ${res.status}`);
         }
