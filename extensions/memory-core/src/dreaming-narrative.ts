@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -71,6 +72,15 @@ const DREAMS_FILENAMES = ["DREAMS.md", "dreams.md"] as const;
 const DIARY_START_MARKER = "<!-- openclaw:dreaming:diary:start -->";
 const DIARY_END_MARKER = "<!-- openclaw:dreaming:diary:end -->";
 const BACKFILL_ENTRY_MARKER = "openclaw:dreaming:backfill-entry";
+
+function buildNarrativeSessionKey(params: {
+  workspaceDir: string;
+  phase: NarrativePhaseData["phase"];
+  nowMs: number;
+}): string {
+  const workspaceHash = createHash("sha1").update(params.workspaceDir).digest("hex").slice(0, 12);
+  return `dreaming-narrative-${params.phase}-${workspaceHash}-${params.nowMs}`;
+}
 
 // ── Prompt building ────────────────────────────────────────────────────
 
@@ -429,7 +439,11 @@ export async function generateAndAppendDreamNarrative(params: {
     return;
   }
 
-  const sessionKey = `dreaming-narrative-${params.data.phase}-${nowMs}`;
+  const sessionKey = buildNarrativeSessionKey({
+    workspaceDir: params.workspaceDir,
+    phase: params.data.phase,
+    nowMs,
+  });
   const message = buildNarrativePrompt(params.data);
 
   try {
