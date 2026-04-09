@@ -139,6 +139,9 @@ export function buildProviderStreamFamilyHooks(
           createToolStreamWrapper(ctx.streamFn, ctx.extraParams?.tool_stream !== false),
       };
   }
+  const unexpectedFamily: never = family;
+  void unexpectedFamily;
+  throw new Error("Unknown provider stream family");
 }
 
 // Public stream-wrapper helpers for provider plugins.
@@ -175,6 +178,7 @@ export {
   createMoonshotThinkingWrapper,
   resolveMoonshotThinkingType,
 } from "../agents/pi-embedded-runner/moonshot-thinking-stream-wrappers.js";
+export { isOpenAICompletionsTransportStreamFn } from "../agents/openai-transport-stream.js";
 export {
   createOpenAIAttributionHeadersWrapper,
   createCodexNativeWebSearchWrapper,

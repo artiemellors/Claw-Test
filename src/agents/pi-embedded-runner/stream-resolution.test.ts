@@ -1,6 +1,10 @@
 import { streamSimple } from "@mariozechner/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import {
+  createOpenAICompletionsTransportStreamFn,
+  isOpenAICompletionsTransportStreamFn,
+} from "../openai-transport-stream.js";
+import {
   describeEmbeddedAgentStreamStrategy,
   resolveEmbeddedAgentApiKey,
   resolveEmbeddedAgentStreamFn,
@@ -137,5 +141,23 @@ describe("resolveEmbeddedAgentStreamFn", () => {
     });
     expect(authStorage.getApiKey).not.toHaveBeenCalled();
     expect(providerStreamFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the OpenAI completions transport marker through provider wrappers", () => {
+    const providerStreamFn = createOpenAICompletionsTransportStreamFn();
+    const streamFn = resolveEmbeddedAgentStreamFn({
+      currentStreamFn: undefined,
+      providerStreamFn,
+      shouldUseWebSocketTransport: false,
+      sessionId: "session-1",
+      model: {
+        api: "openai-completions",
+        provider: "openai",
+        id: "gpt-5.4",
+      } as never,
+      resolvedApiKey: "resolved-key",
+    });
+
+    expect(isOpenAICompletionsTransportStreamFn(streamFn)).toBe(true);
   });
 });
