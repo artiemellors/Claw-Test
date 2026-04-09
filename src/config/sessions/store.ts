@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -74,6 +75,19 @@ let sessionWriteLockAcquirerForTests: typeof acquireSessionWriteLock | null = nu
 function loadSessionArchiveRuntime() {
   sessionArchiveRuntimePromise ??= import("../../gateway/session-archive.runtime.js");
   return sessionArchiveRuntimePromise;
+}
+
+export function getLoadedSessionStoreSnapshotForTest(
+  store: Record<string, SessionEntry> | undefined,
+): { hasSerializedFromDisk: boolean; hasSerializedDigest: boolean } | undefined {
+  const snapshot = getLoadedSessionStoreSnapshot(store);
+  if (!snapshot) {
+    return undefined;
+  }
+  return {
+    hasSerializedFromDisk: snapshot.serializedFromDisk !== undefined,
+    hasSerializedDigest: snapshot.serializedDigest !== undefined,
+  };
 }
 
 function shouldRetainSessionStoreSerializedCache(sizeBytes?: number): boolean {
@@ -241,7 +255,8 @@ function updateSessionStoreWriteCaches(params: {
   serialized: string;
 }): void {
   const fileStat = getFileStatSnapshot(params.storePath);
-  if (shouldRetainSessionStoreSerializedCache(fileStat?.sizeBytes)) {
+  const retainSerializedFromDisk = shouldRetainSessionStoreSerializedCache(fileStat?.sizeBytes);
+  if (retainSerializedFromDisk) {
     setSerializedSessionStore(params.storePath, params.serialized);
   } else {
     setSerializedSessionStore(params.storePath, undefined);
@@ -255,6 +270,7 @@ function updateSessionStoreWriteCaches(params: {
     rememberLoadedSessionStoreSnapshot({
       store: params.store,
       serializedFromDisk: params.serialized,
+      retainSerializedFromDisk,
     });
     dropSessionStoreObjectCache(params.storePath);
     return;
@@ -269,6 +285,7 @@ function updateSessionStoreWriteCaches(params: {
   rememberLoadedSessionStoreSnapshot({
     store: params.store,
     serializedFromDisk: params.serialized,
+    retainSerializedFromDisk,
   });
 }
 
@@ -277,11 +294,21 @@ function tryReuseLoadedSessionStoreSnapshot(params: {
   baseStore?: Record<string, SessionEntry>;
 }): Record<string, SessionEntry> | undefined {
   const snapshot = getLoadedSessionStoreSnapshot(params.baseStore);
-  if (!params.baseStore || snapshot?.serializedFromDisk === undefined) {
+  if (
+    !params.baseStore ||
+    (snapshot?.serializedFromDisk === undefined && snapshot?.serializedDigest === undefined)
+  ) {
     return undefined;
   }
   try {
-    if (fs.readFileSync(params.storePath, "utf-8") !== snapshot.serializedFromDisk) {
+    const serialized = fs.readFileSync(params.storePath, "utf-8");
+    if (snapshot.serializedFromDisk !== undefined) {
+      if (serialized !== snapshot.serializedFromDisk) {
+        return undefined;
+      }
+      return params.baseStore;
+    }
+    if (createHash("sha256").update(serialized).digest("hex") !== snapshot.serializedDigest) {
       return undefined;
     }
     return params.baseStore;

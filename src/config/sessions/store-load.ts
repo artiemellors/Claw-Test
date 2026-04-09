@@ -1,7 +1,12 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeSessionDeliveryFields } from "../../utils/delivery-context.js";
 import { getFileStatSnapshot } from "../cache-utils.js";
+import {
+  resolveSessionObjectCacheMaxBytes,
+  SESSION_OBJECT_CACHE_MAX_BYTES_ENV,
+} from "./store-cache-limit.js";
 import {
   dropSessionStoreObjectCache,
   getSerializedSessionStore,
@@ -11,10 +16,6 @@ import {
   setSerializedSessionStore,
   writeSessionStoreCache,
 } from "./store-cache.js";
-import {
-  resolveSessionObjectCacheMaxBytes,
-  SESSION_OBJECT_CACHE_MAX_BYTES_ENV,
-} from "./store-cache-limit.js";
 import { applySessionStoreMigrations } from "./store-migrations.js";
 import { normalizeSessionRuntimeModelFields, type SessionEntry } from "./types.js";
 
@@ -24,9 +25,13 @@ export type LoadSessionStoreOptions = {
 
 const log = createSubsystemLogger("sessions/store");
 const WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS = new Set<string>();
+type LoadedSessionStoreSnapshot = {
+  serializedFromDisk?: string;
+  serializedDigest?: string;
+};
 let loadedSessionStoreSnapshots = new WeakMap<
   Record<string, SessionEntry>,
-  { serializedFromDisk?: string }
+  LoadedSessionStoreSnapshot
 >();
 
 export function clearSessionObjectCacheLimitWarningsForTest(): void {
@@ -40,15 +45,21 @@ export function clearLoadedSessionStoreSnapshotsForTest(): void {
 export function rememberLoadedSessionStoreSnapshot(params: {
   store: Record<string, SessionEntry>;
   serializedFromDisk?: string;
+  retainSerializedFromDisk?: boolean;
 }): void {
+  const retainSerializedFromDisk = params.retainSerializedFromDisk ?? true;
   loadedSessionStoreSnapshots.set(params.store, {
-    serializedFromDisk: params.serializedFromDisk,
+    serializedFromDisk: retainSerializedFromDisk ? params.serializedFromDisk : undefined,
+    serializedDigest:
+      !retainSerializedFromDisk && params.serializedFromDisk
+        ? createHash("sha256").update(params.serializedFromDisk).digest("hex")
+        : undefined,
   });
 }
 
 export function getLoadedSessionStoreSnapshot(
   store: Record<string, SessionEntry> | undefined,
-): { serializedFromDisk?: string } | undefined {
+): LoadedSessionStoreSnapshot | undefined {
   if (!store) {
     return undefined;
   }
@@ -257,9 +268,11 @@ export function loadSessionStore(
   }
 
   const clonedStore = structuredClone(store);
+  const retainSerializedFromDisk = shouldRetainSessionStoreSerializedCache(fileStat?.sizeBytes);
   rememberLoadedSessionStoreSnapshot({
     store: clonedStore,
     serializedFromDisk,
+    retainSerializedFromDisk,
   });
   return clonedStore;
 }

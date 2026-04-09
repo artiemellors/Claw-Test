@@ -40,6 +40,7 @@ async function applyResetFixture(params: {
   sessionEntry?: Partial<SessionEntry>;
 }) {
   const fixture = createResetFixture(params.sessionEntry);
+  const { applyResetModelOverride } = await import("./session-reset-model.js");
   await applyResetModelOverride({
     cfg: fixture.cfg,
     resetTriggered: params.resetTriggered,
