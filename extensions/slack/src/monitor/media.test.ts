@@ -53,10 +53,14 @@ describe("fetchWithSlackAuth", () => {
 
     // Verify fetch was called with correct params
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch).toHaveBeenCalledWith("https://files.slack.com/test.jpg", {
-      headers: { Authorization: "Bearer xoxb-test-token" },
-      redirect: "manual",
-    });
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      "https://files.slack.com/test.jpg",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(new Headers(mockFetch.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer xoxb-test-token",
+    );
   });
 
   it("rejects non-Slack hosts to avoid leaking tokens", async () => {
@@ -68,7 +72,7 @@ describe("fetchWithSlackAuth", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("follows redirects without Authorization header", async () => {
+  it("keeps Authorization on redirects that stay on Slack hosts", async () => {
     // First call: redirect response from Slack
     const redirectResponse = new Response(null, {
       status: 302,
@@ -89,16 +93,23 @@ describe("fetchWithSlackAuth", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
 
     // First call should have Authorization header and manual redirect
-    expect(mockFetch).toHaveBeenNthCalledWith(1, "https://files.slack.com/test.jpg", {
-      headers: { Authorization: "Bearer xoxb-test-token" },
-      redirect: "manual",
-    });
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      1,
+      "https://files.slack.com/test.jpg",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(new Headers(mockFetch.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer xoxb-test-token",
+    );
 
-    // Second call should follow the redirect without Authorization
+    // Second call should keep Authorization for Slack-owned redirect targets.
     expect(mockFetch).toHaveBeenNthCalledWith(
       2,
       "https://cdn.slack-edge.com/presigned-url?sig=abc123",
-      { redirect: "follow" },
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(new Headers(mockFetch.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer xoxb-test-token",
     );
   });
 
@@ -119,9 +130,38 @@ describe("fetchWithSlackAuth", () => {
     await fetchWithSlackAuth("https://files.slack.com/original.jpg", "xoxb-test-token");
 
     // Second call should resolve the relative URL against the original
-    expect(mockFetch).toHaveBeenNthCalledWith(2, "https://files.slack.com/files/redirect-target", {
-      redirect: "follow",
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      "https://files.slack.com/files/redirect-target",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(new Headers(mockFetch.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer xoxb-test-token",
+    );
+  });
+
+  it("drops Authorization when redirects leave Slack-owned hosts", async () => {
+    const redirectResponse = new Response(null, {
+      status: 302,
+      headers: { location: "https://example.com/presigned-url?sig=abc123" },
     });
+
+    const fileResponse = new Response(Buffer.from("image data"), {
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+    });
+
+    mockFetch.mockResolvedValueOnce(redirectResponse).mockResolvedValueOnce(fileResponse);
+
+    const result = await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
+
+    expect(result).toBe(fileResponse);
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      "https://example.com/presigned-url?sig=abc123",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(new Headers(mockFetch.mock.calls[1]?.[1]?.headers).get("authorization")).toBeNull();
   });
 
   it("returns redirect response when no location header is provided", async () => {
@@ -168,9 +208,14 @@ describe("fetchWithSlackAuth", () => {
     await fetchWithSlackAuth("https://files.slack.com/test.jpg", "xoxb-test-token");
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenNthCalledWith(2, "https://cdn.slack.com/new-url", {
-      redirect: "follow",
-    });
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      "https://cdn.slack.com/new-url",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(new Headers(mockFetch.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Bearer xoxb-test-token",
+    );
   });
 });
 

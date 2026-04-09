@@ -89,40 +89,45 @@ function createSlackMediaFetch(token: string): FetchLike {
 /**
  * Fetches a URL with Authorization header, handling cross-origin redirects.
  * Node.js fetch strips Authorization headers on cross-origin redirects for security.
- * Slack's file URLs redirect to CDN domains with pre-signed URLs that don't need the
- * Authorization header, so we handle the initial auth request manually.
+ * Re-attach the token on redirect hops that still target Slack-owned HTTPS hosts,
+ * while continuing to drop the header for non-Slack redirects.
  */
 export async function fetchWithSlackAuth(url: string, token: string): Promise<Response> {
-  const parsed = assertSlackFileUrl(url);
+  let currentUrl = url;
+  let requireSlackHost = true;
+  let redirectCount = 0;
+  const visited = new Set<string>();
 
-  // Initial request with auth and manual redirect handling
-  const initialRes = await fetch(parsed.href, {
-    headers: { Authorization: `Bearer ${token}` },
-    redirect: "manual",
-  });
+  while (true) {
+    const request = createSlackMediaRequest(currentUrl, token, undefined, { requireSlackHost });
+    requireSlackHost = false;
 
-  // If not a redirect, return the response directly
-  if (initialRes.status < 300 || initialRes.status >= 400) {
-    return initialRes;
+    const response = await fetch(request.url, request.init);
+    if (response.status < 300 || response.status >= 400) {
+      return response;
+    }
+
+    const redirectUrl = response.headers.get("location");
+    if (!redirectUrl) {
+      return response;
+    }
+
+    const resolvedUrl = new URL(redirectUrl, request.url);
+    if (resolvedUrl.protocol !== "https:") {
+      return response;
+    }
+
+    const nextUrl = resolvedUrl.toString();
+    if (visited.has(nextUrl)) {
+      throw new Error("Redirect loop detected while fetching Slack media");
+    }
+    visited.add(nextUrl);
+    redirectCount += 1;
+    if (redirectCount > 3) {
+      throw new Error("Too many redirects while fetching Slack media");
+    }
+    currentUrl = nextUrl;
   }
-
-  // Handle redirect - the redirected URL should be pre-signed and not need auth
-  const redirectUrl = initialRes.headers.get("location");
-  if (!redirectUrl) {
-    return initialRes;
-  }
-
-  // Resolve relative URLs against the original
-  const resolvedUrl = new URL(redirectUrl, parsed.href);
-
-  // Only follow safe protocols (we do NOT include Authorization on redirects).
-  if (resolvedUrl.protocol !== "https:") {
-    return initialRes;
-  }
-
-  // Follow the redirect without the Authorization header
-  // (Slack's CDN URLs are pre-signed and don't need it)
-  return fetch(resolvedUrl.toString(), { redirect: "follow" });
 }
 
 const SLACK_MEDIA_SSRF_POLICY = {
