@@ -106,15 +106,20 @@ function estimateSafeToolCallChars(block: unknown): number {
   }
   const record = block as {
     name?: unknown;
+    input?: unknown;
     arguments?: unknown;
   };
   let chars = typeof record.name === "string" ? record.name.length : 0;
   try {
-    chars += JSON.stringify(record.arguments ?? {}).length;
+    chars += JSON.stringify(record.input ?? record.arguments ?? {}).length;
   } catch {
     chars += 0;
   }
   return chars;
+}
+
+function isFallbackToolCallType(type: unknown): boolean {
+  return type === "toolCall" || type === "toolUse" || type === "functionCall";
 }
 
 function estimateSafeArrayContentChars(content: unknown): number {
@@ -140,7 +145,7 @@ function estimateSafeArrayContentChars(content: unknown): number {
       chars += record.thinking.length;
       continue;
     }
-    if (record.type === "toolCall") {
+    if (isFallbackToolCallType(record.type)) {
       chars += estimateSafeToolCallChars(block);
       continue;
     }

@@ -203,7 +203,7 @@ type CompactionMessageMetrics = {
   messages: number;
   historyTextChars: number;
   toolResultChars: number;
-  estTokens?: number;
+  estTokens: number;
   contributors: Array<{ role: string; chars: number; tool?: string }>;
 };
 
@@ -316,7 +316,6 @@ function summarizeCompactionMessages(messages: AgentMessage[]): CompactionMessag
   let toolResultChars = 0;
   const contributors: Array<{ role: string; chars: number; tool?: string }> = [];
   let estTokens = 0;
-  let tokenEstimationFailed = false;
 
   for (const msg of messages) {
     const role = typeof msg.role === "string" ? msg.role : "unknown";
@@ -326,20 +325,14 @@ function summarizeCompactionMessages(messages: AgentMessage[]): CompactionMessag
       toolResultChars += chars;
     }
     contributors.push({ role, chars, tool: resolveMessageToolLabel(msg) });
-    if (!tokenEstimationFailed) {
-      try {
-        estTokens += estimateMessageTokens(msg);
-      } catch {
-        tokenEstimationFailed = true;
-      }
-    }
+    estTokens += estimateMessageTokens(msg);
   }
 
   return {
     messages: messages.length,
     historyTextChars,
     toolResultChars,
-    estTokens: tokenEstimationFailed ? undefined : estTokens,
+    estTokens,
     contributors: contributors.toSorted((a, b) => b.chars - a.chars).slice(0, 3),
   };
 }

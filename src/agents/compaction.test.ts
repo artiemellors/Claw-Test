@@ -84,6 +84,28 @@ describe("estimateMessageTokens", () => {
     );
   });
 
+  it("counts provider-specific tool-call payloads in the fallback estimator", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        { type: "text" },
+        { type: "toolUse", id: "call_2", name: "read", input: { path: "IDENTITY.md" } },
+        { type: "functionCall", id: "call_3", name: "bash", arguments: { command: "pwd" } },
+      ],
+      timestamp: 1,
+    } as unknown as AgentMessage;
+
+    expect(estimateMessageTokens(message)).toBe(
+      Math.ceil(
+        ("read".length +
+          JSON.stringify({ path: "IDENTITY.md" }).length +
+          "bash".length +
+          JSON.stringify({ command: "pwd" }).length) /
+          4,
+      ),
+    );
+  });
+
   it("returns zero for assistant messages missing content arrays", () => {
     const message = {
       role: "assistant",
