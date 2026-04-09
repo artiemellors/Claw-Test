@@ -130,4 +130,80 @@ describe("createOpenClawCodingTools read behavior", () => {
     });
     expect(details?.truncation).not.toHaveProperty("content");
   });
+
+  it("throws when path is missing for read tool execution", async () => {
+    const baseRead: AgentTool = {
+      name: "read",
+      label: "read",
+      description: "test read",
+      parameters: Type.Object({ path: Type.String() }),
+      execute: vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+        details: {},
+      })),
+    };
+
+    const wrapped = createOpenClawReadTool(
+      baseRead as unknown as Parameters<typeof createOpenClawReadTool>[0],
+    );
+
+    await expect(wrapped.execute("read-missing-path", {})).rejects.toThrow(
+      "Missing required parameter: path",
+    );
+  });
+
+  it("clamps offset and retries when base read reports offset beyond EOF", async () => {
+    const execute = vi
+      .fn<AgentTool["execute"]>()
+      .mockRejectedValueOnce(new Error("Offset 1830 is beyond end of file (1829 lines total)"))
+      .mockResolvedValueOnce({
+        content: [{ type: "text" as const, text: "line-1829" }],
+        details: {},
+      });
+
+    const baseRead: AgentTool = {
+      name: "read",
+      label: "read",
+      description: "test read",
+      parameters: Type.Object({
+        path: Type.String(),
+        offset: Type.Optional(Type.Number()),
+      }),
+      execute,
+    };
+
+    const wrapped = createOpenClawReadTool(
+      baseRead as unknown as Parameters<typeof createOpenClawReadTool>[0],
+    );
+
+    const result = await wrapped.execute("read-clamp-offset", { path: "demo.txt", offset: 1830 });
+    expect(extractToolText(result)).toContain("line-1829");
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1]?.[1]).toMatchObject({ path: "demo.txt", offset: 1829 });
+  });
+
+  it("returns empty text when offset is beyond EOF for empty file", async () => {
+    const execute = vi
+      .fn<AgentTool["execute"]>()
+      .mockRejectedValueOnce(new Error("Offset 1 is beyond end of file (0 lines total)"));
+
+    const baseRead: AgentTool = {
+      name: "read",
+      label: "read",
+      description: "test read",
+      parameters: Type.Object({
+        path: Type.String(),
+        offset: Type.Optional(Type.Number()),
+      }),
+      execute,
+    };
+
+    const wrapped = createOpenClawReadTool(
+      baseRead as unknown as Parameters<typeof createOpenClawReadTool>[0],
+    );
+
+    const result = await wrapped.execute("read-empty-clamp", { path: "empty.txt", offset: 1 });
+    expect(extractToolText(result)).toBe("");
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
 });
