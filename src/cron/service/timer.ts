@@ -369,7 +369,10 @@ function emitFailureAlert(
     return;
   }
 
-  state.deps.enqueueSystemEvent(text, { agentId: params.job.agentId });
+  state.deps.enqueueSystemEvent(text, {
+    agentId: params.job.agentId,
+    wakeRequested: true,
+  });
   if (params.job.wakeMode === "now") {
     state.deps.requestHeartbeatNow({ reason: `cron:${params.job.id}:failure-alert` });
   }
@@ -1175,6 +1178,7 @@ async function executeMainSessionCronJob(
     agentId: job.agentId,
     sessionKey: targetMainSessionKey,
     contextKey: `cron:${job.id}`,
+    wakeRequested: true,
   });
   if (job.wakeMode === "now" && state.deps.runHeartbeatOnce) {
     const reason = `cron:${job.id}`;
@@ -1370,7 +1374,7 @@ export function wake(
   if (!text) {
     return { ok: false } as const;
   }
-  state.deps.enqueueSystemEvent(text);
+  state.deps.enqueueSystemEvent(text, { wakeRequested: true });
   if (opts.mode === "now") {
     state.deps.requestHeartbeatNow({ reason: "wake" });
   }

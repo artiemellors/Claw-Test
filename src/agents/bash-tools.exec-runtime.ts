@@ -314,7 +314,12 @@ export function applyShellPath(env: Record<string, string>, shellPath?: string |
 }
 
 function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "failed") {
-  if (!session.backgrounded || !session.notifyOnExit || session.exitNotified) {
+  if (
+    !session.backgrounded ||
+    !session.notifyOnExit ||
+    session.exitNotified ||
+    (session.pollWaitingCount ?? 0) > 0
+  ) {
     return;
   }
   const sessionKey = session.sessionKey?.trim();
@@ -332,9 +337,9 @@ function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "faile
     return;
   }
   const summary = output
-    ? `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel}) :: ${output}`
-    : `Exec ${status} (${session.id.slice(0, 8)}, ${exitLabel})`;
-  enqueueSystemEvent(summary, { sessionKey, trusted: false });
+    ? `Exec ${status} (${session.id}, ${exitLabel}) :: ${output}`
+    : `Exec ${status} (${session.id}, ${exitLabel})`;
+  enqueueSystemEvent(summary, { sessionKey, trusted: false, wakeRequested: true });
   requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
 }
 
@@ -406,7 +411,7 @@ export function emitExecSystemEvent(
   if (!sessionKey) {
     return;
   }
-  enqueueSystemEvent(text, { sessionKey, contextKey: opts.contextKey });
+  enqueueSystemEvent(text, { sessionKey, contextKey: opts.contextKey, wakeRequested: true });
   requestHeartbeatNow(scopedHeartbeatWakeOptions(sessionKey, { reason: "exec-event" }));
 }
 
