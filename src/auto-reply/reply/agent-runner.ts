@@ -574,6 +574,24 @@ export async function runReplyAgent(params: {
       activeSessionEntry?.contextTokens ??
       DEFAULT_CONTEXT_TOKENS;
 
+    // Determine the intended model target for fallback detection.
+    // When a LiveSessionModelSwitchError is handled inside the fallback chain
+    // (model-fallback.ts), the switch target becomes the user's intended model
+    // but selectedProvider/selectedModel still reflect the original primary.
+    // Use the switch target as the baseline so the successful switch isn't
+    // mislabelled as a fallback.
+    let intendedProvider = selectedProvider;
+    let intendedModel = selectedModel;
+    if (fallbackAttempts?.length) {
+      for (const attempt of fallbackAttempts) {
+        const match = attempt.error?.match(/^Live session model switch requested: (.+?)\/(.+)/);
+        if (match) {
+          intendedProvider = match[1];
+          intendedModel = match[2];
+        }
+      }
+    }
+    const isFromFallback = providerUsed !== intendedProvider || modelUsed !== intendedModel;
     await persistRunSessionUsage({
       storePath,
       sessionKey,
@@ -583,6 +601,7 @@ export async function runReplyAgent(params: {
       promptTokens,
       modelUsed,
       providerUsed,
+      isFromFallback,
       contextTokensUsed,
       systemPromptReport: runResult.meta?.systemPromptReport,
       cliSessionId,

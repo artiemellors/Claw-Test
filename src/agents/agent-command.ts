@@ -767,6 +767,7 @@ async function agentCommandInternal(
     let result: Awaited<ReturnType<typeof runAgentAttempt>>;
     let fallbackProvider = provider;
     let fallbackModel = model;
+    let fallbackAttempts: { error: string }[] = [];
     const MAX_LIVE_SWITCH_RETRIES = 5;
     let liveSwitchRetries = 0;
     for (;;) {
@@ -836,6 +837,7 @@ async function agentCommandInternal(
         result = fallbackResult.result;
         fallbackProvider = fallbackResult.provider;
         fallbackModel = fallbackResult.model;
+        fallbackAttempts = fallbackResult.attempts;
         if (!lifecycleEnded) {
           const stopReason = result.meta.stopReason;
           if (stopReason && stopReason !== "end_turn") {
@@ -948,6 +950,25 @@ async function agentCommandInternal(
 
     // Update token+model fields in the session store.
     if (sessionStore && sessionKey) {
+      // Determine the intended model target for fallback detection.
+      // When a LiveSessionModelSwitchError is handled inside the fallback chain
+      // (model-fallback.ts), the switch target becomes the user's intended model
+      // but provider/model still reflect the original primary. Use the switch
+      // target as the baseline so the successful switch isn't mislabelled as
+      // a fallback.
+      let intendedProvider = provider;
+      let intendedModel = model;
+      if (fallbackAttempts.length) {
+        for (const attempt of fallbackAttempts) {
+          const match = attempt.error?.match(/^Live session model switch requested: (.+?)\/(.+)/);
+          if (match) {
+            intendedProvider = match[1];
+            intendedModel = match[2];
+          }
+        }
+      }
+      const isFromFallback =
+        fallbackProvider !== intendedProvider || fallbackModel !== intendedModel;
       await updateSessionStoreAfterAgentRun({
         cfg,
         contextTokensOverride: agentCfg?.contextTokens,
@@ -959,6 +980,7 @@ async function agentCommandInternal(
         defaultModel: model,
         fallbackProvider,
         fallbackModel,
+        isFromFallback,
         result,
       });
     }

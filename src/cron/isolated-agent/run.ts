@@ -503,9 +503,29 @@ async function finalizeCronRun(params: {
     resolvePositiveContextTokens(prepared.cronSession.sessionEntry.contextTokens) ??
     DEFAULT_CONTEXT_TOKENS;
 
+  // Model is from fallback if the successfully-used provider/model differs
+  // from the configured target. LiveSessionModelSwitchError updates the
+  // configured snapshot so model switches are not treated as fallbacks.
+  // When runWithModelFallback consumes a LiveSessionModelSwitchError internally
+  // (without it reaching the outer retry loop in executeCronRun), the configured
+  // snapshot is not updated. Check fallbackAttempts for switch requests to
+  // derive the actual intended target so live switches aren't mislabelled.
+  let intendedProvider = execution.configuredProvider;
+  let intendedModel = execution.configuredModel;
+  if (execution.fallbackAttempts?.length) {
+    for (const attempt of execution.fallbackAttempts) {
+      const match = attempt.error?.match(/^Live session model switch requested: (.+?)\/(.+)/);
+      if (match) {
+        intendedProvider = match[1];
+        intendedModel = match[2];
+      }
+    }
+  }
+  const isFromFallback = providerUsed !== intendedProvider || modelUsed !== intendedModel;
   setSessionRuntimeModel(prepared.cronSession.sessionEntry, {
     provider: providerUsed,
     model: modelUsed,
+    isFromFallback,
   });
   prepared.cronSession.sessionEntry.contextTokens = contextTokens;
   if (isCliProvider(providerUsed, prepared.cfgWithAgentDefaults)) {
