@@ -20,6 +20,7 @@ const routeState = vi.hoisted(() => ({
 }));
 
 const chromeMcpMocks = vi.hoisted(() => ({
+  clickChromeMcpElement: vi.fn(async () => {}),
   evaluateChromeMcpScript: vi.fn(
     async (_params: { profileName: string; targetId: string; fn: string }) => true,
   ),
@@ -34,7 +35,7 @@ const chromeMcpMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../chrome-mcp.js", () => ({
-  clickChromeMcpElement: vi.fn(async () => {}),
+  clickChromeMcpElement: chromeMcpMocks.clickChromeMcpElement,
   closeChromeMcpTab: vi.fn(async () => {}),
   dragChromeMcpElement: vi.fn(async () => {}),
   evaluateChromeMcpScript: chromeMcpMocks.evaluateChromeMcpScript,
@@ -130,6 +131,7 @@ function getActPostHandler() {
 describe("existing-session browser routes", () => {
   beforeEach(() => {
     routeState.profileCtx.ensureTabAvailable.mockClear();
+    chromeMcpMocks.clickChromeMcpElement.mockClear();
     chromeMcpMocks.evaluateChromeMcpScript.mockReset();
     chromeMcpMocks.navigateChromeMcpPage.mockClear();
     chromeMcpMocks.takeChromeMcpScreenshot.mockClear();
@@ -248,6 +250,33 @@ describe("existing-session browser routes", () => {
       profileName: "chrome-live",
       targetId: "7",
       fn: "() => window.location.href",
+    });
+  });
+
+  it("forwards click timeoutMs to the existing-session click executor", async () => {
+    const handler = getActPostHandler();
+    const response = createBrowserRouteResponse();
+    const ctrl = new AbortController();
+
+    await handler?.(
+      {
+        params: {},
+        query: {},
+        body: { kind: "click", ref: "btn-1", timeoutMs: 1234 },
+        signal: ctrl.signal,
+      },
+      response.res,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(chromeMcpMocks.clickChromeMcpElement).toHaveBeenCalledWith({
+      profileName: "chrome-live",
+      userDataDir: undefined,
+      targetId: "7",
+      uid: "btn-1",
+      doubleClick: false,
+      timeoutMs: 1234,
+      signal: ctrl.signal,
     });
   });
 });
