@@ -341,10 +341,20 @@ function collectAcpMetadataSnapshot(
   const snapshot = new Map<string, NonNullable<SessionEntry["acp"]>>();
   for (const [sessionKey, entry] of Object.entries(store)) {
     if (entry?.acp) {
-      snapshot.set(sessionKey, entry.acp);
+      snapshot.set(sessionKey, structuredClone(entry.acp));
     }
   }
   return snapshot;
+}
+
+function getLoadedSnapshotAcpMetadata(
+  store: Record<string, SessionEntry> | undefined,
+): Map<string, NonNullable<SessionEntry["acp"]>> | undefined {
+  const snapshot = getLoadedSessionStoreSnapshot(store);
+  if (!snapshot) {
+    return undefined;
+  }
+  return new Map(snapshot.acpByKey);
 }
 
 function preserveExistingAcpMetadata(params: {
@@ -568,10 +578,13 @@ export async function updateSessionStore<T>(
   opts?: UpdateSessionStoreOptions,
 ): Promise<T> {
   return await withSessionStoreLock(storePath, async () => {
-    const store =
-      tryReuseLoadedSessionStoreSnapshot({ storePath, baseStore: opts?.baseStore }) ??
-      loadSessionStore(storePath, { skipCache: true });
-    const previousAcpByKey = collectAcpMetadataSnapshot(store);
+    const reusedBaseStore = tryReuseLoadedSessionStoreSnapshot({
+      storePath,
+      baseStore: opts?.baseStore,
+    });
+    const store = reusedBaseStore ?? loadSessionStore(storePath, { skipCache: true });
+    const previousAcpByKey =
+      getLoadedSnapshotAcpMetadata(reusedBaseStore) ?? collectAcpMetadataSnapshot(store);
     try {
       const result = await mutator(store);
       preserveExistingAcpMetadata({

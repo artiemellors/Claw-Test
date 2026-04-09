@@ -28,6 +28,7 @@ const WARNED_SESSION_OBJECT_CACHE_LIMIT_PATHS = new Set<string>();
 type LoadedSessionStoreSnapshot = {
   serializedFromDisk?: string;
   serializedDigest?: string;
+  acpByKey: Map<string, NonNullable<SessionEntry["acp"]>>;
 };
 let loadedSessionStoreSnapshots = new WeakMap<
   Record<string, SessionEntry>,
@@ -54,6 +55,7 @@ export function rememberLoadedSessionStoreSnapshot(params: {
       !retainSerializedFromDisk && params.serializedFromDisk
         ? createHash("sha256").update(params.serializedFromDisk).digest("hex")
         : undefined,
+    acpByKey: collectAcpMetadataSnapshot(params.store),
   });
 }
 
@@ -77,6 +79,18 @@ export function forgetLoadedSessionStoreSnapshot(
 
 function isSessionStoreRecord(value: unknown): value is Record<string, SessionEntry> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function collectAcpMetadataSnapshot(
+  store: Record<string, SessionEntry>,
+): Map<string, NonNullable<SessionEntry["acp"]>> {
+  const snapshot = new Map<string, NonNullable<SessionEntry["acp"]>>();
+  for (const [sessionKey, entry] of Object.entries(store)) {
+    if (entry?.acp) {
+      snapshot.set(sessionKey, structuredClone(entry.acp));
+    }
+  }
+  return snapshot;
 }
 
 function warnSessionObjectCacheLimitHit(params: {
