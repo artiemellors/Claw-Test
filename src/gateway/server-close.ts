@@ -472,7 +472,7 @@ export function createGatewayCloseHandler(params: {
         GATEWAY_WSS_CLOSE_TIMEOUT_MS,
       );
       if (wssCloseResult === "timeout") {
-        params.logger?.warn?.(
+        (params.logger?.warn ?? log.warn)?.(
           `[gateway] websocket server close timed out after ${GATEWAY_WSS_CLOSE_TIMEOUT_MS}ms, forcing client termination and continuing shutdown`,
         );
         const wssClients = (params.wss as { clients?: Iterable<{ terminate?: () => void }> })

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RestartSentinelPayload } from "../infra/restart-sentinel.js";
 import { createGatewayCloseHandler } from "./server-close.js";
 
@@ -163,6 +163,27 @@ describe("createGatewayCloseHandler", () => {
     expect(harness.stalledSocketTerminate).toHaveBeenCalledTimes(1);
     expect(harness.loggerWarn).toHaveBeenCalledWith(
       expect.stringContaining("forcing client termination"),
+    );
+    expect(harness.stopTaskRegistryMaintenance).toHaveBeenCalledTimes(1);
+
+    await closePromise;
+    harness.dispose();
+  });
+
+  it("falls back to subsystem logging when websocket close stalls without params.logger", async () => {
+    vi.useFakeTimers();
+    const harness = createCloseHarness({ stallWssClose: true, omitLogger: true });
+
+    let settled = false;
+    const closePromise = harness.close().then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(2_100);
+    await Promise.resolve();
+    expect(settled).toBe(true);
+    expect(harness.stalledSocketTerminate).toHaveBeenCalledTimes(1);
+    expect(subsystemLoggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining("websocket server close timed out after 2000ms"),
     );
     expect(harness.stopTaskRegistryMaintenance).toHaveBeenCalledTimes(1);
 
