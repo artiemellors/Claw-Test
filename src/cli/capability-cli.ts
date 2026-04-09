@@ -834,10 +834,13 @@ async function runVideoGenerate(params: { prompt: string; model?: string; output
           const { Readable } = await import("stream");
           const { createWriteStream } = await import("fs");
           const mimeType = normalizeMimeType(video.mimeType);
+          // Use || not ?? so empty strings fall through to the next candidate.
+          // path.extname always returns a string (often ""), so ?? would never
+          // reach the third fallback.
           const ext =
-            extensionForMime(mimeType) ??
-            path.extname(video.fileName ?? "") ??
-            path.extname(params.output);
+            extensionForMime(mimeType) ||
+            path.extname(video.fileName ?? "") ||
+            path.extname(params.output ?? "");
           const resolvedOutput = path.resolve(params.output);
           const parsed = path.parse(resolvedOutput);
           const filePath =
