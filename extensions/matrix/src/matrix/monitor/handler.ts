@@ -1409,7 +1409,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                 payloadReplyToId !== currentDraftReplyToId;
               const shouldFinalizeLiveInStop =
                 !quietDraftStreaming &&
-                !hasMedia &&
                 !payloadReplyMismatch &&
                 !draftStream.mustDeliverFinalNormally() &&
                 typeof payload.text === "string" &&
