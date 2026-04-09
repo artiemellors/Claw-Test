@@ -10,6 +10,7 @@ import {
 import { resolveUserPath } from "../utils.js";
 import { maxBytesForKind, type MediaKind } from "./constants.js";
 import { fetchRemoteMedia } from "./fetch.js";
+import { runFfprobe } from "./ffmpeg-exec.js";
 import {
   convertHeicToJpeg,
   hasAlphaChannel,
@@ -23,7 +24,13 @@ import {
   LocalMediaAccessError,
   type LocalMediaAccessErrorCode,
 } from "./local-media-access.js";
-import { detectMime, extensionForMime, kindFromMime, normalizeMimeType } from "./mime.js";
+import {
+  detectMime,
+  extensionForMime,
+  getFileExtension,
+  kindFromMime,
+  normalizeMimeType,
+} from "./mime.js";
 
 export { getDefaultLocalRoots, LocalMediaAccessError };
 export type { LocalMediaAccessErrorCode };
@@ -104,7 +111,8 @@ function isPixelLimitError(error: unknown): boolean {
 }
 
 function isHeicSource(opts: { contentType?: string; fileName?: string }): boolean {
-  if (HEIC_MIME_RE.test(normalizeOptionalString(opts.contentType) ?? "")) {
+  const normalizedContentType = normalizeMimeType(opts.contentType);
+  if (normalizedContentType && HEIC_MIME_RE.test(normalizedContentType)) {
     return true;
   }
   if (HEIC_EXT_RE.test(normalizeOptionalString(opts.fileName) ?? "")) {
@@ -135,6 +143,56 @@ function assertHostReadMediaAllowed(params: {
     "path-not-allowed",
     `Host-local media sends only allow images, audio, video, PDF, and Office documents (got ${normalizedMime ?? "unknown"}).`,
   );
+}
+
+function isRemoteUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function shouldConvertHeicBuffer(opts: { contentType?: string; fileName?: string }): boolean {
+  return isHeicSource(opts);
+}
+
+async function normalizeAudioOnlyWebmMime(
+  filePath: string,
+  contentType?: string,
+): Promise<string | undefined> {
+  if (contentType !== "video/webm" || getFileExtension(filePath) !== ".webm") {
+    return contentType;
+  }
+  if (isRemoteUrl(filePath)) {
+    return contentType;
+  }
+
+  try {
+    const stdout = await runFfprobe([
+      "-v",
+      "error",
+      "-show_entries",
+      "stream=codec_type",
+      "-of",
+      "default=noprint_wrappers=1:nokey=1",
+      filePath,
+    ]);
+    const streamKinds = new Set(
+      stdout
+        .split(/\r?\n/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    if (streamKinds.has("audio") && !streamKinds.has("video")) {
+      return "audio/webm";
+    }
+  } catch {
+    // Keep the original type when ffprobe is unavailable or the file cannot be probed.
+  }
+
+  return contentType;
 }
 
 function toJpegFileName(fileName?: string): string | undefined {
@@ -185,9 +243,11 @@ async function optimizeImageWithFallback(params: {
   meta?: { contentType?: string; fileName?: string };
 }): Promise<OptimizedImage> {
   const { buffer, cap, meta } = params;
+  const sourceLooksHeic = isHeicSource(meta ?? {});
   const isPng =
-    meta?.contentType === "image/png" ||
-    normalizeLowercaseStringOrEmpty(meta?.fileName).endsWith(".png");
+    !sourceLooksHeic &&
+    (meta?.contentType === "image/png" ||
+      normalizeLowercaseStringOrEmpty(meta?.fileName).endsWith(".png"));
   const hasAlpha = isPng && (await hasAlphaChannel(buffer));
 
   if (hasAlpha) {
@@ -377,8 +437,8 @@ async function loadWebMediaInternal(
     }
   }
   const detectedMime = await detectMime({ buffer: data, filePath: mediaUrl });
-  const verifiedMime = hostReadCapability ? await detectMime({ buffer: data }) : detectedMime;
-  const mime = verifiedMime ?? detectedMime;
+  const mime = await normalizeAudioOnlyWebmMime(mediaUrl, detectedMime);
+  const verifiedMime = hostReadCapability ? await detectMime({ buffer: data }) : undefined;
   const kind = kindFromMime(mime);
   let fileName = path.basename(mediaUrl) || undefined;
   if (fileName && !path.extname(fileName) && mime) {
@@ -390,7 +450,7 @@ async function loadWebMediaInternal(
   if (hostReadCapability) {
     assertHostReadMediaAllowed({
       contentType: verifiedMime,
-      kind: kindFromMime(detectedMime ?? verifiedMime),
+      kind: kindFromMime(verifiedMime ?? detectedMime),
     });
   }
   return await clampAndFinalize({
@@ -435,7 +495,7 @@ export async function optimizeImageToJpeg(
 }> {
   // Try a grid of sizes/qualities until under the limit.
   let source = buffer;
-  if (isHeicSource(opts)) {
+  if (shouldConvertHeicBuffer(opts)) {
     try {
       source = await convertHeicToJpeg(buffer);
     } catch (err) {

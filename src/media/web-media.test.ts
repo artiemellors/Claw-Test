@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { importFreshModule } from "../../test/helpers/import-fresh.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
 import { createJpegBufferWithDimensions, createPngBufferWithDimensions } from "./test-helpers.js";
@@ -20,6 +21,15 @@ let fakePdfFile = "";
 let oversizedJpegFile = "";
 let realPdfFile = "";
 let tinyPngFile = "";
+let fakeHeicFile = "";
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.resetModules();
+  vi.doUnmock("./image-ops.js");
+  vi.doUnmock("./mime.js");
+  vi.doUnmock("./ffmpeg-exec.js");
+});
 
 beforeAll(async () => {
   ({ loadWebMedia } = await import("./web-media.js"));
@@ -29,12 +39,14 @@ beforeAll(async () => {
   realPdfFile = path.join(fixtureRoot, "real.pdf");
   tinyPngFile = path.join(fixtureRoot, "tiny.png");
   oversizedJpegFile = path.join(fixtureRoot, "oversized.jpg");
+  fakeHeicFile = path.join(fixtureRoot, "tiny.heic");
   await fs.writeFile(fakePdfFile, "TOP_SECRET_TEXT", "utf8");
   await fs.writeFile(
     realPdfFile,
     Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"),
   );
   await fs.writeFile(tinyPngFile, Buffer.from(TINY_PNG_BASE64, "base64"));
+  await fs.writeFile(fakeHeicFile, Buffer.from(TINY_PNG_BASE64, "base64"));
   await fs.writeFile(
     oversizedJpegFile,
     createJpegBufferWithDimensions({ width: 6_000, height: 5_000 }),
@@ -183,6 +195,153 @@ describe("loadWebMedia", () => {
       expect(result.kind).toBe("image");
       expect(result.buffer.length).toBeGreaterThan(0);
     });
+  });
+
+  it("normalizes HEIC local files to JPEG output", async () => {
+    const result = await loadWebMedia(fakeHeicFile, createLocalWebMediaOptions());
+
+    expect(result.kind).toBe("image");
+    expect(result.contentType).toBe("image/jpeg");
+    expect(result.fileName).toBe("tiny.jpg");
+    expect(result.buffer[0]).toBe(0xff);
+    expect(result.buffer[1]).toBe(0xd8);
+  });
+
+  it("converts parameterized HEIC mime types before JPEG optimization", async () => {
+    const inputBuffer = Buffer.from("fake-heic");
+    const convertedBuffer = Buffer.from("converted-jpeg-source");
+    const optimizedBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const convertHeicToJpegMock = vi.fn().mockResolvedValueOnce(convertedBuffer);
+    const resizeToJpegMock = vi.fn().mockResolvedValueOnce(optimizedBuffer);
+    vi.doMock("./image-ops.js", async () => {
+      const actual = await vi.importActual<typeof import("./image-ops.js")>("./image-ops.js");
+      return {
+        ...actual,
+        convertHeicToJpeg: convertHeicToJpegMock,
+        resizeToJpeg: resizeToJpegMock,
+      };
+    });
+    const { optimizeImageToJpeg } = await importFreshModule<typeof import("./web-media.js")>(
+      import.meta.url,
+      "./web-media.js?scope=heic-mime-params",
+    );
+
+    const result = await optimizeImageToJpeg(inputBuffer, 1024, {
+      contentType: "image/heic; charset=binary",
+      fileName: "tiny.heic",
+    });
+
+    expect(convertHeicToJpegMock).toHaveBeenCalledWith(inputBuffer);
+    expect(resizeToJpegMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buffer: convertedBuffer,
+        maxSide: 2048,
+        quality: 80,
+      }),
+    );
+    expect(result.buffer).toBe(optimizedBuffer);
+  });
+
+  it("converts HEIC files identified by extension even when the mime type is mislabeled", async () => {
+    const inputBuffer = Buffer.from("fake-heic");
+    const convertedBuffer = Buffer.from("converted-jpeg-source");
+    const optimizedBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const convertHeicToJpegMock = vi.fn().mockResolvedValueOnce(convertedBuffer);
+    const resizeToJpegMock = vi.fn().mockResolvedValueOnce(optimizedBuffer);
+    vi.doMock("./image-ops.js", async () => {
+      const actual = await vi.importActual<typeof import("./image-ops.js")>("./image-ops.js");
+      return {
+        ...actual,
+        convertHeicToJpeg: convertHeicToJpegMock,
+        resizeToJpeg: resizeToJpegMock,
+      };
+    });
+    const { optimizeImageToJpeg } = await importFreshModule<typeof import("./web-media.js")>(
+      import.meta.url,
+      "./web-media.js?scope=heic-extension-fallback",
+    );
+
+    const result = await optimizeImageToJpeg(inputBuffer, 1024, {
+      contentType: "application/octet-stream",
+      fileName: "tiny.heic",
+    });
+
+    expect(convertHeicToJpegMock).toHaveBeenCalledWith(inputBuffer);
+    expect(resizeToJpegMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buffer: convertedBuffer,
+        maxSide: 2048,
+        quality: 80,
+      }),
+    );
+    expect(result.buffer).toBe(optimizedBuffer);
+  });
+
+  it("relabels audio-only webm files as audio before delivery", async () => {
+    const audioOnlyWebmFile = path.join(fixtureRoot, "voice.webm");
+    await fs.writeFile(audioOnlyWebmFile, Buffer.from("fake-webm"));
+    const detectMimeMock = vi.fn().mockResolvedValueOnce("video/webm");
+    const runFfprobeMock = vi.fn().mockResolvedValueOnce("audio\n");
+    vi.doMock("./mime.js", async () => {
+      const actual = await vi.importActual<typeof import("./mime.js")>("./mime.js");
+      return {
+        ...actual,
+        detectMime: detectMimeMock,
+      };
+    });
+    vi.doMock("./ffmpeg-exec.js", async () => {
+      const actual = await vi.importActual<typeof import("./ffmpeg-exec.js")>("./ffmpeg-exec.js");
+      return {
+        ...actual,
+        runFfprobe: runFfprobeMock,
+      };
+    });
+    const { loadWebMedia: loadFreshWebMedia } = await importFreshModule<
+      typeof import("./web-media.js")
+    >(import.meta.url, "./web-media.js?scope=audio-only-webm");
+
+    const result = await loadFreshWebMedia(audioOnlyWebmFile, createLocalWebMediaOptions());
+
+    expect(detectMimeMock).toHaveBeenCalledTimes(1);
+    expect(runFfprobeMock).toHaveBeenCalledTimes(1);
+    expect(result.kind).toBe("audio");
+    expect(result.contentType).toBe("audio/webm");
+  });
+
+  it("does not probe remote webm URLs for stream metadata", async () => {
+    const runFfprobeMock = vi.fn();
+    const fetchRemoteMediaMock = vi
+      .fn()
+      .mockResolvedValue({ buffer: Buffer.from("fake-remote-webm"), contentType: "video/webm" });
+    vi.doMock("./fetch.js", async () => {
+      const actual = await vi.importActual<typeof import("./fetch.js")>("./fetch.js");
+      return {
+        ...actual,
+        fetchRemoteMedia: fetchRemoteMediaMock,
+      };
+    });
+    vi.doMock("./ffmpeg-exec.js", async () => {
+      const actual = await vi.importActual<typeof import("./ffmpeg-exec.js")>("./ffmpeg-exec.js");
+      return {
+        ...actual,
+        runFfprobe: runFfprobeMock,
+      };
+    });
+    const { loadWebMedia: loadFreshWebMedia } = await importFreshModule<
+      typeof import("./web-media.js")
+    >(import.meta.url, "./web-media.js?scope=remote-webm");
+
+    const result = await loadFreshWebMedia(
+      "https://example.com/voice.webm",
+      createLocalWebMediaOptions(),
+    );
+
+    expect(fetchRemoteMediaMock).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://example.com/voice.webm" }),
+    );
+    expect(runFfprobeMock).not.toHaveBeenCalled();
+    expect(result.kind).toBe("video");
+    expect(result.contentType).toBe("video/webm");
   });
 
   describe("host read capability", () => {

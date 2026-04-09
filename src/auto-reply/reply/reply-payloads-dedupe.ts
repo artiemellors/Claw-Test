@@ -1,6 +1,6 @@
 import { isMessagingToolDuplicate } from "../../agents/pi-embedded-helpers.js";
 import type { MessagingToolSend } from "../../agents/pi-embedded-runner.js";
-import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
+import { getLoadedChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { normalizeTargetForProvider } from "../../infra/outbound/target-normalization.js";
 import { normalizeOptionalAccountId } from "../../routing/account-id.js";
 import {
@@ -64,6 +64,10 @@ export function filterMessagingToolMediaDuplicates(params: {
   });
 }
 
+const PROVIDER_ALIAS_MAP: Record<string, string> = {
+  lark: "feishu",
+};
+
 function normalizeProviderForComparison(value?: string): string | undefined {
   const trimmed = normalizeOptionalString(value);
   if (!trimmed) {
@@ -74,7 +78,7 @@ function normalizeProviderForComparison(value?: string): string | undefined {
   if (normalizedChannel) {
     return normalizedChannel;
   }
-  return lowered;
+  return PROVIDER_ALIAS_MAP[lowered] ?? lowered;
 }
 
 function normalizeThreadIdForComparison(value?: string): string | undefined {
@@ -105,7 +109,8 @@ function targetsMatchForSuppression(params: {
   targetKey: string;
   targetThreadId?: string;
 }): boolean {
-  const pluginMatch = getChannelPlugin(params.provider)?.outbound?.targetsMatchForReplySuppression;
+  const pluginMatch = getLoadedChannelPlugin(params.provider)?.outbound
+    ?.targetsMatchForReplySuppression;
   if (pluginMatch) {
     return pluginMatch({
       originTarget: params.originTarget,

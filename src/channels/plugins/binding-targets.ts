@@ -10,11 +10,14 @@ export async function ensureConfiguredBindingTargetReady(params: {
   cfg: OpenClawConfig;
   bindingResolution: ConfiguredBindingResolution | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  await ensureStatefulTargetBuiltinsRegistered();
   if (!params.bindingResolution) {
     return { ok: true };
   }
-  const driver = getStatefulBindingTargetDriver(params.bindingResolution.statefulTarget.driverId);
+  let driver = getStatefulBindingTargetDriver(params.bindingResolution.statefulTarget.driverId);
+  if (!driver) {
+    await ensureStatefulTargetBuiltinsRegistered();
+    driver = getStatefulBindingTargetDriver(params.bindingResolution.statefulTarget.driverId);
+  }
   if (!driver) {
     return {
       ok: false,
@@ -33,11 +36,17 @@ export async function resetConfiguredBindingTargetInPlace(params: {
   reason: "new" | "reset";
   commandSource?: string;
 }): Promise<{ ok: true } | { ok: false; skipped?: boolean; error?: string }> {
-  await ensureStatefulTargetBuiltinsRegistered();
-  const resolved = resolveStatefulBindingTargetBySessionKey({
+  let resolved = resolveStatefulBindingTargetBySessionKey({
     cfg: params.cfg,
     sessionKey: params.sessionKey,
   });
+  if (!resolved) {
+    await ensureStatefulTargetBuiltinsRegistered();
+    resolved = resolveStatefulBindingTargetBySessionKey({
+      cfg: params.cfg,
+      sessionKey: params.sessionKey,
+    });
+  }
   if (!resolved?.driver.resetInPlace) {
     return {
       ok: false,
@@ -54,8 +63,11 @@ export async function ensureConfiguredBindingTargetSession(params: {
   cfg: OpenClawConfig;
   bindingResolution: ConfiguredBindingResolution;
 }): Promise<{ ok: true; sessionKey: string } | { ok: false; sessionKey: string; error: string }> {
-  await ensureStatefulTargetBuiltinsRegistered();
-  const driver = getStatefulBindingTargetDriver(params.bindingResolution.statefulTarget.driverId);
+  let driver = getStatefulBindingTargetDriver(params.bindingResolution.statefulTarget.driverId);
+  if (!driver) {
+    await ensureStatefulTargetBuiltinsRegistered();
+    driver = getStatefulBindingTargetDriver(params.bindingResolution.statefulTarget.driverId);
+  }
   if (!driver) {
     return {
       ok: false,

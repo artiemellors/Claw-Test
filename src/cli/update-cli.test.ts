@@ -265,14 +265,16 @@ describe("update-cli", () => {
     );
   };
 
-  const makeOkUpdateResult = (overrides: Partial<UpdateRunResult> = {}): UpdateRunResult =>
-    ({
-      status: "ok",
-      mode: "git",
-      steps: [],
-      durationMs: 100,
-      ...overrides,
-    }) as UpdateRunResult;
+  const makeOkUpdateResult = (
+    overrides: Partial<Extract<UpdateRunResult, { status: "ok" }>> = {},
+  ): Extract<UpdateRunResult, { status: "ok" }> => ({
+    status: "ok",
+    mode: "git",
+    root: "/tmp/openclaw-update-result",
+    steps: [],
+    durationMs: 100,
+    ...overrides,
+  });
 
   const runUpdateCliScenario = async (testCase: UpdateCliScenario) => {
     vi.clearAllMocks();
@@ -313,6 +315,7 @@ describe("update-cli", () => {
     vi.mocked(runGatewayUpdate).mockResolvedValue({
       status: "ok",
       mode: "npm",
+      root: tempDir,
       steps: [],
       durationMs: 100,
     });
@@ -1079,6 +1082,7 @@ describe("update-cli", () => {
         vi.mocked(runGatewayUpdate).mockResolvedValue({
           status: "ok",
           mode: "git",
+          root: "/tmp/openclaw-update-result",
           steps: [],
           durationMs: 100,
         } satisfies UpdateRunResult);
@@ -1379,6 +1383,7 @@ describe("update-cli", () => {
       vi.mocked(runGatewayUpdate).mockResolvedValue({
         status: "ok",
         mode: "git",
+        root: "/tmp/openclaw-update-result",
         steps: [],
         durationMs: 100,
       });

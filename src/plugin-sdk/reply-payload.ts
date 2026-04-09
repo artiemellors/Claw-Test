@@ -1,5 +1,29 @@
+import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
+import type { ReplyPayload } from "../auto-reply/types.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/types.js";
 import { readStringValue } from "../shared/string-coerce.js";
+
+function extractToolDeliveryMediaUrls(payload: ReplyPayload): {
+  audioAsVoice?: boolean;
+  mediaUrls: string[];
+} {
+  const mediaUrls = payload.mediaUrls ?? [];
+  const mediaUrl = payload.mediaUrl ? [payload.mediaUrl] : [];
+  const parsed = payload.text ? parseReplyDirectives(payload.text) : undefined;
+  const textMediaUrls = parsed?.mediaUrls ?? [];
+  const seen = new Set<string>();
+  for (const rawUrl of [...mediaUrls, ...mediaUrl, ...textMediaUrls]) {
+    const url = rawUrl.trim();
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+  }
+  return {
+    audioAsVoice: payload.audioAsVoice ?? parsed?.audioAsVoice,
+    mediaUrls: [...seen],
+  };
+}
 
 export type { MediaPayload, MediaPayloadInput } from "../channels/plugins/media-payload.js";
 export { buildMediaPayload } from "../channels/plugins/media-payload.js";
@@ -400,4 +424,49 @@ export async function deliverFormattedTextWithAttachments(params: {
     replyToId: params.payload.replyToId,
   });
   return true;
+}
+
+export function resolveToolDeliveryPayload(
+  payload: ReplyPayload,
+  options?: {
+    allowText?: boolean;
+    allowExecApproval?: boolean;
+  },
+): ReplyPayload | null {
+  const allowText = options?.allowText === true;
+  const allowExecApproval = options?.allowExecApproval !== false;
+
+  if (allowText && payload.text?.trim()) {
+    return payload;
+  }
+
+  const execApproval =
+    payload.channelData &&
+    typeof payload.channelData === "object" &&
+    !Array.isArray(payload.channelData)
+      ? payload.channelData.execApproval
+      : undefined;
+  if (
+    allowExecApproval &&
+    execApproval &&
+    typeof execApproval === "object" &&
+    !Array.isArray(execApproval)
+  ) {
+    return payload;
+  }
+
+  const extracted = extractToolDeliveryMediaUrls(payload);
+  const mediaUrls = extracted.mediaUrls;
+  const hasMedia = mediaUrls.length > 0;
+  if (!hasMedia) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    text: undefined,
+    mediaUrls,
+    mediaUrl: mediaUrls[0],
+    ...(extracted.audioAsVoice !== undefined ? { audioAsVoice: extracted.audioAsVoice } : {}),
+  };
 }

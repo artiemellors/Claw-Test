@@ -9,6 +9,13 @@ import { shouldBuildBundledCluster } from "./optional-bundled-clusters.mjs";
 
 const TOP_LEVEL_PUBLIC_SURFACE_EXTENSIONS = new Set([".ts", ".js", ".mts", ".cts", ".mjs", ".cjs"]);
 const toPosixPath = (value) => value.replaceAll("\\", "/");
+// These packages expose runtime-only public surfaces via generated plugin-sdk facades
+// but do not carry full bundled-plugin manifests.
+const RUNTIME_PUBLIC_SURFACE_ONLY_DIR_NAMES = new Set([
+  "image-generation-core",
+  "media-understanding-core",
+  "speech-core",
+]);
 
 function readBundledPluginPackageJson(packageJsonPath) {
   if (!fs.existsSync(packageJsonPath)) {
@@ -97,21 +104,31 @@ export function collectBundledPluginBuildEntries(params = {}) {
 
     const pluginDir = path.join(extensionsRoot, dirent.name);
     const manifestPath = path.join(pluginDir, "openclaw.plugin.json");
-    const hasManifest = fs.existsSync(manifestPath);
     const packageJsonPath = path.join(pluginDir, "package.json");
     const packageJson = readBundledPluginPackageJson(packageJsonPath);
     const topLevelPublicSurfaceEntries = collectTopLevelPublicSurfaceEntries(pluginDir);
-    if (
+    const hasManifest = fs.existsSync(manifestPath);
+    const isRuntimePublicSurfaceOnlyDir = RUNTIME_PUBLIC_SURFACE_ONLY_DIR_NAMES.has(dirent.name);
+    const isManifestlessSupportPackage =
       !hasManifest &&
-      !isManifestlessBundledRuntimeSupportPackage({
+      isManifestlessBundledRuntimeSupportPackage({
         dirName: dirent.name,
         packageJson,
         topLevelPublicSurfaceEntries,
-      })
-    ) {
+      });
+    if (!hasManifest && !isRuntimePublicSurfaceOnlyDir && !isManifestlessSupportPackage) {
       continue;
     }
     if (!shouldBuildBundledCluster(dirent.name, env, { packageJson })) {
+      continue;
+    }
+
+    const sourceEntries = hasManifest
+      ? Array.from(
+          new Set([...collectPluginSourceEntries(packageJson), ...topLevelPublicSurfaceEntries]),
+        )
+      : topLevelPublicSurfaceEntries;
+    if (sourceEntries.length === 0) {
       continue;
     }
 
@@ -120,12 +137,7 @@ export function collectBundledPluginBuildEntries(params = {}) {
       hasManifest,
       hasPackageJson: packageJson !== null,
       packageJson,
-      sourceEntries: Array.from(
-        new Set([
-          ...(hasManifest ? collectPluginSourceEntries(packageJson) : []),
-          ...topLevelPublicSurfaceEntries,
-        ]),
-      ),
+      sourceEntries,
     });
   }
 

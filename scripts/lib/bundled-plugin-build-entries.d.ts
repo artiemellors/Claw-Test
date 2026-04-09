@@ -1,5 +1,6 @@
 export type BundledPluginBuildEntry = {
   id: string;
+  hasManifest: boolean;
   hasPackageJson: boolean;
   packageJson: unknown;
   sourceEntries: string[];

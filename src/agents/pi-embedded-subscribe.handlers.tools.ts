@@ -32,6 +32,7 @@ import type {
 } from "./pi-embedded-subscribe.handlers.types.js";
 import { isPromiseLike } from "./pi-embedded-subscribe.promise.js";
 import {
+  extractToolResultAudioAsVoice,
   extractToolResultMediaArtifact,
   extractMessagingToolSend,
   extractToolErrorMessage,
@@ -491,7 +492,13 @@ async function emitToolResultOutput(params: {
           result,
         );
       }
-      ctx.emitToolOutput(toolName, meta, outputText, result);
+      ctx.emitToolOutput(
+        toolName,
+        meta,
+        outputText,
+        extractToolResultAudioAsVoice(result),
+        result,
+      );
     }
     if (!hasStructuredMedia) {
       return;

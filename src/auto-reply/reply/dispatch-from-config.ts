@@ -1,4 +1,3 @@
-import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { isParentOwnedBackgroundAcpSession } from "../../acp/session-interaction-mode.js";
 import { resolveAgentConfig, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import {
@@ -61,6 +60,7 @@ import {
 } from "./dispatch-from-config.runtime.js";
 import { shouldSkipDuplicateInbound } from "./inbound-dedupe.js";
 import type { ReplyDispatcher, ReplyDispatchKind } from "./reply-dispatcher.js";
+import { resolveToolDeliveryPayload as resolveDefaultToolDeliveryPayload } from "./reply-payloads.js";
 import { resolveReplyRoutingDecision } from "./routing-policy.js";
 import { resolveRunTypingPolicy } from "./typing-policy.js";
 
@@ -796,22 +796,7 @@ export async function dispatchReplyFromConfig(params: {
       if (shouldSendToolSummaries) {
         return payload;
       }
-      const execApproval =
-        payload.channelData &&
-        typeof payload.channelData === "object" &&
-        !Array.isArray(payload.channelData)
-          ? payload.channelData.execApproval
-          : undefined;
-      if (execApproval && typeof execApproval === "object" && !Array.isArray(execApproval)) {
-        return payload;
-      }
-      // Group/native flows intentionally suppress tool summary text, but media-only
-      // tool results (for example TTS audio) must still be delivered.
-      const hasMedia = resolveSendableOutboundReplyParts(payload).hasMedia;
-      if (!hasMedia) {
-        return null;
-      }
-      return { ...payload, text: undefined };
+      return resolveDefaultToolDeliveryPayload(payload);
     };
     const typing = resolveRunTypingPolicy({
       requestedPolicy: params.replyOptions?.typingPolicy,

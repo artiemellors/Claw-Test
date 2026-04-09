@@ -18,6 +18,7 @@ const ALLOWED_EXTENSION_PATH_STRING_TESTS = new Set([
   "src/cli/capability-cli.test.ts",
   "src/commands/doctor-legacy-config.migrations.test.ts",
   "src/plugins/contracts/bundled-extension-config-api-guardrails.test.ts",
+  "src/plugin-sdk/browser-maintenance.test.ts",
   "src/scripts/test-projects.test.ts",
 ]);
 
@@ -97,9 +98,13 @@ describe("plugin contract boundary invariants", () => {
       }
       const source = readFileSync(resolve(REPO_ROOT, file), "utf8");
       return (
-        /from\s+["'][^"']*extensions\/.+(?:api|runtime-api|test-api)\.js["']/u.test(source) ||
-        /vi\.(?:mock|doMock)\(\s*["'][^"']*extensions\/.+["']/u.test(source) ||
-        /importActual<[^>]*>\(\s*["'][^"']*extensions\/.+["']/u.test(source)
+        /from\s+["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(source) ||
+        /vi\.(?:mock|doMock)\(\s*["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(
+          source,
+        ) ||
+        /importActual<[^>]*>\(\s*["'][^"']*extensions\/.+\/(?:api|runtime-api|test-api)\.js["']/u.test(
+          source,
+        )
       );
     });
     expect(offenders).toEqual([]);

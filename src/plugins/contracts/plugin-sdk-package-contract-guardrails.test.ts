@@ -168,6 +168,8 @@ function resolveNpmCommandInvocation(npmArgs: string[]): NpmCommandInvocation {
 }
 
 function packOpenClawToTempDir(packDir: string): string {
+  const npmCacheDir = join(packDir, ".npm-cache");
+  mkdirSync(npmCacheDir, { recursive: true });
   const invocation = resolveNpmCommandInvocation([
     "pack",
     "--ignore-scripts",
@@ -182,6 +184,8 @@ function packOpenClawToTempDir(packDir: string): string {
       ...process.env,
       ...invocation.env,
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+      NPM_CONFIG_CACHE: npmCacheDir,
+      npm_config_cache: npmCacheDir,
     },
     maxBuffer: NPM_PACK_MAX_BUFFER_BYTES,
     stdio: ["ignore", "pipe", "pipe"],
@@ -245,6 +249,7 @@ function collectExtensionCoreImportLeaks(): Array<{ file: string; specifier: str
     if (
       /(?:^|\/)(?:__tests__|tests|test-support)(?:\/|$)/.test(repoRelativePath) ||
       /(?:^|\/)test-support\.[cm]?tsx?$/.test(repoRelativePath) ||
+      /\.test-harness\.[cm]?tsx?$/.test(repoRelativePath) ||
       /\.test\.[cm]?tsx?$/.test(repoRelativePath)
     ) {
       continue;
