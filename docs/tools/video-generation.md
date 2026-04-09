@@ -167,12 +167,12 @@ dimensions). Providers that do not declare it surface the value via
 
 ### Advanced
 
-| Parameter         | Type   | Description                                                                                                                                                                                                                                                                               |
-| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `action`          | string | `"generate"` (default), `"status"`, or `"list"`                                                                                                                                                                                                                                           |
-| `model`           | string | Provider/model override (e.g. `runway/gen4.5`)                                                                                                                                                                                                                                            |
-| `filename`        | string | Output filename hint                                                                                                                                                                                                                                                                      |
-| `providerOptions` | object | Provider-specific options as a JSON object (e.g. `{"seed": 42, "draft": true}`). Each provider declares its own accepted keys and primitive types; unknown keys or type mismatches skip the candidate during fallback. Run `video_generate action=list` to see what each provider accepts |
+| Parameter         | Type   | Description                                                                                                                                                                                                                                                                                                                                          |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action`          | string | `"generate"` (default), `"status"`, or `"list"`                                                                                                                                                                                                                                                                                                      |
+| `model`           | string | Provider/model override (e.g. `runway/gen4.5`)                                                                                                                                                                                                                                                                                                       |
+| `filename`        | string | Output filename hint                                                                                                                                                                                                                                                                                                                                 |
+| `providerOptions` | object | Provider-specific options as a JSON object (e.g. `{"seed": 42, "draft": true}`). Providers that declare a typed schema validate the keys and types; unknown keys or mismatches skip the candidate during fallback. Providers without a declared schema receive the options as-is. Run `video_generate action=list` to see what each provider accepts |
 
 Not all providers support all parameters. OpenClaw already normalizes duration to the closest provider-supported value, and it also remaps translated geometry hints such as size-to-aspect-ratio when a fallback provider exposes a different control surface. Truly unsupported overrides are ignored on a best-effort basis and reported as warnings in the tool result. Hard capability limits (such as too many reference inputs) fail before submission.
 
@@ -200,9 +200,14 @@ can still run on a capable fallback:
 - If the active candidate's `maxDurationSeconds` is below the requested
   `durationSeconds` and the candidate does not declare a
   `supportedDurationSeconds` list, it is skipped.
-- If the request contains `providerOptions` and the active candidate does
-  not declare the requested keys in its typed `providerOptions` schema, or
-  the value types do not match, the candidate is skipped.
+- If the request contains `providerOptions` and the active candidate
+  explicitly declares a typed `providerOptions` schema, the candidate is
+  skipped when the supplied keys are not in the schema or the value types do
+  not match. Providers that have not yet declared a schema receive the
+  options as-is (backward-compatible pass-through). A provider can
+  explicitly opt out of all provider options by declaring an empty schema
+  (`capabilities.providerOptions: {}`), which causes the same skip as a
+  type mismatch.
 
 The first skip reason in a request is logged at `warn` so operators see
 when their primary provider was passed over; subsequent skips log at
