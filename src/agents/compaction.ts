@@ -129,6 +129,10 @@ function isFallbackToolCallType(type: unknown): boolean {
   );
 }
 
+function isFallbackTextType(type: unknown): boolean {
+  return type === "text" || type === "input_text" || type === "output_text";
+}
+
 function estimateSafeArrayContentChars(content: unknown): number {
   if (!Array.isArray(content)) {
     return 0;
@@ -144,7 +148,7 @@ function estimateSafeArrayContentChars(content: unknown): number {
       text?: unknown;
       thinking?: unknown;
     };
-    if (record.type === "text" && typeof record.text === "string") {
+    if (isFallbackTextType(record.type) && typeof record.text === "string") {
       chars += record.text.length;
       continue;
     }

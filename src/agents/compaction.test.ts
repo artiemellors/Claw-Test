@@ -69,6 +69,8 @@ describe("estimateMessageTokens", () => {
         null,
         { type: "text" },
         { type: "text", text: "abcd" },
+        { type: "input_text", text: "gh" },
+        { type: "output_text", text: "ij" },
         { type: "thinking" },
         { type: "thinking", thinking: "ef" },
         { type: "toolCall", id: "call_1", name: "read", arguments: { path: "x" } },
@@ -79,7 +81,13 @@ describe("estimateMessageTokens", () => {
     expect(() => estimateMessageTokens(message)).not.toThrow();
     expect(estimateMessageTokens(message)).toBe(
       Math.ceil(
-        ("abcd".length + "ef".length + "read".length + JSON.stringify({ path: "x" }).length) / 4,
+        ("abcd".length +
+          "gh".length +
+          "ij".length +
+          "ef".length +
+          "read".length +
+          JSON.stringify({ path: "x" }).length) /
+          4,
       ),
     );
   });
