@@ -4838,6 +4838,16 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     minimum: 0,
                     maximum: 9007199254740991,
                   },
+                  startupWaitTimeoutMs: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                  completionAnnounceTimeoutMs: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 9007199254740991,
+                  },
                   announceTimeoutMs: {
                     type: "integer",
                     exclusiveMinimum: 0,
@@ -20784,6 +20794,13 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             title: "Gateway Channel Max Restarts Per Hour",
             description:
               "Maximum number of health-monitor-initiated channel restarts allowed within a rolling one-hour window. Once hit, further restarts are skipped until the window expires. Default: 10.",
+          },
+          connectChallengeTimeoutMs: {
+            type: "integer",
+            minimum: 1,
+            maximum: 300000,
+            description:
+              "WebSocket pre-auth/connect handshake timeout in milliseconds for gateway clients and server-side handshake enforcement (default: 10000). Raise this when local control-plane stalls can delay connect challenge completion.",
           },
           tailscale: {
             type: "object",

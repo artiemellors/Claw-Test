@@ -27,6 +27,7 @@ let lastClientOptions: {
   token?: string;
   password?: string;
   tlsFingerprint?: string;
+  connectChallengeTimeoutMs?: number;
   scopes?: string[];
   deviceIdentity?: unknown;
   onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
@@ -58,6 +59,7 @@ vi.mock("./client.js", () => ({
       url?: string;
       token?: string;
       password?: string;
+      connectChallengeTimeoutMs?: number;
       scopes?: string[];
       onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
       onClose?: (code: number, reason: string) => void;
@@ -95,6 +97,7 @@ class StubGatewayClient {
     url?: string;
     token?: string;
     password?: string;
+    connectChallengeTimeoutMs?: number;
     scopes?: string[];
     onHelloOk?: (hello: { features?: { methods?: string[] } }) => void | Promise<void>;
     onClose?: (code: number, reason: string) => void;
@@ -760,13 +763,77 @@ describe("callGateway error details", () => {
     expect(errMessage).toContain("gateway closed (1006");
   });
 
-  it("forwards caller timeout to client requests", async () => {
+  it("forwards caller timeout to client requests and connect handshake budget", async () => {
     setLocalLoopbackGatewayConfig();
 
     await callGateway({ method: "health", timeoutMs: 45_000 });
 
+    expect(lastClientOptions?.connectChallengeTimeoutMs).toBe(45_000);
     expect(lastRequestOptions?.method).toBe("health");
     expect(lastRequestOptions?.opts?.timeoutMs).toBe(45_000);
+  });
+
+  it("falls back to configured connect handshake budget when caller timeout is absent", async () => {
+    loadConfig.mockReturnValue({
+      gateway: { mode: "local", bind: "loopback", connectChallengeTimeoutMs: 25_000 },
+    });
+    setGatewayNetworkDefaults();
+
+    await callGateway({ method: "health" });
+
+    expect(lastClientOptions?.connectChallengeTimeoutMs).toBe(25_000);
+  });
+
+  it("uses configured connect handshake budget as the default outer timeout floor", async () => {
+    vi.useFakeTimers();
+    startMode = "silent";
+    loadConfig.mockReturnValue({
+      gateway: { mode: "local", bind: "loopback", connectChallengeTimeoutMs: 25_000 },
+    });
+    setGatewayNetworkDefaults();
+
+    const promise = callGateway({ method: "health" }).catch((caught) => caught);
+
+    await vi.advanceTimersByTimeAsync(10_001);
+    await Promise.resolve();
+
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    const err = await promise;
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("gateway timeout after 25000ms");
+  });
+
+  it("preserves the 10s default outer timeout when handshake timeout is configured lower", async () => {
+    vi.useFakeTimers();
+    startMode = "silent";
+    loadConfig.mockReturnValue({
+      gateway: { mode: "local", bind: "loopback", connectChallengeTimeoutMs: 250 },
+    });
+    setGatewayNetworkDefaults();
+
+    const promise = callGateway({ method: "health" }).catch((caught) => caught);
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    await Promise.resolve();
+
+    let settled = false;
+    void promise.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const err = await promise;
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err)).toContain("gateway timeout after 10000ms");
   });
 
   it("does not inject wrapper timeout defaults into expectFinal requests", async () => {

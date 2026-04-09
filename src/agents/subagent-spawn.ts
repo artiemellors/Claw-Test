@@ -59,6 +59,17 @@ export type SpawnSubagentSandboxMode = (typeof SUBAGENT_SPAWN_SANDBOX_MODES)[num
 
 export { decodeStrictBase64 };
 
+const DEFAULT_SUBAGENT_STARTUP_TIMEOUT_MS = 60_000;
+const SUBAGENT_MAX_SAFE_TIMEOUT_MS = 2_147_000_000;
+
+export function resolveSubagentStartupWaitTimeoutMs(cfg: ReturnType<typeof loadConfig>): number {
+  const configured = cfg.agents?.defaults?.subagents?.startupWaitTimeoutMs;
+  if (typeof configured !== "number" || !Number.isFinite(configured)) {
+    return DEFAULT_SUBAGENT_STARTUP_TIMEOUT_MS;
+  }
+  return Math.min(Math.max(1, Math.floor(configured)), SUBAGENT_MAX_SAFE_TIMEOUT_MS);
+}
+
 type SubagentSpawnDeps = {
   callGateway: typeof callGateway;
   getGlobalHookRunner: () => SubagentLifecycleHookRunner | null;
@@ -84,9 +95,9 @@ export type SpawnSubagentParams = {
   runTimeoutSeconds?: number;
   thread?: boolean;
   mode?: SpawnSubagentMode;
+  lightContext?: boolean;
   cleanup?: "delete" | "keep";
   sandbox?: SpawnSubagentSandboxMode;
-  lightContext?: boolean;
   expectsCompletionMessage?: boolean;
   attachments?: Array<{
     name: string;
@@ -398,6 +409,7 @@ export async function spawnSubagentDirect(
     cfg,
     runTimeoutSeconds: params.runTimeoutSeconds,
   });
+  const startupWaitTimeoutMs = resolveSubagentStartupWaitTimeoutMs(cfg);
   let modelApplied = false;
   let threadBindingReady = false;
   const { mainKey, alias } = resolveMainSessionAlias(cfg);
@@ -518,7 +530,7 @@ export async function spawnSubagentDirect(
       await callSubagentGateway({
         method: "sessions.patch",
         params: { key: childSessionKey, ...patch },
-        timeoutMs: 10_000,
+        timeoutMs: startupWaitTimeoutMs,
       });
       return undefined;
     } catch (err) {
@@ -728,7 +740,7 @@ export async function spawnSubagentDirect(
           : {}),
         ...publicSpawnedMetadata,
       },
-      timeoutMs: 10_000,
+      timeoutMs: startupWaitTimeoutMs,
     });
     const runId = readGatewayRunId(response);
     if (runId) {

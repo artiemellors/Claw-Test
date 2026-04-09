@@ -40,6 +40,7 @@ import {
   type GatewayRemoteCredentialPrecedence,
 } from "./credentials.js";
 import { canSkipGatewayConfigLoad } from "./explicit-connection-policy.js";
+import { getPreauthHandshakeTimeoutMsFromEnv } from "./handshake-timeouts.js";
 import {
   CLI_DEFAULT_OPERATOR_SCOPES,
   resolveLeastPrivilegeOperatorScopesForMethod,
@@ -278,12 +279,17 @@ type ResolvedGatewayCallContext = {
   remotePasswordFallback?: GatewayRemoteCredentialFallback;
 };
 
-function resolveGatewayCallTimeout(timeoutValue: unknown): {
+function resolveGatewayCallTimeout(
+  timeoutValue: unknown,
+  defaultTimeoutMs = 10_000,
+): {
   timeoutMs: number;
   safeTimerTimeoutMs: number;
 } {
   const timeoutMs =
-    typeof timeoutValue === "number" && Number.isFinite(timeoutValue) ? timeoutValue : 10_000;
+    typeof timeoutValue === "number" && Number.isFinite(timeoutValue)
+      ? timeoutValue
+      : defaultTimeoutMs;
   const safeTimerTimeoutMs = Math.max(1, Math.min(Math.floor(timeoutMs), 2_147_483_647));
   return { timeoutMs, safeTimerTimeoutMs };
 }
@@ -711,12 +717,22 @@ async function executeGatewayRequestWithScopes<T>(params: {
   token?: string;
   password?: string;
   tlsFingerprint?: string;
+  connectChallengeTimeoutMs?: number;
   timeoutMs: number;
   safeTimerTimeoutMs: number;
   connectionDetails: GatewayConnectionDetails;
 }): Promise<T> {
-  const { opts, scopes, url, token, password, tlsFingerprint, timeoutMs, safeTimerTimeoutMs } =
-    params;
+  const {
+    opts,
+    scopes,
+    url,
+    token,
+    password,
+    tlsFingerprint,
+    connectChallengeTimeoutMs,
+    timeoutMs,
+    safeTimerTimeoutMs,
+  } = params;
   // Yield to the event loop before starting the WebSocket connection.
   // On Windows with large dist bundles, heavy synchronous module loading
   // can starve the event loop, preventing timely processing of the
@@ -743,6 +759,7 @@ async function executeGatewayRequestWithScopes<T>(params: {
       token,
       password,
       tlsFingerprint,
+      connectChallengeTimeoutMs,
       instanceId: opts.instanceId ?? randomUUID(),
       clientName: opts.clientName ?? GATEWAY_CLIENT_NAMES.CLI,
       clientDisplayName: opts.clientDisplayName,
@@ -798,8 +815,15 @@ async function callGatewayWithScopes<T = Record<string, unknown>>(
   opts: CallGatewayBaseOptions,
   scopes: OperatorScope[],
 ): Promise<T> {
-  const { timeoutMs, safeTimerTimeoutMs } = resolveGatewayCallTimeout(opts.timeoutMs);
   const context = resolveGatewayCallContext(opts);
+  const configuredConnectChallengeTimeoutMs = getPreauthHandshakeTimeoutMsFromEnv(
+    process.env,
+    context.config.gateway?.connectChallengeTimeoutMs,
+  );
+  const { timeoutMs, safeTimerTimeoutMs } = resolveGatewayCallTimeout(
+    opts.timeoutMs,
+    Math.max(10_000, configuredConnectChallengeTimeoutMs),
+  );
   const resolvedCredentials = await resolveGatewayCredentials(context);
   ensureExplicitGatewayAuth({
     urlOverride: context.urlOverride,
@@ -816,6 +840,10 @@ async function callGatewayWithScopes<T = Record<string, unknown>>(
     urlSource: context.urlOverrideSource,
     ...(opts.configPath ? { configPath: opts.configPath } : {}),
   });
+  const connectChallengeTimeoutMs =
+    typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
+      ? timeoutMs
+      : configuredConnectChallengeTimeoutMs;
   const url = connectionDetails.url;
   const tlsFingerprint = await resolveGatewayTlsFingerprint({ opts, context, url });
   const { token, password } = resolvedCredentials;
@@ -826,6 +854,7 @@ async function callGatewayWithScopes<T = Record<string, unknown>>(
     token,
     password,
     tlsFingerprint,
+    connectChallengeTimeoutMs,
     timeoutMs,
     safeTimerTimeoutMs,
     connectionDetails,
