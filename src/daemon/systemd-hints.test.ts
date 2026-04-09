@@ -13,6 +13,8 @@ describe("isSystemdUnavailableDetail", () => {
       ),
     ).toBe(true);
     expect(isSystemdUnavailableDetail("permission denied")).toBe(false);
+    expect(isSystemdUnavailableDetail("Unit openclaw-gateway.service not found.")).toBe(false);
+    expect(isSystemdUnavailableDetail("not-found")).toBe(false);
   });
 });
 
