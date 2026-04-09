@@ -527,4 +527,40 @@ describe("subagent announce seam flow", () => {
       timeoutMs: 10_000,
     });
   });
+
+  it("preserves delete cleanup when internal no-fallback routing cannot deliver", async () => {
+    loadSessionStoreMock.mockImplementation(() => ({
+      "agent:main:subagent:orchestrator": { sessionId: "" },
+    }));
+    subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReturnValue(null);
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:worker",
+      childRunId: "run-nested-no-fallback",
+      requesterSessionKey: "agent:main:subagent:orchestrator",
+      requesterDisplayKey: "subagent:orchestrator",
+      task: "nested cleanup fallback",
+      timeoutMs: 10,
+      cleanup: "delete",
+      waitForCompletion: false,
+      startedAt: 10,
+      endedAt: 20,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+    });
+
+    expect(didAnnounce).toBe(false);
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(sessionsDeleteSpy).toHaveBeenCalledTimes(1);
+    expect(sessionsDeleteSpy).toHaveBeenCalledWith({
+      method: "sessions.delete",
+      params: {
+        key: "agent:main:subagent:worker",
+        deleteTranscript: true,
+        emitLifecycleHooks: false,
+      },
+      timeoutMs: 10_000,
+    });
+  });
 });

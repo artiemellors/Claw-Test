@@ -100,4 +100,29 @@ describe("resolvePluginSetupCliBackendRuntime fallback", () => {
 
     expect(runtime.resolvePluginSetupCliBackendRuntime({ backend: "demo-backend" })).toBeUndefined();
   });
+
+  it("returns no backend when OPENCLAW_BUNDLED_PLUGINS_DIR points to a file", async () => {
+    const tempDir = makeTrackedTempDir("openclaw-setup-registry-file-override", tempDirs);
+    const fileOverride = path.join(tempDir, "not-a-directory.json");
+    fs.writeFileSync(fileOverride, "{}\n", "utf8");
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = fileOverride;
+    delete process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS;
+
+    vi.doMock("node:module", async () => {
+      const actual = await vi.importActual<typeof import("node:module")>("node:module");
+      return {
+        ...actual,
+        createRequire: () => () => {
+          throw new Error("force runtime fallback");
+        },
+      };
+    });
+
+    const runtime = await importFreshModule<typeof import("./setup-registry.runtime.js")>(
+      import.meta.url,
+      "./setup-registry.runtime.js?scope=fallback-file-override",
+    );
+
+    expect(runtime.resolvePluginSetupCliBackendRuntime({ backend: "demo-backend" })).toBeUndefined();
+  });
 });

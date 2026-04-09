@@ -3,6 +3,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import JSON5 from "json5";
 import { normalizeProviderId } from "../agents/provider-id.js";
+import { openBoundaryFileSync } from "../infra/boundary-file-read.js";
 import { loadPluginManifest, resolvePluginManifestPath } from "./manifest.js";
 import { resolveBundledPluginsDir } from "./bundled-dir.js";
 
@@ -19,12 +20,19 @@ type SetupCliBackendRuntimeEntry = {
 };
 
 function resolveManifestOnlyCliBackends(pluginDir: string): SetupCliBackendRuntimeEntry[] {
+  const manifestPath = resolvePluginManifestPath(pluginDir);
+  const opened = openBoundaryFileSync({
+    absolutePath: manifestPath,
+    rootPath: pluginDir,
+    boundaryLabel: "plugin root",
+    rejectHardlinks: true,
+    maxBytes: 1024 * 1024,
+  });
+  if (!opened.ok) {
+    return [];
+  }
   try {
-    const manifestPath = resolvePluginManifestPath(pluginDir);
-    if (!fs.existsSync(manifestPath)) {
-      return [];
-    }
-    const raw = JSON5.parse(fs.readFileSync(manifestPath, "utf8")) as {
+    const raw = JSON5.parse(fs.readFileSync(opened.fd, "utf8")) as {
       id?: unknown;
       cliBackends?: unknown;
     };
@@ -46,6 +54,8 @@ function resolveManifestOnlyCliBackends(pluginDir: string): SetupCliBackendRunti
     );
   } catch {
     return [];
+  } finally {
+    fs.closeSync(opened.fd);
   }
 }
 
@@ -71,23 +81,29 @@ function resolveBundledSetupCliBackends(
     return bundledSetupCliBackendsCache;
   }
 
-  const entries = fs
-    .readdirSync(bundledPluginsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const pluginDir = path.join(bundledPluginsDir, entry.name);
-      const manifestResult = loadPluginManifest(pluginDir, false);
-      if (manifestResult.ok) {
-        return (manifestResult.manifest.cliBackends ?? []).map(
-          (backendId) =>
-            ({
-              pluginId: manifestResult.manifest.id,
-              backend: { id: backendId },
-            }) satisfies SetupCliBackendRuntimeEntry,
-        );
-      }
-      return resolveManifestOnlyCliBackends(pluginDir);
-    });
+  let dirEntries: fs.Dirent[];
+  try {
+    dirEntries = fs.readdirSync(bundledPluginsDir, { withFileTypes: true });
+  } catch {
+    bundledSetupCliBackendsCacheKey = cacheKey;
+    bundledSetupCliBackendsCache = [];
+    return bundledSetupCliBackendsCache;
+  }
+
+  const entries = dirEntries.filter((entry) => entry.isDirectory()).flatMap((entry) => {
+    const pluginDir = path.join(bundledPluginsDir, entry.name);
+    const manifestResult = loadPluginManifest(pluginDir, false);
+    if (manifestResult.ok) {
+      return (manifestResult.manifest.cliBackends ?? []).map(
+        (backendId) =>
+          ({
+            pluginId: manifestResult.manifest.id,
+            backend: { id: backendId },
+          }) satisfies SetupCliBackendRuntimeEntry,
+      );
+    }
+    return resolveManifestOnlyCliBackends(pluginDir);
+  });
 
   bundledSetupCliBackendsCacheKey = cacheKey;
   bundledSetupCliBackendsCache = entries;
