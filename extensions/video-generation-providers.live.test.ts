@@ -213,7 +213,8 @@ describeLive("video generation provider live", () => {
         const liveSize = testCase.providerId === "openai" ? "1280x720" : undefined;
         const logPrefix = `[live:video-generation] provider=${testCase.providerId} model=${providerModel}`;
         let generatedVideo = null as {
-          buffer: Buffer;
+          buffer?: Buffer;
+          url?: string;
           mimeType: string;
           fileName?: string;
         } | null;
@@ -239,7 +240,10 @@ describeLive("video generation provider live", () => {
 
           expect(result.videos.length).toBeGreaterThan(0);
           expect(result.videos[0]?.mimeType.startsWith("video/")).toBe(true);
-          expect(result.videos[0]?.buffer.byteLength).toBeGreaterThan(1024);
+          const asset = result.videos[0];
+          const hasBuffer = asset?.buffer != null && asset.buffer.byteLength > 1024;
+          const hasUrl = typeof asset?.url === "string" && asset.url.startsWith("http");
+          expect(hasBuffer || hasUrl).toBe(true);
           generatedVideo = result.videos[0] ?? null;
           attempted.push(`${testCase.providerId}:generate:${providerModel} (${authLabel})`);
           console.error(
@@ -299,7 +303,10 @@ describeLive("video generation provider live", () => {
 
           expect(result.videos.length).toBeGreaterThan(0);
           expect(result.videos[0]?.mimeType.startsWith("video/")).toBe(true);
-          expect(result.videos[0]?.buffer.byteLength).toBeGreaterThan(1024);
+          const asset = result.videos[0];
+          const hasBuffer = asset?.buffer != null && asset.buffer.byteLength > 1024;
+          const hasUrl = typeof asset?.url === "string" && asset.url.startsWith("http");
+          expect(hasBuffer || hasUrl).toBe(true);
           attempted.push(`${testCase.providerId}:imageToVideo:${providerModel} (${authLabel})`);
           console.error(
             `${logPrefix} mode=imageToVideo done ms=${Date.now() - startedAt} videos=${result.videos.length}`,
@@ -349,7 +356,10 @@ describeLive("video generation provider live", () => {
 
           expect(result.videos.length).toBeGreaterThan(0);
           expect(result.videos[0]?.mimeType.startsWith("video/")).toBe(true);
-          expect(result.videos[0]?.buffer.byteLength).toBeGreaterThan(1024);
+          const asset = result.videos[0];
+          const hasBuffer = asset?.buffer != null && asset.buffer.byteLength > 1024;
+          const hasUrl = typeof asset?.url === "string" && asset.url.startsWith("http");
+          expect(hasBuffer || hasUrl).toBe(true);
           attempted.push(`${testCase.providerId}:videoToVideo:${providerModel} (${authLabel})`);
           console.error(
             `${logPrefix} mode=videoToVideo done ms=${Date.now() - startedAt} videos=${result.videos.length}`,

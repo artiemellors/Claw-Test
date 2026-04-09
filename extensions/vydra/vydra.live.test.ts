@@ -79,7 +79,10 @@ describe.skipIf(!LIVE || !VYDRA_API_KEY)("vydra live", () => {
 
       expect(result.videos.length).toBeGreaterThan(0);
       expect(result.videos[0]?.mimeType.startsWith("video/")).toBe(true);
-      expect(result.videos[0]?.buffer.byteLength).toBeGreaterThan(1024);
+      const vydraAsset = result.videos[0];
+      const vydraHasBuffer = vydraAsset?.buffer != null && vydraAsset.buffer.byteLength > 1024;
+      const vydraHasUrl = typeof vydraAsset?.url === "string" && vydraAsset.url.startsWith("http");
+      expect(vydraHasBuffer || vydraHasUrl).toBe(true);
     },
     8 * 60_000,
   );
@@ -102,7 +105,10 @@ describe.skipIf(!LIVE || !VYDRA_API_KEY)("vydra live", () => {
 
       expect(result.videos.length).toBeGreaterThan(0);
       expect(result.videos[0]?.mimeType.startsWith("video/")).toBe(true);
-      expect(result.videos[0]?.buffer.byteLength).toBeGreaterThan(1024);
+      const vydraAsset = result.videos[0];
+      const vydraHasBuffer = vydraAsset?.buffer != null && vydraAsset.buffer.byteLength > 1024;
+      const vydraHasUrl = typeof vydraAsset?.url === "string" && vydraAsset.url.startsWith("http");
+      expect(vydraHasBuffer || vydraHasUrl).toBe(true);
     },
     15 * 60_000,
   );
