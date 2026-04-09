@@ -218,6 +218,17 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    network: z
+      .object({
+        dangerouslyAllowPrivateNetwork: z
+          .boolean()
+          .optional()
+          .describe(
+            "Dangerous opt-in for TUN/fake-ip or transparent-proxy environments where provider API hostnames resolve to private/internal/special-use addresses (e.g. 198.18.0.0/15). When enabled, SSRF IP checks are skipped for image/music/video generation providers.",
+          ),
+      })
+      .strict()
+      .optional(),
     sandbox: AgentSandboxSchema,
   })
   .strict()

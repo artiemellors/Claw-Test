@@ -332,6 +332,14 @@ export type AgentDefaultsConfig = {
     /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
     requireAgentId?: boolean;
   };
+  /** Network settings for provider requests. */
+  network?: {
+    /**
+     * Dangerous opt-in for TUN/fake-ip or transparent-proxy environments.
+     * Skips SSRF IP checks for image/music/video generation providers.
+     */
+    dangerouslyAllowPrivateNetwork?: boolean;
+  };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: AgentSandboxConfig;
 };
