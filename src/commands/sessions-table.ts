@@ -28,6 +28,7 @@ export type SessionDisplayRow = {
   modelProvider?: string;
   providerOverride?: string;
   modelOverride?: string;
+  modelIsFromFallback?: boolean;
   contextTokens?: number;
 };
 
@@ -64,6 +65,7 @@ export function toSessionDisplayRows(store: Record<string, SessionEntry>): Sessi
         modelProvider: entry?.modelProvider,
         providerOverride: entry?.providerOverride,
         modelOverride: entry?.modelOverride,
+        modelIsFromFallback: entry?.modelIsFromFallback,
         contextTokens: entry?.contextTokens,
       } satisfies SessionDisplayRow;
     })
@@ -85,7 +87,7 @@ export function resolveSessionDisplayModel(
   cfg: OpenClawConfig,
   row: Pick<
     SessionDisplayRow,
-    "key" | "model" | "modelProvider" | "modelOverride" | "providerOverride"
+    "key" | "model" | "modelProvider" | "modelOverride" | "providerOverride" | "modelIsFromFallback"
   >,
   defaults: SessionDisplayDefaults,
 ): string {
