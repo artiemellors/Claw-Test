@@ -308,20 +308,53 @@ async function callTool(
   userDataDir: string | undefined,
   name: string,
   args: Record<string, unknown> = {},
+  opts?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<ChromeMcpToolResult> {
   const cacheKey = buildChromeMcpSessionCacheKey(profileName, userDataDir);
   const session = await getSession(profileName, userDataDir);
   let result: ChromeMcpToolResult;
+  const timeoutMs = opts?.timeoutMs;
+  const signal = opts?.signal;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let abortListener: (() => void) | undefined;
+  let rejectAbort: ((reason: unknown) => void) | undefined;
+  let abortPromise: Promise<never> | undefined;
+  if (typeof timeoutMs === "number" || signal) {
+    abortPromise = new Promise((_, reject) => {
+      rejectAbort = reject;
+    });
+    void abortPromise.catch(() => {});
+    if (typeof timeoutMs === "number") {
+      timeoutHandle = setTimeout(() => rejectAbort?.(new Error("timed out")), timeoutMs);
+    }
+    if (signal) {
+      if (signal.aborted) {
+        rejectAbort?.(signal.reason ?? new Error("aborted"));
+      } else {
+        abortListener = () => rejectAbort?.(signal.reason ?? new Error("aborted"));
+        signal.addEventListener("abort", abortListener, { once: true });
+      }
+    }
+  }
+  const callPromise = session.client.callTool({
+    name,
+    arguments: args,
+  }) as Promise<ChromeMcpToolResult>;
   try {
-    result = (await session.client.callTool({
-      name,
-      arguments: args,
-    })) as ChromeMcpToolResult;
+    result = abortPromise ? await Promise.race([callPromise, abortPromise]) : await callPromise;
   } catch (err) {
+    void callPromise.catch(() => {});
     // Transport/connection error — tear down session so it reconnects on next call
     sessions.delete(cacheKey);
     await session.client.close().catch(() => {});
     throw err;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+    if (signal && abortListener) {
+      signal.removeEventListener("abort", abortListener);
+    }
   }
   // Tool-level errors (element not found, script error, etc.) don't indicate a
   // broken connection — don't tear down the session for these.
@@ -492,12 +525,23 @@ export async function clickChromeMcpElement(params: {
   targetId: string;
   uid: string;
   doubleClick?: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<void> {
-  await callTool(params.profileName, params.userDataDir, "click", {
-    pageId: parsePageId(params.targetId),
-    uid: params.uid,
-    ...(params.doubleClick ? { dblClick: true } : {}),
-  });
+  await callTool(
+    params.profileName,
+    params.userDataDir,
+    "click",
+    {
+      pageId: parsePageId(params.targetId),
+      uid: params.uid,
+      ...(params.doubleClick ? { dblClick: true } : {}),
+    },
+    {
+      timeoutMs: params.timeoutMs,
+      signal: params.signal,
+    },
+  );
 }
 
 export async function fillChromeMcpElement(params: {
