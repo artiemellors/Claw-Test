@@ -8,6 +8,9 @@ import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 // Grace period to keep resolved entries for late awaitDecision calls
 const RESOLVED_ENTRY_GRACE_MS = 15_000;
 
+// Maximum number of pending approval requests to prevent unbounded growth
+const MAX_PENDING_APPROVALS = 1000;
+
 export type ExecApprovalRequestPayload = InfraExecApprovalRequestPayload;
 
 export type ExecApprovalRecord<TPayload = ExecApprovalRequestPayload> = {
@@ -39,6 +42,7 @@ export type ExecApprovalIdLookupResult =
 
 export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
   private pending = new Map<string, PendingEntry<TPayload>>();
+  private activeCount = 0;
 
   create(request: TPayload, timeoutMs: number, id?: string | null): ExecApprovalRecord<TPayload> {
     const now = Date.now();
@@ -62,6 +66,9 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     timeoutMs: number,
   ): Promise<ExecApprovalDecision | null> {
     const existing = this.pending.get(record.id);
+    if (!existing && this.activeCount >= MAX_PENDING_APPROVALS) {
+      throw new Error(`Too many pending approval requests (limit: ${MAX_PENDING_APPROVALS})`);
+    }
     if (existing) {
       // Idempotent: return existing promise if still pending
       if (existing.record.resolvedAtMs === undefined) {
@@ -88,6 +95,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
       this.expire(record.id);
     }, timeoutMs);
     this.pending.set(record.id, entry);
+    this.activeCount++;
     return promise;
   }
 
@@ -114,6 +122,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     pending.record.resolvedAtMs = Date.now();
     pending.record.decision = decision;
     pending.record.resolvedBy = resolvedBy ?? null;
+    this.activeCount--;
     // Resolve the promise first, then delete after a grace period.
     // This allows in-flight awaitDecision calls to find the resolved entry.
     pending.resolve(decision);
@@ -138,6 +147,7 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
     pending.record.resolvedAtMs = Date.now();
     pending.record.decision = undefined;
     pending.record.resolvedBy = resolvedBy ?? null;
+    this.activeCount--;
     pending.resolve(null);
     setTimeout(() => {
       if (this.pending.get(recordId) === pending) {
