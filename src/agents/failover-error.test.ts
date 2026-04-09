@@ -181,6 +181,28 @@ describe("failover-error", () => {
     ).toBe("overloaded");
   });
 
+  it("classifies OpenRouter no-endpoints 404s as model_not_found", () => {
+    expect(
+      resolveFailoverReasonFromError({
+        status: 404,
+        message: "No endpoints found for deepseek/deepseek-r1:free.",
+      }),
+    ).toBe("model_not_found");
+    expect(
+      resolveFailoverReasonFromError({
+        message: "404 No endpoints found for deepseek/deepseek-r1:free.",
+      }),
+    ).toBe("model_not_found");
+  });
+
+  it("classifies generic model-does-not-exist messages as model_not_found", () => {
+    expect(
+      resolveFailoverReasonFromError({
+        message: "The model gpt-foo does not exist.",
+      }),
+    ).toBe("model_not_found");
+  });
+
   it("keeps status-only 503s conservative unless the payload is clearly overloaded", () => {
     expect(
       resolveFailoverReasonFromError({
