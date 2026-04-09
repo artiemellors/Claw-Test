@@ -1,3 +1,4 @@
+import { findFenceSpanAt, parseFenceSpans } from "../markdown/fences.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 export type InlineDirectiveParseResult = {
@@ -133,6 +134,76 @@ export function stripInlineDirectiveTagsFromMessageForDisplay(
   });
   return { ...message, content: cleaned };
 }
+
+/**
+ * Split an unclosed trailing `[[…` directive tag from the end of streaming text.
+ *
+ * Returns `{ text, tail }` where `tail` is the stripped pending fragment (or "").
+ * Occurrences of `[[` inside Markdown fenced code blocks are ignored so that
+ * code examples like ` ```\n[[some_code]]\n``` ` are never mistakenly truncated.
+ */
+export const splitTrailingDirective = (
+  text: string,
+): { text: string; tail: string } => {
+  const fenceSpans = parseFenceSpans(text);
+  let searchFrom = text.length;
+  while (searchFrom > 0) {
+    const openIndex = text.lastIndexOf("[[", searchFrom - 1);
+    if (openIndex < 0) {
+      return { text, tail: "" };
+    }
+
+    // `[[` is inside a fenced code block — skip and continue searching leftward.
+    if (findFenceSpanAt(fenceSpans, openIndex)) {
+      searchFrom = openIndex;
+      continue;
+    }
+
+    // Found a `[[` outside any fence — scan forward for a `]]` that is also
+    // outside a fence.  Skip over any `]]` that falls inside a fenced block.
+    let closeSearch = openIndex + 2;
+    let closed = false;
+    while (closeSearch < text.length) {
+      const closeIndex = text.indexOf("]]", closeSearch);
+      if (closeIndex < 0) {
+        break;
+      }
+      if (!findFenceSpanAt(fenceSpans, closeIndex)) {
+        closed = true;
+        break;
+      }
+      closeSearch = closeIndex + 2;
+    }
+
+    if (closed) {
+      // Paired `]]` exists outside a fence — complete directive tag, no truncation needed.
+      return { text, tail: "" };
+    }
+
+    // Unclosed `[[` outside a fence — truncate into tail.
+    return {
+      text: text.slice(0, openIndex),
+      tail: text.slice(openIndex),
+    };
+  }
+
+  return { text, tail: "" };
+};
+
+/**
+ * Strip an unclosed trailing `[[…` (or lone `[`) directive fragment from text.
+ *
+ * Convenience wrapper around {@link splitTrailingDirective} that returns only the
+ * cleaned text string.
+ */
+export const stripTrailingDirective = (text: string): string => {
+  const { text: cleaned } = splitTrailingDirective(text);
+  // Also strip a lone trailing `[` that may be the start of `[[`.
+  if (cleaned.endsWith("[")) {
+    return cleaned.slice(0, -1);
+  }
+  return cleaned;
+};
 
 export function parseInlineDirectives(
   text?: string,
