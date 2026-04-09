@@ -6,19 +6,130 @@ import { getDiscordGatewayEmitter, waitForDiscordGatewayStop } from "../monitor.
 import type { DiscordVoiceManager } from "../voice/manager.js";
 import type { MutableDiscordGateway } from "./gateway-handle.js";
 import { registerGateway, unregisterGateway } from "./gateway-registry.js";
-import type { DiscordGatewayEvent, DiscordGatewaySupervisor } from "./gateway-supervisor.js";
+import {
+  DiscordGatewayLifecycleError,
+  type DiscordGatewayEvent,
+  type DiscordGatewaySupervisor,
+} from "./gateway-supervisor.js";
 import type { DiscordMonitorStatusSink } from "./status.js";
 
 const DISCORD_GATEWAY_READY_TIMEOUT_MS = 15_000;
 const DISCORD_GATEWAY_RUNTIME_READY_TIMEOUT_MS = 30_000;
 const DISCORD_GATEWAY_READY_POLL_MS = 250;
-
-type ExecApprovalsHandler = {
-  start: () => Promise<void>;
-  stop: () => Promise<void>;
-};
+const DISCORD_GATEWAY_STARTUP_DISCONNECT_DRAIN_TIMEOUT_MS = 5_000;
+const DISCORD_GATEWAY_STARTUP_TERMINATE_CLOSE_TIMEOUT_MS = 1_000;
 
 type GatewayReadyWaitResult = "ready" | "stopped" | "timeout";
+
+async function restartGatewayAfterReadyTimeout(params: {
+  gateway?: Pick<MutableDiscordGateway, "connect" | "disconnect" | "ws">;
+  abortSignal?: AbortSignal;
+  runtime: RuntimeEnv;
+}): Promise<void> {
+  if (!params.gateway || params.abortSignal?.aborted) {
+    return;
+  }
+
+  const socket = params.gateway.ws;
+  if (!socket) {
+    params.gateway.disconnect();
+    if (!params.abortSignal?.aborted) {
+      params.gateway.connect(false);
+    }
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let drainTimeout: ReturnType<typeof setTimeout> | undefined;
+    let terminateCloseTimeout: ReturnType<typeof setTimeout> | undefined;
+    const ignoreSocketError = () => {};
+    const clearTimers = () => {
+      if (drainTimeout) {
+        clearTimeout(drainTimeout);
+        drainTimeout = undefined;
+      }
+      if (terminateCloseTimeout) {
+        clearTimeout(terminateCloseTimeout);
+        terminateCloseTimeout = undefined;
+      }
+    };
+    const cleanup = () => {
+      clearTimers();
+      socket.removeListener("close", onClose);
+      socket.removeListener("error", ignoreSocketError);
+    };
+    const finishResolve = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const finishReject = (error: Error) => {
+      if (params.abortSignal?.aborted) {
+        finishResolve();
+        return;
+      }
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onClose = () => {
+      finishResolve();
+    };
+
+    socket.on("error", ignoreSocketError);
+    socket.on("close", onClose);
+    params.gateway?.disconnect();
+
+    drainTimeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      if (typeof socket.terminate !== "function") {
+        finishReject(
+          new Error(
+            `discord gateway socket did not close within ${DISCORD_GATEWAY_STARTUP_DISCONNECT_DRAIN_TIMEOUT_MS}ms before restart`,
+          ),
+        );
+        return;
+      }
+      params.runtime.error?.(
+        danger(
+          `discord: startup restart waiting on a stale gateway socket for ${DISCORD_GATEWAY_STARTUP_DISCONNECT_DRAIN_TIMEOUT_MS}ms; forcing terminate before reconnect`,
+        ),
+      );
+      try {
+        socket.terminate();
+      } catch {
+        finishReject(
+          new Error(
+            `discord gateway socket did not close within ${DISCORD_GATEWAY_STARTUP_DISCONNECT_DRAIN_TIMEOUT_MS}ms before restart`,
+          ),
+        );
+        return;
+      }
+      terminateCloseTimeout = setTimeout(() => {
+        finishReject(
+          new Error(
+            `discord gateway socket did not close within ${DISCORD_GATEWAY_STARTUP_DISCONNECT_DRAIN_TIMEOUT_MS}ms before restart`,
+          ),
+        );
+      }, DISCORD_GATEWAY_STARTUP_TERMINATE_CLOSE_TIMEOUT_MS);
+      terminateCloseTimeout.unref?.();
+    }, DISCORD_GATEWAY_STARTUP_DISCONNECT_DRAIN_TIMEOUT_MS);
+    drainTimeout.unref?.();
+  });
+
+  if (!params.abortSignal?.aborted) {
+    params.gateway.connect(false);
+  }
+}
 
 function parseGatewayCloseCode(message: string): number | undefined {
   const match = /Gateway websocket closed:\s*(\d{3,5})/.exec(message);
@@ -163,12 +274,12 @@ function createGatewayStatusObserver(params: {
 }
 
 async function waitForGatewayReady(params: {
-  gateway?: Pick<MutableDiscordGateway, "connect" | "disconnect" | "isConnected">;
+  gateway?: Pick<MutableDiscordGateway, "connect" | "disconnect" | "isConnected" | "ws">;
   abortSignal?: AbortSignal;
   beforePoll?: () => Promise<"continue" | "stop"> | "continue" | "stop";
   pushStatus?: (patch: Parameters<DiscordMonitorStatusSink>[0]) => void;
   runtime: RuntimeEnv;
-  beforeRestart?: () => void;
+  beforeRestart?: () => Promise<void> | void;
 }): Promise<void> {
   const waitUntilReady = async (): Promise<GatewayReadyWaitResult> => {
     const deadlineAt = Date.now() + DISCORD_GATEWAY_READY_TIMEOUT_MS;
@@ -181,6 +292,7 @@ async function waitForGatewayReady(params: {
         params.pushStatus?.({
           ...createConnectedChannelStatusPatch(at),
           lastDisconnect: null,
+          lastError: null,
         });
         return "ready";
       }
@@ -223,9 +335,12 @@ async function waitForGatewayReady(params: {
   if (params.abortSignal?.aborted) {
     return;
   }
-  params.beforeRestart?.();
-  params.gateway.disconnect();
-  params.gateway.connect(false);
+  await params.beforeRestart?.();
+  await restartGatewayAfterReadyTimeout({
+    gateway: params.gateway,
+    abortSignal: params.abortSignal,
+    runtime: params.runtime,
+  });
 
   if ((await waitUntilReady()) === "timeout") {
     throw new Error(
@@ -242,7 +357,6 @@ export async function runDiscordGatewayLifecycle(params: {
   isDisallowedIntentsError: (err: unknown) => boolean;
   voiceManager: DiscordVoiceManager | null;
   voiceManagerRef: { current: DiscordVoiceManager | null };
-  execApprovalsHandler: ExecApprovalsHandler | null;
   threadBindings: { stop: () => void };
   gatewaySupervisor: DiscordGatewaySupervisor;
   statusSink?: DiscordMonitorStatusSink;
@@ -285,7 +399,13 @@ export async function runDiscordGatewayLifecycle(params: {
     if (event.shouldStopLifecycle) {
       lifecycleStopping = true;
     }
-    params.runtime.error?.(danger(`discord gateway error: ${event.message}`));
+    params.runtime.error?.(
+      danger(
+        event.shouldStopLifecycle
+          ? `discord gateway ${event.type}: ${event.message}`
+          : `discord gateway error: ${event.message}`,
+      ),
+    );
     return event.shouldStopLifecycle ? "stop" : "continue";
   };
   const drainPendingGatewayErrors = (): "continue" | "stop" =>
@@ -297,13 +417,9 @@ export async function runDiscordGatewayLifecycle(params: {
       if (event.type === "disallowed-intents") {
         return "stop";
       }
-      throw event.err;
+      throw new DiscordGatewayLifecycleError(event);
     });
   try {
-    if (params.execApprovalsHandler) {
-      await params.execApprovalsHandler.start();
-    }
-
     // Drain gateway errors emitted before lifecycle listeners were attached.
     if (drainPendingGatewayErrors() === "stop") {
       return;
@@ -347,9 +463,6 @@ export async function runDiscordGatewayLifecycle(params: {
     if (params.voiceManager) {
       await params.voiceManager.destroy();
       params.voiceManagerRef.current = null;
-    }
-    if (params.execApprovalsHandler) {
-      await params.execApprovalsHandler.stop();
     }
     params.threadBindings.stop();
   }
