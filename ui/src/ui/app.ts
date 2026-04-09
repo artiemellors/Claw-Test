@@ -28,6 +28,7 @@ import {
   handleFirstUpdated,
   handleUpdated,
 } from "./app-lifecycle.ts";
+import { switchChatSession } from "./app-render.helpers.ts";
 import { renderApp } from "./app-render.ts";
 import {
   exportLogs as exportLogsInternal,
@@ -69,8 +70,14 @@ import type {
   SkillMessage,
 } from "./controllers/skills.ts";
 import type { GatewayBrowserClient, GatewayHelloOk } from "./gateway.ts";
+import { GatewayRequestError } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
-import { resolveAgentIdFromSessionKey } from "./session-key.ts";
+import {
+  buildAgentMainSessionKey,
+  buildDashboardSessionMainKey,
+  parseAgentSessionKey,
+  resolveAgentIdFromSessionKey,
+} from "./session-key.ts";
 import { loadSettings, type UiSettings } from "./storage.ts";
 import { VALID_THEME_NAMES, type ResolvedTheme, type ThemeMode, type ThemeName } from "./theme.ts";
 import type {
@@ -108,6 +115,42 @@ declare global {
 }
 
 const bootAssistantIdentity = normalizeAssistantIdentity({});
+
+export function shouldUseOptimisticNewSessionFallback(error: unknown): boolean {
+  if (!(error instanceof GatewayRequestError)) {
+    return true;
+  }
+  if (error.gatewayCode === "UNAVAILABLE" || error.gatewayCode === "TIMEOUT") {
+    return true;
+  }
+  if (error.gatewayCode !== "INVALID_REQUEST") {
+    return false;
+  }
+  return normalizeLowercaseStringOrEmpty(error.message).includes("unknown method");
+}
+
+export function resolveNewSessionAgentId(params: {
+  sessionKey: string;
+  sessionsResult: OpenClawApp["sessionsResult"];
+  assistantAgentId: string | null;
+}): string | null {
+  const activeSessionExists =
+    params.sessionsResult?.sessions?.some((row) => row.key === params.sessionKey) ?? false;
+  const sessionAgentId = activeSessionExists
+    ? parseAgentSessionKey(params.sessionKey)?.agentId
+    : null;
+  if (sessionAgentId) {
+    return sessionAgentId;
+  }
+  if (params.assistantAgentId) {
+    return params.assistantAgentId;
+  }
+  const scopedSessionAgentId = parseAgentSessionKey(params.sessionKey)?.agentId;
+  if (scopedSessionAgentId && scopedSessionAgentId !== "main") {
+    return null;
+  }
+  return "main";
+}
 
 function resolveOnboardingMode(): boolean {
   if (!window.location.search) {
@@ -204,6 +247,9 @@ export class OpenClawApp extends LitElement {
   @state() execApprovalError: string | null = null;
   @state() pendingGatewayUrl: string | null = null;
   pendingGatewayToken: string | null = null;
+
+  @state() newSessionModalOpen = false;
+  @state() newSessionName = "";
 
   @state() configLoading = false;
   @state() configRaw = "{\n}\n";
@@ -751,6 +797,70 @@ export class OpenClawApp extends LitElement {
   handleGatewayUrlCancel() {
     this.pendingGatewayUrl = null;
     this.pendingGatewayToken = null;
+  }
+
+  handleNewSessionOpen() {
+    this.newSessionModalOpen = true;
+    this.newSessionName = "";
+  }
+
+  async handleNewSessionConfirm() {
+    const name = this.newSessionName.trim();
+    if (!name) {
+      return;
+    }
+    const agentId = resolveNewSessionAgentId({
+      sessionKey: this.sessionKey,
+      sessionsResult: this.sessionsResult,
+      assistantAgentId: this.assistantAgentId,
+    });
+    if (!agentId) {
+      this.lastError = "Still loading agent context. Try again in a moment.";
+      return;
+    }
+    this.newSessionModalOpen = false;
+    this.newSessionName = "";
+    const newKey = buildAgentMainSessionKey({
+      agentId,
+      mainKey: buildDashboardSessionMainKey({
+        name,
+        uniqueId: generateUUID(),
+      }),
+    });
+    if (this.client && this.connected) {
+      try {
+        const result = (await this.client.request("sessions.create", {
+          key: newKey,
+          agentId,
+          label: name,
+        })) as {
+          ok: boolean;
+          key?: string;
+        };
+        if (result?.ok && result.key) {
+          switchChatSession(this as Parameters<typeof switchChatSession>[0], result.key);
+          return;
+        }
+      } catch (error) {
+        if (shouldUseOptimisticNewSessionFallback(error)) {
+          switchChatSession(this as Parameters<typeof switchChatSession>[0], newKey);
+          return;
+        }
+        this.lastError =
+          error instanceof Error
+            ? `Failed to create session: ${error.message}`
+            : "Failed to create session";
+        return;
+      }
+      this.lastError = "Failed to create session";
+      return;
+    }
+    switchChatSession(this as Parameters<typeof switchChatSession>[0], newKey);
+  }
+
+  handleNewSessionCancel() {
+    this.newSessionModalOpen = false;
+    this.newSessionName = "";
   }
 
   // Sidebar handlers for tool output viewing
