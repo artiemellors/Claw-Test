@@ -119,7 +119,14 @@ function estimateSafeToolCallChars(block: unknown): number {
 }
 
 function isFallbackToolCallType(type: unknown): boolean {
-  return type === "toolCall" || type === "toolUse" || type === "functionCall";
+  return (
+    type === "toolCall" ||
+    type === "toolUse" ||
+    type === "functionCall" ||
+    type === "tool_call" ||
+    type === "tool_use" ||
+    type === "function_call"
+  );
 }
 
 function estimateSafeArrayContentChars(content: unknown): number {

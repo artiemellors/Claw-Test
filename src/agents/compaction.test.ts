@@ -91,6 +91,9 @@ describe("estimateMessageTokens", () => {
         { type: "text" },
         { type: "toolUse", id: "call_2", name: "read", input: { path: "IDENTITY.md" } },
         { type: "functionCall", id: "call_3", name: "bash", arguments: { command: "pwd" } },
+        { type: "tool_use", id: "call_4", name: "search", input: { q: "openclaw" } },
+        { type: "tool_call", id: "call_5", name: "write", arguments: { path: "out.txt" } },
+        { type: "function_call", id: "call_6", name: "exec", arguments: { cmd: "pwd" } },
       ],
       timestamp: 1,
     } as unknown as AgentMessage;
@@ -100,7 +103,13 @@ describe("estimateMessageTokens", () => {
         ("read".length +
           JSON.stringify({ path: "IDENTITY.md" }).length +
           "bash".length +
-          JSON.stringify({ command: "pwd" }).length) /
+          JSON.stringify({ command: "pwd" }).length +
+          "search".length +
+          JSON.stringify({ q: "openclaw" }).length +
+          "write".length +
+          JSON.stringify({ path: "out.txt" }).length +
+          "exec".length +
+          JSON.stringify({ cmd: "pwd" }).length) /
           4,
       ),
     );
