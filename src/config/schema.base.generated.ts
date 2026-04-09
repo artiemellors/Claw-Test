@@ -16969,7 +16969,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 },
                 title: "Exec Safe Bin Trusted Dirs",
                 description:
-                  "Additional explicit directories trusted for safe-bin path checks (PATH entries are never auto-trusted).",
+                  "Additional explicit immutable directories trusted for safe-bin path checks (PATH entries are never auto-trusted; mutable dirs like /usr/local/bin, /snap/bin, ~/.nvm, or workspace-relative script dirs are not valid safe-bin roots).",
               },
               safeBinProfiles: {
                 type: "object",
@@ -23617,7 +23617,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "tools.exec.safeBinTrustedDirs": {
       label: "Exec Safe Bin Trusted Dirs",
-      help: "Additional explicit directories trusted for safe-bin path checks (PATH entries are never auto-trusted).",
+      help: "Additional explicit immutable directories trusted for safe-bin path checks (PATH entries are never auto-trusted; mutable dirs like /usr/local/bin, /snap/bin, ~/.nvm, or workspace-relative script dirs are not valid safe-bin roots).",
       tags: ["storage", "tools"],
     },
     "tools.exec.safeBinProfiles": {
