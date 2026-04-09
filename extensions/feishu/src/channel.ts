@@ -119,6 +119,31 @@ const loadFeishuChannelRuntime = createLazyRuntimeNamedExport(
   "feishuChannelRuntime",
 );
 
+function shouldTreatFeishuDeliveredTextAsVisible(params: {
+  kind: "tool" | "block" | "final";
+  text?: string;
+  cfg?: ClawdbotConfig;
+  accountId?: string | null;
+}): boolean {
+  if (params.kind !== "block" || typeof params.text !== "string" || !params.text.trim()) {
+    return false;
+  }
+  if (!params.cfg) {
+    return false;
+  }
+  const account = resolveFeishuAccount({ cfg: params.cfg, accountId: params.accountId });
+  const renderMode = account.config?.renderMode ?? "auto";
+  const streamingEnabled = account.config?.streaming !== false && renderMode !== "raw";
+  if (!streamingEnabled) {
+    return false;
+  }
+  return (
+    renderMode === "card" ||
+    /```[\s\S]*?```/.test(params.text) ||
+    /\|.+\|[\r\n]+\|[-:| ]+\|/.test(params.text)
+  );
+}
+
 const collectFeishuSecurityWarnings = createAllowlistProviderGroupPolicyWarningCollector<{
   cfg: ClawdbotConfig;
   accountId?: string | null;
@@ -1209,6 +1234,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
       chunker: chunkTextForOutbound,
       chunkerMode: "markdown",
       textChunkLimit: 4000,
+      shouldTreatDeliveredTextAsVisible: shouldTreatFeishuDeliveredTextAsVisible,
       ...createRuntimeOutboundDelegates({
         getRuntime: loadFeishuChannelRuntime,
         sendText: { resolve: (runtime) => runtime.feishuOutbound.sendText },
