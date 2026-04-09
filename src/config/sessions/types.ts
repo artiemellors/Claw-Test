@@ -214,6 +214,14 @@ export type SessionEntry = {
   fallbackNoticeSelectedModel?: string;
   fallbackNoticeActiveModel?: string;
   fallbackNoticeReason?: string;
+  /**
+   * Model cooldown circuit breaker expiry timestamp (ms).
+   * When all credentials return model_cooldown with a long reset_seconds,
+   * this field stores the expiry time to prevent infinite retry loops.
+   * Set when soonestCooldownExpiry exceeds the configured threshold.
+   * Cleared when the cooldown expires or a run succeeds.
+   */
+  modelCooldownUntil?: number;
   contextTokens?: number;
   compactionCount?: number;
   compactionCheckpoints?: SessionCompactionCheckpoint[];

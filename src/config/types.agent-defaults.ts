@@ -429,4 +429,13 @@ export type AgentLlmConfig = {
    * Default: 60 seconds.
    */
   idleTimeoutSeconds?: number;
+  /**
+   * Model cooldown circuit breaker threshold in minutes.
+   * When all credentials return model_cooldown with reset_seconds exceeding this threshold,
+   * the session enters a cooldown state and rejects new messages until the cooldown expires.
+   * This prevents infinite retry loops against hours-long cooldowns.
+   * Default: 60 minutes (1 hour).
+   * Set to 0 to disable the circuit breaker.
+   */
+  modelCooldownThresholdMinutes?: number;
 };
