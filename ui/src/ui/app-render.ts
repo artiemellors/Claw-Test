@@ -747,13 +747,17 @@ export function renderApp(state: AppViewState) {
               onSessionKeyChange: (next) => {
                 state.sessionKey = next;
                 state.chatMessage = "";
+                state.chatMessages = [];
+                state.chatToolMessages = [];
+                state.chatStream = null;
+                state.chatRunId = null;
+                state.chatQueue = [];
                 state.resetToolStream();
                 state.applySettings({
                   ...state.settings,
                   sessionKey: next,
                   lastActiveSessionKey: next,
                 });
-                void state.loadAssistantIdentity();
               },
               onToggleGatewayTokenVisibility: () => {
                 state.overviewShowGatewayToken = !state.overviewShowGatewayToken;
@@ -1545,23 +1549,7 @@ export function renderApp(state: AppViewState) {
           ? renderChat({
               sessionKey: state.sessionKey,
               onSessionKeyChange: (next) => {
-                state.sessionKey = next;
-                state.chatMessage = "";
-                state.chatAttachments = [];
-                state.chatStream = null;
-                state.chatStreamStartedAt = null;
-                state.chatRunId = null;
-                state.chatQueue = [];
-                state.resetToolStream();
-                state.resetChatScroll();
-                state.applySettings({
-                  ...state.settings,
-                  sessionKey: next,
-                  lastActiveSessionKey: next,
-                });
-                void state.loadAssistantIdentity();
-                void loadChatHistory(state);
-                void refreshChatAvatar(state);
+                switchChatSession(state, next);
               },
               thinkingLevel: state.chatThinkingLevel,
               showThinking,
