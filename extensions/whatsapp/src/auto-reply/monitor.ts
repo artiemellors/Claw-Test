@@ -41,6 +41,8 @@ function isNonRetryableWebCloseStatus(statusCode: unknown): boolean {
   return statusCode === 440;
 }
 
+const RECONNECT_SAFETY_TIMEOUT_MS = 90_000;
+
 type ActiveConnectionRun = {
   connectionId: string;
   startedAt: number;
@@ -167,6 +169,7 @@ export async function monitorWebChannel(
   process.once("SIGINT", handleSigint);
 
   let reconnectAttempts = 0;
+  let reconnectSafetyTimer: ReturnType<typeof setTimeout> | null = null;
   const socketRef: { current: WASocket | null } = { current: null };
   const disconnectRetryController = new AbortController();
   const stopDisconnectRetries = () => {
@@ -261,6 +264,13 @@ export async function monitorWebChannel(
 
     setActiveWebListener(account.accountId, listener);
 
+    // Clear the reconnect safety timer from a previous iteration — listener
+    // was successfully re-registered, so the reconnect is not stuck.
+    if (reconnectSafetyTimer) {
+      clearTimeout(reconnectSafetyTimer);
+      reconnectSafetyTimer = null;
+    }
+
     // Drain any messages that failed with "no listener" during the disconnect window.
     void drainReconnectQueue({
       accountId: account.accountId,
@@ -272,7 +282,6 @@ export async function monitorWebChannel(
         "reconnect drain failed",
       );
     });
-
     active.unregisterUnhandled = registerUnhandledRejectionHandler((reason) => {
       if (!isLikelyWhatsAppCryptoError(reason)) {
         return false;
@@ -293,6 +302,18 @@ export async function monitorWebChannel(
     const closeListener = async () => {
       socketRef.current = null;
       setActiveWebListener(account.accountId, null);
+      // Start a safety timer to detect stuck reconnects. If the listener
+      // isn't re-registered within 90s, something is likely stuck.
+      // Timer lives in outer scope so the next iteration can clear it.
+      if (reconnectSafetyTimer) {
+        clearTimeout(reconnectSafetyTimer);
+      }
+      reconnectSafetyTimer = setTimeout(() => {
+        reconnectLogger.warn(
+          { connectionId: active.connectionId, accountId: account.accountId },
+          "WA listener guard: 90s since closeListener, reconnect may be stuck",
+        );
+      }, RECONNECT_SAFETY_TIMEOUT_MS);
       if (active.unregisterUnhandled) {
         active.unregisterUnhandled();
         active.unregisterUnhandled = null;
@@ -363,6 +384,13 @@ export async function monitorWebChannel(
         );
         void closeListener().catch((err) => {
           logVerbose(`Close listener failed: ${formatError(err)}`);
+        });
+        // Immediately reflect disconnection in status so external consumers
+        // (e.g. `channels status`) don't report "connected" during the gap.
+        statusController.noteClose({
+          error: "listener-null-watchdog-reconnect",
+          reconnectAttempts,
+          healthState: "reconnecting",
         });
         listener.signalClose?.({
           status: 499,
@@ -525,6 +553,12 @@ export async function monitorWebChannel(
   }
 
   statusController.markStopped();
+
+  // Clear any dangling reconnect safety timer so it doesn't fire after exit.
+  if (reconnectSafetyTimer) {
+    clearTimeout(reconnectSafetyTimer);
+    reconnectSafetyTimer = null;
+  }
 
   process.removeListener("SIGINT", handleSigint);
 }
