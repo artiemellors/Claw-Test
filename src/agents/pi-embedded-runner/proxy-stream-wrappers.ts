@@ -6,7 +6,10 @@ import { normalizeOptionalLowercaseString, readStringValue } from "../../shared/
 import { resolveProviderRequestPolicy } from "../provider-attribution.js";
 import { resolveProviderRequestPolicyConfig } from "../provider-request-config.js";
 import { applyAnthropicEphemeralCacheControlMarkers } from "./anthropic-cache-control-payload.js";
-import { isAnthropicModelRef } from "./anthropic-family-cache-semantics.js";
+import {
+  isAnthropicModelRef,
+  isDeepInfraAnthropicModelRef,
+} from "./anthropic-family-cache-semantics.js";
 import { streamWithPayloadPatch } from "./stream-payload-utils.js";
 const KILOCODE_FEATURE_HEADER = "X-KILOCODE-FEATURE";
 const KILOCODE_FEATURE_DEFAULT = "openclaw";
@@ -88,6 +91,21 @@ export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | unde
   };
 }
 
+export function createDeepInfraSystemCacheWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
+  const underlying = baseStreamFn ?? streamSimple;
+  return (model, context, options) => {
+    const provider = readStringValue(model.provider);
+    const modelId = readStringValue(model.id);
+    if (!provider || !modelId || !isDeepInfraAnthropicModelRef(provider, modelId)) {
+      return underlying(model, context, options);
+    }
+
+    return streamWithPayloadPatch(underlying, model, context, options, (payloadObj) => {
+      applyAnthropicEphemeralCacheControlMarkers(payloadObj);
+    });
+  };
+}
+
 export function createOpenRouterWrapper(
   baseStreamFn: StreamFn | undefined,
   thinkingLevel?: ThinkLevel,
@@ -120,6 +138,23 @@ export function createOpenRouterWrapper(
 
 export function isProxyReasoningUnsupported(modelId: string): boolean {
   return isProxyReasoningUnsupportedModelHint(modelId);
+}
+
+export function createDeepInfraWrapper(
+  baseStreamFn: StreamFn | undefined,
+  thinkingLevel?: ThinkLevel,
+): StreamFn {
+  const underlying = baseStreamFn ?? streamSimple;
+  return (model, context, options) => {
+    const onPayload = options?.onPayload;
+    return underlying(model, context, {
+      ...options,
+      onPayload: (payload) => {
+        normalizeProxyReasoningPayload(payload, thinkingLevel);
+        return onPayload?.(payload, model);
+      },
+    });
+  };
 }
 
 export function createKilocodeWrapper(

@@ -85,6 +85,7 @@ export async function modelsListCommand(
       rows,
       models: modelRegistry?.getAll() ?? [],
       context: rowContext,
+      sort_by_name: providerFilter !== "deepinfra",
     });
 
     if (modelRegistry) {

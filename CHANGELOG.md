@@ -6,6 +6,8 @@ Docs: https://docs.openclaw.ai
 
 ### Changes
 
+- Providers/DeepInfra: add DeepInfra as an official provider with interactive onboarding, `DEEPINFRA_API_KEY` auto-detection, and dynamic model discovery from the DeepInfra API. (#53805) Thanks @ats3v
+
 ### Fixes
 
 - fix(browser): auto-generate browser control auth token for none/trusted-proxy modes [AI]. (#63280) Thanks @pgondhi987.
