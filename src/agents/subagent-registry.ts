@@ -411,6 +411,7 @@ function restoreSubagentRunsOnce() {
     return;
   }
   restoreAttempted = true;
+  ensureListener();
   try {
     const restoredCount = subagentRegistryDeps.restoreSubagentRunsFromDisk({
       runs: subagentRuns,
@@ -431,7 +432,6 @@ function restoreSubagentRunsOnce() {
       return;
     }
     // Resume pending work.
-    ensureListener();
     if ([...subagentRuns.values()].some((entry) => entry.archiveAtMs)) {
       startSweeper();
     }
@@ -457,11 +457,16 @@ function resolveSubagentWaitTimeoutMs(
   });
 }
 
+let sweepInProgress = false;
+
 function startSweeper() {
   if (sweeper) {
     return;
   }
   sweeper = setInterval(() => {
+    if (sweepInProgress) {
+      return;
+    }
     void sweepSubagentRuns();
   }, 60_000);
   sweeper.unref?.();
@@ -476,41 +481,56 @@ function stopSweeper() {
 }
 
 async function sweepSubagentRuns() {
-  const now = Date.now();
-  let mutated = false;
-  for (const [runId, entry] of subagentRuns.entries()) {
-    if (!entry.archiveAtMs || entry.archiveAtMs > now) {
-      continue;
-    }
-    clearPendingLifecycleError(runId);
-    void notifyContextEngineSubagentEnded({
-      childSessionKey: entry.childSessionKey,
-      reason: "swept",
-      workspaceDir: entry.workspaceDir,
-    });
-    subagentRuns.delete(runId);
-    mutated = true;
-    // Archive/purge is terminal for the run record; remove any retained attachments too.
-    await safeRemoveAttachmentsDir(entry);
-    try {
-      await subagentRegistryDeps.callGateway({
-        method: "sessions.delete",
-        params: {
-          key: entry.childSessionKey,
-          deleteTranscript: true,
-          emitLifecycleHooks: false,
-        },
-        timeoutMs: 10_000,
+  if (sweepInProgress) {
+    return;
+  }
+  sweepInProgress = true;
+  try {
+    const now = Date.now();
+    let mutated = false;
+    for (const [runId, entry] of subagentRuns.entries()) {
+      if (!entry.archiveAtMs || entry.archiveAtMs > now) {
+        continue;
+      }
+      clearPendingLifecycleError(runId);
+      try {
+        await subagentRegistryDeps.callGateway({
+          method: "sessions.delete",
+          params: {
+            key: entry.childSessionKey,
+            deleteTranscript: true,
+            emitLifecycleHooks: false,
+          },
+          timeoutMs: 10_000,
+        });
+      } catch (err) {
+        log.warn("sweepSubagentRuns: sessions.delete failed; run retained for retry", {
+          runId,
+          childSessionKey: entry.childSessionKey,
+          error: String(err),
+        });
+        continue;
+      }
+      // Delete attachments AFTER successful sessions.delete so that a gateway
+      // failure does not leave a partially-swept run (no attachments but still
+      // present in the runs map).
+      await safeRemoveAttachmentsDir(entry);
+      void notifyContextEngineSubagentEnded({
+        childSessionKey: entry.childSessionKey,
+        reason: "swept",
+        workspaceDir: entry.workspaceDir,
       });
-    } catch {
-      // ignore
+      subagentRuns.delete(runId);
+      mutated = true;
     }
-  }
-  if (mutated) {
-    persistSubagentRuns();
-  }
-  if (subagentRuns.size === 0) {
-    stopSweeper();
+    if (mutated) {
+      persistSubagentRuns();
+    }
+    if (subagentRuns.size === 0) {
+      stopSweeper();
+    }
+  } finally {
+    sweepInProgress = false;
   }
 }
 
@@ -645,6 +665,7 @@ export function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
   subagentRegistryRuntimePromise = null;
   resetAnnounceQueuesForTests();
   stopSweeper();
+  sweepInProgress = false;
   restoreAttempted = false;
   if (listenerStop) {
     listenerStop();
