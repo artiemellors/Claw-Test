@@ -28,7 +28,7 @@ export type MatrixDraftStream = {
   /** Ensure the last pending update has been sent. */
   flush: () => Promise<void>;
   /** Flush and mark this block as done. Returns the event ID if a message was sent. */
-  stop: () => Promise<string | undefined>;
+  stop: (opts?: { finalizeLive?: boolean }) => Promise<string | undefined>;
   /** Reset state for the next text block (after tool calls). */
   reset: () => void;
   /** The event ID of the current draft message, if any. */
@@ -53,12 +53,17 @@ export function createMatrixDraftStream(params: {
 }): MatrixDraftStream {
   const { roomId, client, cfg, threadId, accountId, log } = params;
   const preview = resolveDraftPreviewOptions(params.mode ?? "partial");
+  // MSC4357 live markers are only useful for "partial" mode where users see
+  // the draft evolve. "quiet" mode uses m.notice for background previews
+  // where a streaming animation would be unexpected.
+  const useLive = params.mode !== "quiet";
 
   let currentEventId: string | undefined;
   let lastSentText = "";
   let stopped = false;
   let sendFailed = false;
   let finalizeInPlaceBlocked = false;
+  let liveFinalized = false;
   let replyToId = params.replyToId;
 
   const sendOrEdit = async (text: string): Promise<boolean> => {
@@ -94,10 +99,11 @@ export function createMatrixDraftStream(params: {
           accountId,
           msgtype: preview.msgtype,
           includeMentions: preview.includeMentions,
+          live: useLive,
         });
         currentEventId = result.messageId;
         lastSentText = preparedText.trimmedText;
-        log?.(`draft-stream: created message ${currentEventId}`);
+        log?.(`draft-stream: created message ${currentEventId}${useLive ? " (MSC4357 live)" : ""}`);
       } else {
         await editMessageMatrix(roomId, currentEventId, preparedText.trimmedText, {
           client,
@@ -106,6 +112,7 @@ export function createMatrixDraftStream(params: {
           accountId,
           msgtype: preview.msgtype,
           includeMentions: preview.includeMentions,
+          live: useLive,
         });
         lastSentText = preparedText.trimmedText;
       }
@@ -133,10 +140,41 @@ export function createMatrixDraftStream(params: {
 
   log?.(`draft-stream: ready (throttleMs=${DEFAULT_THROTTLE_MS})`);
 
-  const stop = async (): Promise<string | undefined> => {
+  const stop = async (opts: { finalizeLive?: boolean } = {}): Promise<string | undefined> => {
     // Flush before marking stopped so the loop can drain pending text.
     await loop.flush();
     stopped = true;
+    // Send a final edit without the MSC4357 live marker to signal that
+    // the stream is complete. Supporting clients will stop the streaming
+    // animation and display the final content.
+    if (
+      (opts.finalizeLive ?? true) &&
+      useLive &&
+      !liveFinalized &&
+      currentEventId &&
+      lastSentText
+    ) {
+      liveFinalized = true;
+      try {
+        await editMessageMatrix(roomId, currentEventId, lastSentText, {
+          client,
+          cfg,
+          threadId,
+          accountId,
+          msgtype: preview.msgtype,
+          includeMentions: preview.includeMentions,
+          live: false,
+        });
+        log?.(`draft-stream: finalized ${currentEventId} (MSC4357 stream ended)`);
+      } catch (err) {
+        log?.(`draft-stream: finalize edit failed: ${String(err)}`);
+        // If the finalize edit fails, the live marker remains on the last
+        // successful edit. Flag the stream so callers can fall back to
+        // normal final delivery or redaction instead of leaving the message
+        // stuck in a "still streaming" state for MSC4357 clients.
+        finalizeInPlaceBlocked = true;
+      }
+    }
     return currentEventId;
   };
 
@@ -149,6 +187,7 @@ export function createMatrixDraftStream(params: {
     stopped = false;
     sendFailed = false;
     finalizeInPlaceBlocked = false;
+    liveFinalized = false;
     loop.resetPending();
     loop.resetThrottleWindow();
   };
