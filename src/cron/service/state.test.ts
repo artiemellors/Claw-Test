@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCronServiceState } from "./state.js";
+import { createCronServiceState, formatMsToIso } from "./state.js";
 
 describe("cron service state seam coverage", () => {
   it("threads heartbeat and session-store dependencies into internal state", () => {
@@ -66,5 +66,28 @@ describe("cron service state seam coverage", () => {
     expect(state.deps.nowMs()).toBe(789_000);
 
     nowSpy.mockRestore();
+  });
+});
+
+describe("formatMsToIso", () => {
+  it("formats valid milliseconds to ISO string", () => {
+    expect(formatMsToIso(0)).toBe("1970-01-01T00:00:00.000Z");
+    expect(formatMsToIso(1_700_000_000_000)).toBe("2023-11-14T22:13:20.000Z");
+  });
+
+  it("returns undefined for undefined input", () => {
+    expect(formatMsToIso(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined for non-finite values", () => {
+    expect(formatMsToIso(Infinity)).toBeUndefined();
+    expect(formatMsToIso(-Infinity)).toBeUndefined();
+    expect(formatMsToIso(NaN)).toBeUndefined();
+  });
+
+  it("returns undefined for out-of-range timestamps", () => {
+    // Values outside the valid Date range (~±8.64e15) produce Invalid Date
+    expect(formatMsToIso(1e16)).toBeUndefined();
+    expect(formatMsToIso(-1e16)).toBeUndefined();
   });
 });
