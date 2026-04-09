@@ -10,6 +10,7 @@ import {
   normalizeOptionalLowercaseString,
 } from "openclaw/plugin-sdk/text-runtime";
 import { OLLAMA_DEFAULT_BASE_URL, OLLAMA_DEFAULT_MODEL } from "./defaults.js";
+import { readProviderBaseUrl } from "./provider-base-url.js";
 import {
   buildOllamaBaseUrlSsrFPolicy,
   buildOllamaModelDefinition,
@@ -518,7 +519,8 @@ export async function ensureOllamaModelPulled(params: {
   if (!params.model.startsWith("ollama/")) {
     return;
   }
-  const baseUrl = params.config.models?.providers?.ollama?.baseUrl ?? OLLAMA_DEFAULT_BASE_URL;
+  const baseUrl =
+    readProviderBaseUrl(params.config.models?.providers?.ollama) ?? OLLAMA_DEFAULT_BASE_URL;
   const modelName = params.model.slice("ollama/".length);
   if (isOllamaCloudModel(modelName)) {
     return;
