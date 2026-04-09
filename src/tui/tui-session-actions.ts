@@ -368,6 +368,11 @@ export function createSessionActions(context: SessionActionContext) {
     // so refresh data for the newly selected session isn't rejected as stale.
     state.sessionInfo.updatedAt = null;
     state.historyLoaded = false;
+    // Reset the WebSocket sequence counter so that events arriving for the new
+    // session are not compared against the stale sequence of the previous
+    // session.  Without this, switching agents causes "seq gap" errors and
+    // token-stream events are silently dropped.  (#63342)
+    client.resetSeq();
     clearLocalRunIds?.();
     btw.clear();
     updateHeader();

@@ -250,6 +250,7 @@ describe("tui session actions", () => {
       client: {
         listSessions,
         loadHistory,
+        resetSeq: vi.fn(),
       } as unknown as GatewayChatClient,
       chatLog: {
         addSystem: vi.fn(),

@@ -342,6 +342,14 @@ export class GatewayClient {
     void this.beginStop();
   }
 
+  /**
+   * Reset the sequence counter so that events from a new session context
+   * do not trigger spurious gap warnings against the old session's sequence.
+   */
+  resetSeq() {
+    this.lastSeq = null;
+  }
+
   async stopAndWait(opts?: { timeoutMs?: number }): Promise<void> {
     // Some callers need teardown ordering, not just "close requested". Wait for
     // the socket to close or the terminate fallback to fire.

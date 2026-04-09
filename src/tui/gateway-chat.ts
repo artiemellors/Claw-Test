@@ -194,6 +194,17 @@ export class GatewayChatClient {
     this.client.stop();
   }
 
+  /**
+   * Reset the WebSocket sequence counter.  Call this when switching agents or
+   * sessions so that events from the new session context are not compared
+   * against the stale sequence of the previous session.  Without this reset,
+   * the gateway client reports spurious "seq gap" errors on every response
+   * after an agent switch.
+   */
+  resetSeq() {
+    this.client.resetSeq();
+  }
+
   async waitForReady() {
     await this.readyPromise;
   }
