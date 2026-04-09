@@ -9,6 +9,8 @@ import {
   setLoggerOverride,
   stripRedundantSubsystemPrefixForConsole,
 } from "./logging.js";
+import { loggingState } from "./logging/state.js";
+import { createSubsystemLogger } from "./logging/subsystem.js";
 import type { RuntimeEnv } from "./runtime.js";
 import { withTempDirSync } from "./test-helpers/temp-dir.js";
 
@@ -67,6 +69,53 @@ describe("logger helpers", () => {
       logWarn("warn-only");
       const content = fs.readFileSync(logPath, "utf-8");
       expect(content).toContain("warn-only");
+    });
+  });
+
+  it("re-targets long-lived subsystem loggers when the file path rolls over", () => {
+    withTempDirSync({ prefix: "openclaw-log-test-" }, (dir) => {
+      // Simulate a module-level subsystem logger captured before the rollover.
+      const oldPath = path.join(dir, "openclaw-2026-04-04.log");
+      setLoggerOverride({ level: "info", file: oldPath });
+      const log = createSubsystemLogger("rollover-test");
+      log.info("before-rollover");
+      expect(fs.readFileSync(oldPath, "utf-8")).toContain("before-rollover");
+
+      // Simulate the daily rolling-log path turning over.
+      const newPath = path.join(dir, "openclaw-2026-04-05.log");
+      setLoggerOverride({ level: "info", file: newPath });
+
+      log.info("after-rollover");
+
+      const newContent = fs.readFileSync(newPath, "utf-8");
+      expect(newContent).toContain("after-rollover");
+      // Old file must NOT receive post-rollover writes from the cached logger.
+      expect(fs.readFileSync(oldPath, "utf-8")).not.toContain("after-rollover");
+    });
+  });
+
+  it("detects file path rollover even without an external getLogger() call", () => {
+    // Regression for the natural midnight rollover case: long-lived subsystem
+    // loggers may keep emitting without anyone else calling getLogger(), so
+    // we must force a settings refresh inside the subsystem emit path itself
+    // rather than relying on the generation counter being bumped externally.
+    withTempDirSync({ prefix: "openclaw-log-test-" }, (dir) => {
+      const oldPath = path.join(dir, "openclaw-2026-04-04.log");
+      const newPath = path.join(dir, "openclaw-2026-04-05.log");
+      setLoggerOverride({ level: "info", file: oldPath });
+      const log = createSubsystemLogger("rollover-natural");
+      log.info("before-rollover");
+
+      // Mutate the override file in place to simulate
+      // `defaultRollingPathForToday()` returning a new value at midnight,
+      // without calling setLoggerOverride() (which would bump the generation
+      // counter on its own and mask the bug).
+      (loggingState.overrideSettings as { file: string }).file = newPath;
+
+      log.info("after-rollover");
+
+      expect(fs.readFileSync(newPath, "utf-8")).toContain("after-rollover");
+      expect(fs.readFileSync(oldPath, "utf-8")).not.toContain("after-rollover");
     });
   });
 
