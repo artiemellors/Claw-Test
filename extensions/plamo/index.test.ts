@@ -1,13 +1,13 @@
 import { streamSimple } from "@mariozechner/pi-ai";
+import {
+  installPinnedHostnameTestHooks,
+  requestUrl,
+  resolveProviderPluginChoice,
+  withFetchPreconnect,
+} from "openclaw/plugin-sdk/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveEmbeddedAgentStreamFn } from "../../src/agents/pi-embedded-runner/stream-resolution.js";
 import { SYSTEM_PROMPT_CACHE_BOUNDARY } from "../../src/agents/system-prompt-cache-boundary.js";
-import {
-  installPinnedHostnameTestHooks,
-  resolveRequestUrl,
-} from "../../src/media-understanding/audio.test-helpers.ts";
-import { resolveProviderPluginChoice } from "../../src/plugins/provider-wizard.js";
-import { withFetchPreconnect } from "../../src/test-utils/fetch-mock.js";
 import { registerSingleProviderPlugin } from "../../test/helpers/plugins/plugin-registration.js";
 import plamoPlugin from "./index.js";
 import { normalizePlamoToolMarkupInMessage } from "./stream.js";
@@ -68,7 +68,7 @@ function stubPlamoSseFetch(chunks: string[]) {
   let seenInit: RequestInit | undefined;
   const fetchMock = withFetchPreconnect(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      seenUrl = resolveRequestUrl(input);
+      seenUrl = requestUrl(input);
       seenInit = init;
       return createSseResponse(chunks);
     }),
