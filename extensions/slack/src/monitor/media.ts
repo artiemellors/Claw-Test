@@ -38,25 +38,51 @@ function assertSlackFileUrl(rawUrl: string): URL {
   return parsed;
 }
 
+function parseSlackMediaUrl(rawUrl: string): URL {
+  try {
+    return new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid Slack file URL: ${rawUrl}`);
+  }
+}
+
+function createSlackMediaRequest(
+  rawUrl: string,
+  token: string,
+  init?: RequestInit,
+  options?: { requireSlackHost?: boolean },
+): {
+  url: string;
+  init: RequestInit;
+} {
+  const parsed = options?.requireSlackHost
+    ? assertSlackFileUrl(rawUrl)
+    : parseSlackMediaUrl(rawUrl);
+  const { headers: initHeaders, redirect: _redirect, ...rest } = init ?? {};
+  const headers = new Headers(initHeaders);
+
+  if (parsed.protocol === "https:" && isSlackHostname(parsed.hostname)) {
+    headers.set("Authorization", `Bearer ${token}`);
+  } else {
+    headers.delete("Authorization");
+  }
+
+  return {
+    url: parsed.href,
+    init: { ...rest, headers, redirect: "manual" },
+  };
+}
+
 function createSlackMediaFetch(token: string): FetchLike {
-  let includeAuth = true;
+  let requireSlackHost = true;
   return async (input, init) => {
     const url = resolveRequestUrl(input);
     if (!url) {
       throw new Error("Unsupported fetch input: expected string, URL, or Request");
     }
-    const { headers: initHeaders, redirect: _redirect, ...rest } = init ?? {};
-    const headers = new Headers(initHeaders);
-
-    if (includeAuth) {
-      includeAuth = false;
-      const parsed = assertSlackFileUrl(url);
-      headers.set("Authorization", `Bearer ${token}`);
-      return fetch(parsed.href, { ...rest, headers, redirect: "manual" });
-    }
-
-    headers.delete("Authorization");
-    return fetch(url, { ...rest, headers, redirect: "manual" });
+    const request = createSlackMediaRequest(url, token, init, { requireSlackHost });
+    requireSlackHost = false;
+    return fetch(request.url, request.init);
   };
 }
 
@@ -205,9 +231,9 @@ export async function resolveSlackMedia(params: {
         return null;
       }
       try {
-        // Note: fetchRemoteMedia calls fetchImpl(url) with the URL string today and
-        // handles size limits internally. Provide a fetcher that uses auth once, then lets
-        // the redirect chain continue without credentials.
+        // fetchRemoteMedia follows redirects manually. Re-attach the bot token for
+        // each hop that still targets a Slack-owned HTTPS hostname, while refusing
+        // to send credentials to the initial URL unless it is Slack-hosted.
         const fetchImpl = createSlackMediaFetch(params.token);
         const fetched = await fetchRemoteMedia({
           url,
