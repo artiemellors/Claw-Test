@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   buildWorkspaceSkillStatus: vi.fn(),
   installSkill: vi.fn(),
   detectBinary: vi.fn(),
-  resolveDaemonContainerContext: vi.fn(),
+  detectContainerEnvironment: vi.fn(),
   resolveNodeManagerOptions: vi.fn(() => [
     { value: "npm", label: "npm" },
     { value: "pnpm", label: "pnpm" },
@@ -23,7 +23,7 @@ vi.mock("../agents/skills-install.js", () => ({
   installSkill: mocks.installSkill,
 }));
 vi.mock("../daemon/container-context.js", () => ({
-  resolveDaemonContainerContext: mocks.resolveDaemonContainerContext,
+  detectContainerEnvironment: mocks.detectContainerEnvironment,
 }));
 vi.mock("./onboard-helpers.js", () => ({
   detectBinary: mocks.detectBinary,
@@ -139,7 +139,7 @@ const runtime: RuntimeEnv = {
 
 describe("setupSkills", () => {
   afterEach(() => {
-    mocks.resolveDaemonContainerContext.mockReturnValue(null);
+    mocks.detectContainerEnvironment.mockReturnValue(false);
   });
 
   it.skipIf(process.platform !== "linux")(
@@ -153,7 +153,7 @@ describe("setupSkills", () => {
           installLabel: "Install ffmpeg (brew)",
         }),
       ]);
-      mocks.resolveDaemonContainerContext.mockReturnValue("docker");
+      mocks.detectContainerEnvironment.mockReturnValue(true);
 
       const { prompter, notes } = createPrompter({});
       await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
@@ -185,7 +185,7 @@ describe("setupSkills", () => {
       }),
     ]);
 
-    mocks.resolveDaemonContainerContext.mockReturnValue(null);
+    mocks.detectContainerEnvironment.mockReturnValue(false);
     const { prompter, notes } = createPrompter({ multiselect: ["__skip__"] });
     await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
 
@@ -211,7 +211,7 @@ describe("setupSkills", () => {
       }),
     ]);
 
-    mocks.resolveDaemonContainerContext.mockReturnValue(null);
+    mocks.detectContainerEnvironment.mockReturnValue(false);
     const { prompter, notes } = createPrompter({ multiselect: ["video-frames"] });
     await setupSkills({} as OpenClawConfig, "/tmp/ws", runtime, prompter);
 

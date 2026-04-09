@@ -2,7 +2,7 @@ import { installSkill } from "../agents/skills-install.js";
 import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveDaemonContainerContext } from "../daemon/container-context.js";
+import { detectContainerEnvironment } from "../daemon/container-context.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { normalizeSecretInput } from "../utils/normalize-secret-input.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
@@ -83,8 +83,7 @@ export async function setupSkills(
   }
 
   const brewAvailable = await detectBinary("brew");
-  const inLinuxContainer =
-    process.platform === "linux" && Boolean(resolveDaemonContainerContext(process.env));
+  const inLinuxContainer = process.platform === "linux" && detectContainerEnvironment(process.env);
   const installable = missing.filter((skill) => {
     if (skill.install.length === 0 || skill.missing.bins.length === 0) {
       return false;
