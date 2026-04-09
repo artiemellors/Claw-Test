@@ -9,7 +9,11 @@ import {
   resolveSingleAccountPromotionTarget as resolveMatrixSingleAccountPromotionTarget,
   singleAccountKeysToMove as matrixSingleAccountKeysToMove,
 } from "../../plugin-sdk/matrix.js";
-import { singleAccountKeysToMove as telegramSingleAccountKeysToMove } from "../../plugin-sdk/telegram.js";
+import {
+  namedAccountPromotionKeys as telegramNamedAccountPromotionKeys,
+  resolveSingleAccountPromotionTarget as resolveTelegramSingleAccountPromotionTarget,
+  singleAccountKeysToMove as telegramSingleAccountKeysToMove,
+} from "../../plugin-sdk/telegram.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { DEFAULT_ACCOUNT_ID } from "../../routing/session-key.js";
 import {
@@ -70,6 +74,10 @@ import {
   setSetupChannelEnabled,
   splitSetupEntries,
 } from "./setup-wizard-helpers.js";
+import {
+  resolveSingleAccountKeysToMove,
+  resolveSingleAccountPromotionTarget,
+} from "./setup-helpers.js";
 
 beforeEach(() => {
   setActivePluginRegistry(
@@ -93,6 +101,8 @@ beforeEach(() => {
           ...createChannelTestPluginBase({ id: "telegram", label: "Telegram" }),
           setup: {
             singleAccountKeysToMove: telegramSingleAccountKeysToMove,
+            namedAccountPromotionKeys: telegramNamedAccountPromotionKeys,
+            resolveSingleAccountPromotionTarget: resolveTelegramSingleAccountPromotionTarget,
           },
         },
       },
@@ -1017,6 +1027,61 @@ describe("patchChannelConfigForAccount", () => {
     expect(next.channels?.telegram?.groupPolicy).toBeUndefined();
     expect(next.channels?.telegram?.streaming).toBeUndefined();
     expect(next.channels?.telegram?.accounts?.work?.botToken).toBe("work-token");
+  });
+
+  it("telegram: does not move dmPolicy or allowFrom from root when named accounts exist", () => {
+    const keys = resolveSingleAccountKeysToMove({
+      channelKey: "telegram",
+      channel: {
+        dmPolicy: "disabled",
+        allowFrom: ["123"],
+        botToken: "legacy",
+        accounts: { alerts: { botToken: "tok" } },
+      },
+    });
+    expect(keys).not.toContain("dmPolicy");
+    expect(keys).not.toContain("allowFrom");
+    expect(keys).toContain("botToken");
+  });
+
+  it("telegram: resolves promotion target from defaultAccount", () => {
+    expect(
+      resolveSingleAccountPromotionTarget({
+        channelKey: "telegram",
+        channel: {
+          defaultAccount: "alerts",
+          accounts: { alerts: { botToken: "tok" } },
+        },
+      }),
+    ).toBe("alerts");
+  });
+
+  it("telegram: preserves root dmPolicy when patching defaultAccount-scoped dm policy", () => {
+    const cfg: OpenClawConfig = {
+      channels: {
+        telegram: {
+          defaultAccount: "alerts",
+          dmPolicy: "disabled",
+          allowFrom: ["123"],
+          accounts: {
+            alerts: {
+              dmPolicy: "allowlist",
+              botToken: "tok",
+            },
+          },
+        },
+      },
+    };
+
+    const next = patchChannelConfigForAccount({
+      cfg,
+      channel: "telegram",
+      accountId: "alerts",
+      patch: { dmPolicy: "open" },
+    });
+
+    expect(next.channels?.telegram?.dmPolicy).toBe("disabled");
+    expect(next.channels?.telegram?.accounts?.alerts?.dmPolicy).toBe("open");
   });
 
   it("supports imessage/signal account-scoped channel patches", () => {
