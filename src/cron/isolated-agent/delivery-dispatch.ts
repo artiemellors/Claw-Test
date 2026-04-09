@@ -229,6 +229,7 @@ function getCompletedDirectCronDelivery(
 
 function buildDirectCronDeliveryIdempotencyKey(params: {
   runSessionId: string;
+  runStartedAt: number;
   delivery: SuccessfulDeliveryTarget;
 }): string {
   const threadId =
@@ -237,7 +238,7 @@ function buildDirectCronDeliveryIdempotencyKey(params: {
       : String(params.delivery.threadId);
   const accountId = params.delivery.accountId?.trim() ?? "";
   const normalizedTo = normalizeDeliveryTarget(params.delivery.channel, params.delivery.to);
-  return `cron-direct-delivery:v1:${params.runSessionId}:${params.delivery.channel}:${accountId}:${normalizedTo}:${threadId}`;
+  return `cron-direct-delivery:v1:${params.runSessionId}:${params.runStartedAt}:${params.delivery.channel}:${accountId}:${normalizedTo}:${threadId}`;
 }
 
 function shouldQueueCronAwareness(job: CronJob, deliveryBestEffort: boolean): boolean {
@@ -422,6 +423,7 @@ export async function dispatchCronDelivery(
     const identity = resolveAgentOutboundIdentity(params.cfgWithAgentDefaults, params.agentId);
     const deliveryIdempotencyKey = buildDirectCronDeliveryIdempotencyKey({
       runSessionId: params.runSessionId,
+      runStartedAt: params.runStartedAt,
       delivery,
     });
     try {

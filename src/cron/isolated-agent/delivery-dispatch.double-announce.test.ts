@@ -315,7 +315,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
     expect(enqueueSystemEvent).toHaveBeenCalledWith("Morning briefing complete.", {
       sessionKey: "agent:main:main",
-      contextKey: "cron-direct-delivery:v1:run-123:telegram::123456:",
+      contextKey: `cron-direct-delivery:v1:run-123:${params.runStartedAt}:telegram::123456:`,
     });
   });
 
@@ -519,14 +519,67 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
   });
 
+  it("does not suppress delivery across different cron runs that reuse the same session id", async () => {
+    vi.mocked(countActiveDescendantRuns).mockReturnValue(0);
+    vi.mocked(isLikelyInterimCronMessage).mockReturnValue(false);
+    vi.mocked(deliverOutboundPayloads).mockResolvedValue([{ ok: true } as never]);
+    const lineRecipient = "U11111111111111111111111111111111";
+
+    const firstParams = makeBaseParams({
+      synthesizedText: "Recurring LINE update.",
+      runSessionId: "shared-session-id",
+      sessionTarget: `session:agent:main:line:direct:${lineRecipient.toLowerCase()}`,
+    });
+    firstParams.resolvedDelivery = {
+      ...firstParams.resolvedDelivery,
+      channel: "line",
+      to: lineRecipient,
+    };
+    firstParams.runStartedAt = 1_000;
+    firstParams.runEndedAt = 1_500;
+
+    const secondParams = makeBaseParams({
+      synthesizedText: "Recurring LINE update.",
+      runSessionId: "shared-session-id",
+      sessionTarget: `session:agent:main:line:direct:${lineRecipient.toLowerCase()}`,
+    });
+    secondParams.resolvedDelivery = {
+      ...secondParams.resolvedDelivery,
+      channel: "line",
+      to: lineRecipient,
+    };
+    secondParams.runStartedAt = 2_000;
+    secondParams.runEndedAt = 2_500;
+
+    const first = await dispatchCronDelivery(firstParams);
+    const second = await dispatchCronDelivery(secondParams);
+
+    expect(first.delivered).toBe(true);
+    expect(second.delivered).toBe(true);
+    expect(deliverOutboundPayloads).toHaveBeenCalledTimes(2);
+    expect(deliverOutboundPayloads).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ channel: "line", to: lineRecipient }),
+    );
+    expect(deliverOutboundPayloads).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ channel: "line", to: lineRecipient }),
+    );
+  });
+
   it("does not cache partial bestEffort delivery replays as delivered", async () => {
     vi.mocked(countActiveDescendantRuns).mockReturnValue(0);
     vi.mocked(isLikelyInterimCronMessage).mockReturnValue(false);
-    vi.mocked(deliverOutboundPayloads).mockImplementation(async (params) => {
-      const failedPayload = Array.isArray(params.payloads) ? params.payloads[0] : undefined;
-      params.onError?.(new Error("payload failed"), failedPayload as never);
-      return [{ ok: true } as never];
-    });
+    vi.mocked(deliverOutboundPayloads).mockImplementation(
+      async (params: Parameters<typeof deliverOutboundPayloads>[0]) => {
+        const failedPayload = {
+          text: params.payloads[0]?.text ?? "",
+          mediaUrls: [] as string[],
+        };
+        params.onError?.(new Error("payload failed"), failedPayload);
+        return [{ ok: true } as never];
+      },
+    );
 
     const params = makeBaseParams({ synthesizedText: "Partial bestEffort replay." }) as Record<
       string,
