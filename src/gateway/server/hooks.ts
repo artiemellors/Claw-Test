@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import type { CliDeps } from "../../cli/deps.js";
 import { loadConfig, type OpenClawConfig } from "../../config/config.js";
 import { resolveMainSessionKeyFromConfig } from "../../config/sessions.js";
+import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import { runCronIsolatedAgentTurn } from "../../cron/isolated-agent.js";
 import type { CronJob } from "../../cron/types.js";
 import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
@@ -39,8 +41,15 @@ export function createGatewayHooksRequestHandler(params: {
   };
 
   const dispatchAgentHook = (value: HookAgentDispatchPayload) => {
-    const sessionKey = value.sessionKey;
+    const cfg = loadConfig();
     const mainSessionKey = resolveMainSessionKeyFromConfig();
+    const sessionKey =
+      value.sessionTarget === "main"
+        ? resolveAgentMainSessionKey({
+            cfg,
+            agentId: value.agentId?.trim() || resolveDefaultAgentId(cfg),
+          })
+        : value.sessionKey;
     const jobId = randomUUID();
     const now = Date.now();
     const delivery = value.deliver
@@ -58,7 +67,7 @@ export function createGatewayHooksRequestHandler(params: {
       createdAtMs: now,
       updatedAtMs: now,
       schedule: { kind: "at", at: new Date(now).toISOString() },
-      sessionTarget: "isolated",
+      sessionTarget: value.sessionTarget === "main" ? "main" : "isolated",
       wakeMode: value.wakeMode,
       payload: {
         kind: "agentTurn",
