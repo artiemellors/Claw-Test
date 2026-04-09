@@ -2,6 +2,7 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 import {
+  estimateMessageTokens,
   estimateMessagesTokens,
   pruneHistoryForContextShare,
   splitMessagesByTokenShare,
@@ -59,6 +60,41 @@ function pruneLargeSimpleHistory() {
   });
   return { messages, pruned, maxContextTokens };
 }
+
+describe("estimateMessageTokens", () => {
+  it("falls back to guarded estimation for malformed assistant blocks", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        null,
+        { type: "text" },
+        { type: "text", text: "abcd" },
+        { type: "thinking" },
+        { type: "thinking", thinking: "ef" },
+        { type: "toolCall", id: "call_1", name: "read", arguments: { path: "x" } },
+      ],
+      timestamp: 1,
+    } as unknown as AgentMessage;
+
+    expect(() => estimateMessageTokens(message)).not.toThrow();
+    expect(estimateMessageTokens(message)).toBe(
+      Math.ceil(
+        ("abcd".length + "ef".length + "read".length + JSON.stringify({ path: "x" }).length) / 4,
+      ),
+    );
+  });
+
+  it("returns zero for assistant messages missing content arrays", () => {
+    const message = {
+      role: "assistant",
+      timestamp: 1,
+    } as unknown as AgentMessage;
+
+    expect(() => estimateMessageTokens(message)).not.toThrow();
+    expect(estimateMessageTokens(message)).toBe(0);
+    expect(estimateMessagesTokens([message])).toBe(0);
+  });
+});
 
 describe("splitMessagesByTokenShare", () => {
   it("splits messages into two non-empty parts", () => {
