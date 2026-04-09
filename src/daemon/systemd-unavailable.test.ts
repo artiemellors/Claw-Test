@@ -8,7 +8,15 @@ import {
 describe("classifySystemdUnavailableDetail", () => {
   it("classifies missing systemctl details", () => {
     expect(isSystemctlMissingDetail("spawn systemctl ENOENT")).toBe(true);
+    expect(isSystemctlMissingDetail("systemctl: command not found")).toBe(true);
+    expect(isSystemctlMissingDetail("systemctl: not found")).toBe(true);
     expect(classifySystemdUnavailableDetail("systemctl not available")).toBe("missing_systemctl");
+  });
+
+  it("does not treat a missing unit as a missing systemctl binary", () => {
+    expect(isSystemctlMissingDetail("Unit openclaw-gateway.service not found.")).toBe(false);
+    expect(isSystemctlMissingDetail("not-found")).toBe(false);
+    expect(classifySystemdUnavailableDetail("Unit openclaw-gateway.service not found.")).toBeNull();
   });
 
   it("classifies user bus/session failures", () => {
