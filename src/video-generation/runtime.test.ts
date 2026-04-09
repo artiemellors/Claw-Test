@@ -327,26 +327,28 @@ describe("video-generation runtime", () => {
     expect(result.attempts[0]?.error).toMatch(/does not accept providerOptions/);
   });
 
-  it("skips candidates that do not declare any providerOptions schema", async () => {
+  it("passes providerOptions through to providers that do not declare any schema (backward compat)", async () => {
     mocks.resolveAgentModelPrimaryValue.mockReturnValue("video-plugin/vid-v1");
+    let seen: unknown;
     const provider: VideoGenerationProvider = {
       id: "video-plugin",
-      capabilities: {}, // no providerOptions declared
-      async generateVideo() {
-        throw new Error("should not be called");
+      capabilities: {}, // no providerOptions declared → pass-through
+      async generateVideo(req) {
+        seen = req.providerOptions;
+        return { videos: [{ buffer: Buffer.from("x"), mimeType: "video/mp4" }] };
       },
     };
     mocks.getVideoGenerationProvider.mockReturnValue(provider);
 
-    await expect(
-      generateVideo({
-        cfg: {
-          agents: { defaults: { videoGenerationModel: { primary: "video-plugin/vid-v1" } } },
-        } as OpenClawConfig,
-        prompt: "test",
-        providerOptions: { seed: 42 },
-      }),
-    ).rejects.toThrow(/does not accept providerOptions/);
+    await generateVideo({
+      cfg: {
+        agents: { defaults: { videoGenerationModel: { primary: "video-plugin/vid-v1" } } },
+      } as OpenClawConfig,
+      prompt: "test",
+      providerOptions: { seed: 42 },
+    });
+
+    expect(seen).toEqual({ seed: 42 });
   });
 
   it("skips candidates that declare a providerOptions schema missing the requested key", async () => {
@@ -397,13 +399,17 @@ describe("video-generation runtime", () => {
     ).rejects.toThrow(/expects providerOptions\.seed to be a finite number, got string/);
   });
 
-  it("falls over from a provider without providerOptions support to one that has it", async () => {
+  it("falls over from a provider with explicit empty providerOptions schema to one that has it", async () => {
+    // Undeclared schema ({}) passes through; only explicit empty ({} as declaration) skips.
+    // Use explicit empty for "openai" to demonstrate the fallback still works.
     mocks.getVideoGenerationProvider.mockImplementation((providerId: string) => {
       if (providerId === "openai") {
         return {
           id: "openai",
           defaultModel: "sora-2",
-          capabilities: {}, // no providerOptions
+          capabilities: {
+            providerOptions: {} as Record<string, VideoGenerationProviderOptionType>,
+          }, // explicit empty
           isConfigured: () => true,
           async generateVideo() {
             throw new Error("should not be called");
@@ -433,7 +439,7 @@ describe("video-generation runtime", () => {
       {
         id: "openai",
         defaultModel: "sora-2",
-        capabilities: {},
+        capabilities: { providerOptions: {} as Record<string, VideoGenerationProviderOptionType> },
         isConfigured: () => true,
         generateVideo: async () => ({ videos: [] }),
       },
