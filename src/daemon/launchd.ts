@@ -465,13 +465,61 @@ function isUnsupportedGuiDomain(detail: string): boolean {
 }
 
 export async function stopLaunchAgent({ stdout, env }: GatewayServiceControlArgs): Promise<void> {
+  const serviceEnv = env ?? (process.env as GatewayServiceEnv);
   const domain = resolveGuiDomain();
-  const label = resolveLaunchAgentLabel({ env });
-  const res = await execLaunchctl(["bootout", `${domain}/${label}`]);
+  const label = resolveLaunchAgentLabel({ env: serviceEnv });
+  const serviceTarget = `${domain}/${label}`;
+  // Best-effort plist resolution: HOME/USERPROFILE may be absent in sanitized
+  // shells or service wrappers.  When unavailable we can still bootout by
+  // service-target label; we just lose the disable+bootstrap "dormant
+  // registration" benefit.
+  let plistPath: string | undefined;
+  try {
+    plistPath = resolveLaunchAgentPlistPath(serviceEnv);
+  } catch {
+    // swallow — plistPath stays undefined
+  }
+  const res = await execLaunchctl(["bootout", serviceTarget]);
   if (res.code !== 0 && !isLaunchctlNotLoaded(res)) {
     throw new Error(`launchctl bootout failed: ${res.stderr || res.stdout}`.trim());
   }
-  stdout.write(`${formatLine("Stopped LaunchAgent", `${domain}/${label}`)}\n`);
+  if (plistPath == null) {
+    stdout.write(`${formatLine("Stopped LaunchAgent", serviceTarget)}\n`);
+    return;
+  }
+  // Disable the service so KeepAlive / RunAtLoad do not immediately relaunch
+  // it.  If disable fails, do NOT proceed to bootstrap — the service was
+  // already bootout'd, so without bootstrap it stays fully unregistered,
+  // which is the safer failure mode for a stop operation.  (#63128, #63164)
+  const disable = await execLaunchctl(["disable", serviceTarget]);
+  if (disable.code !== 0) {
+    const detail = (disable.stderr || disable.stdout).trim();
+    stdout.write(
+      `${formatLine("Warning", `launchctl disable failed — skipping bootstrap to keep service unregistered: ${detail}`)}\n`,
+    );
+    stdout.write(`${formatLine("Stopped LaunchAgent", serviceTarget)}\n`);
+    return;
+  }
+  // Re-bootstrap the plist so the service stays registered (but disabled) with
+  // launchd after bootout.  Without this, the LaunchAgent is fully deregistered
+  // and neither `launchctl kickstart` nor KeepAlive can revive it — `openclaw
+  // gateway restart` would find a dead service.
+  const boot = await execLaunchctl(["bootstrap", domain, plistPath]);
+  if (boot.code !== 0) {
+    const detail = (boot.stderr || boot.stdout).trim();
+    const normalized = normalizeLowercaseStringOrEmpty(detail);
+    // exit 130 / "already exists in domain" means the service is still
+    // registered — that is fine, we just wanted it to stay loaded.
+    const alreadyLoaded = boot.code === 130 || normalized.includes("already exists in domain");
+    if (!alreadyLoaded) {
+      stdout.write(
+        `${formatLine("Warning", `launchctl bootstrap failed — service is unregistered, not just dormant: ${detail}`)}\n`,
+      );
+      stdout.write(`${formatLine("Stopped LaunchAgent (degraded)", serviceTarget)}\n`);
+      return;
+    }
+  }
+  stdout.write(`${formatLine("Stopped LaunchAgent", serviceTarget)}\n`);
 }
 
 async function writeLaunchAgentPlist({
@@ -620,6 +668,10 @@ export async function restartLaunchAgent({
   if (cleanupPort !== null) {
     cleanStaleGatewayProcessesSync(cleanupPort);
   }
+
+  // Clear any persisted "disabled" state (e.g. from a prior `openclaw gateway
+  // stop`) so that KeepAlive and kickstart work as expected.  (#63128)
+  await execLaunchctl(["enable", serviceTarget]);
 
   const start = await execLaunchctl(["kickstart", "-k", serviceTarget]);
   if (start.code === 0) {
