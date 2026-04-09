@@ -98,7 +98,7 @@ Model note: while many providers and models are supported, prefer a current flag
 
 ## Install (recommended)
 
-Runtime: **Node 24 (recommended) or Node 22.16+**.
+Runtime: **Node 24 (recommended) or Node 22.16+**. See also: [Nix](#nix-reproducible-environment) for a fully reproducible alternative.
 
 ```bash
 npm install -g openclaw@latest
@@ -111,7 +111,7 @@ OpenClaw Onboard installs the Gateway daemon (launchd/systemd user service) so i
 
 ## Quick start (TL;DR)
 
-Runtime: **Node 24 (recommended) or Node 22.16+**.
+Runtime: **Node 24 (recommended) or Node 22.16+**. Or: `nix develop` for a [zero-config dev shell](#nix-reproducible-environment).
 
 Full beginner guide (auth, pairing, channels): [Getting started](https://docs.openclaw.ai/start/getting-started)
 
@@ -157,6 +157,28 @@ pnpm gateway:watch
 ```
 
 Note: `pnpm openclaw ...` runs TypeScript directly (via `tsx`). `pnpm build` produces `dist/` for running via Node / the packaged `openclaw` binary.
+
+## Nix (reproducible environment)
+
+[Nix](https://nixos.org/) provides a fully reproducible, hash-verified development environment and build system. One command gives you the exact same toolchain on any Linux or macOS machine — no manual Node/pnpm version management, no dependency conflicts, no "it worked on my machine."
+
+```bash
+# Enter the dev shell (installs nothing globally)
+nix develop
+
+# Or run OpenClaw with a local LLM in one command
+nix run .#with-ollama
+```
+
+What you get:
+
+- **Reproducible dev shell** — Node 22, pnpm, linters, formatters, and all native dependencies, pinned to exact versions via `flake.lock`
+- **One-command inference** — `nix run .#with-ollama` starts Ollama + OpenClaw together (CUDA, ROCm, and Vulkan GPU variants available)
+- **OCI containers** — minimal, hash-verified container images with no shell or package manager inside (~412 MB compressed, same total size as a traditional Docker build but every byte is auditable)
+- **Hardened MicroVMs** — NixOS-based QEMU VMs with systemd security scoring (Linux only)
+- **45 static analysis tools** — `nix run .#analyze` for security scanning, linting, SBOM generation, and more
+
+Full documentation: **[nix/README.md](nix/README.md)** | Quick start: **[nix/docs/quickstart.md](nix/docs/quickstart.md)**
 
 ## Security defaults (DM access)
 

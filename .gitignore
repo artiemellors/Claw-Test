@@ -148,5 +148,6 @@ changelog/fragments/
 .artifacts/
 test/fixtures/openclaw-vitest-unit-report.json
 analysis/
+!nix/analysis/
 .artifacts/qa-e2e/
 extensions/qa-lab/web/dist/
