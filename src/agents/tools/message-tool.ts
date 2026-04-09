@@ -1,4 +1,4 @@
-import { Type, type TSchema } from "@sinclair/typebox";
+import { Type, TypeGuard, type TSchema } from "@sinclair/typebox";
 import { listChannelPlugins } from "../../channels/plugins/index.js";
 import {
   channelSupportsMessageCapability,
@@ -354,6 +354,20 @@ function buildChannelManagementSchema() {
   };
 }
 
+function buildOptionalExtraProperties(
+  properties?: Record<string, TSchema>,
+): Record<string, TSchema> {
+  if (!properties) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(properties).map(([name, schema]) => [
+      name,
+      TypeGuard.IsOptional(schema) ? schema : Type.Optional(schema),
+    ]),
+  );
+}
+
 function buildMessageToolSchemaProps(options: {
   includeInteractive: boolean;
   extraProperties?: Record<string, TSchema>;
@@ -372,7 +386,7 @@ function buildMessageToolSchemaProps(options: {
     ...buildGatewaySchema(),
     ...buildChannelManagementSchema(),
     ...buildPresenceSchema(),
-    ...options.extraProperties,
+    ...buildOptionalExtraProperties(options.extraProperties),
   };
 }
 
