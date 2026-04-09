@@ -62,6 +62,47 @@ const ttsMocks = vi.hoisted(() => ({
     return params.payload;
   }),
   resolveTtsConfig: vi.fn((_cfg: OpenClawConfig) => ({ mode: "final" })),
+  resolveTtsConfigForAccount: vi.fn(
+    (cfg: OpenClawConfig, channel: string | undefined, accountId?: string) => {
+      const raw = (cfg.messages?.tts ?? {}) as Record<string, unknown>;
+      const accountOverrides =
+        channel === "feishu"
+          ? (
+              cfg.channels as
+                | Record<
+                    string,
+                    | {
+                        accounts?: Record<string, { tts?: unknown } | undefined>;
+                      }
+                    | undefined
+                  >
+                | undefined
+            )?.feishu?.accounts?.[accountId ?? ""]?.tts
+          : undefined;
+      const merged = {
+        ...raw,
+        ...(typeof accountOverrides === "object" && accountOverrides !== null
+          ? (accountOverrides as Record<string, unknown>)
+          : {}),
+      };
+      return {
+        mode: (merged.mode as "all" | "final" | undefined) ?? "final",
+        sourceConfig: {
+          ...cfg,
+          messages: {
+            ...cfg.messages,
+            tts: merged,
+          },
+        },
+      };
+    },
+  ),
+  resolveStatusTtsSnapshot: vi.fn((_params: { cfg: OpenClawConfig; sessionAuto?: string }) => ({
+    autoMode: "always",
+    provider: "auto",
+    maxLength: 1500,
+    summarize: true,
+  })),
 }));
 
 const mediaUnderstandingMocks = vi.hoisted(() => ({
@@ -127,6 +168,7 @@ async function runDispatch(params: {
   bodyForAgent: string;
   cfg?: OpenClawConfig;
   dispatcher?: ReplyDispatcher;
+  ttsChannel?: string;
   shouldRouteToOriginating?: boolean;
   originatingChannel?: string;
   originatingTo?: string;
@@ -147,6 +189,7 @@ async function runDispatch(params: {
     dispatcher: params.dispatcher ?? createDispatcher().dispatcher,
     sessionKey: targetSessionKey,
     inboundAudio: false,
+    ttsChannel: params.ttsChannel,
     shouldRouteToOriginating: params.shouldRouteToOriginating ?? false,
     ...(params.shouldRouteToOriginating
       ? {
@@ -273,17 +316,18 @@ describe("tryDispatchAcpReply", () => {
     vi.doMock("../../tts/tts.js", () => ({
       maybeApplyTtsToPayload: (params: unknown) => ttsMocks.maybeApplyTtsToPayload(params),
       resolveTtsConfig: (cfg: OpenClawConfig) => ttsMocks.resolveTtsConfig(cfg),
+      resolveTtsConfigForAccount: (
+        cfg: OpenClawConfig,
+        channel: string | undefined,
+        accountId?: string,
+      ) => ttsMocks.resolveTtsConfigForAccount(cfg, channel, accountId),
     }));
     vi.doMock("../../tts/tts.runtime.js", () => ({
       maybeApplyTtsToPayload: (params: unknown) => ttsMocks.maybeApplyTtsToPayload(params),
     }));
     vi.doMock("../../tts/status-config.js", () => ({
-      resolveStatusTtsSnapshot: () => ({
-        autoMode: "always",
-        provider: "auto",
-        maxLength: 1500,
-        summarize: true,
-      }),
+      resolveStatusTtsSnapshot: (params: { cfg: OpenClawConfig; sessionAuto?: string }) =>
+        ttsMocks.resolveStatusTtsSnapshot(params),
     }));
     vi.doMock("./dispatch-acp-tts.runtime.js", () => ({
       maybeApplyTtsToPayload: (params: unknown) => ttsMocks.maybeApplyTtsToPayload(params),
@@ -332,6 +376,14 @@ describe("tryDispatchAcpReply", () => {
     ttsMocks.maybeApplyTtsToPayload.mockClear();
     ttsMocks.resolveTtsConfig.mockReset();
     ttsMocks.resolveTtsConfig.mockReturnValue({ mode: "final" });
+    ttsMocks.resolveTtsConfigForAccount.mockClear();
+    ttsMocks.resolveStatusTtsSnapshot.mockReset();
+    ttsMocks.resolveStatusTtsSnapshot.mockReturnValue({
+      autoMode: "always",
+      provider: "auto",
+      maxLength: 1500,
+      summarize: true,
+    });
     mediaUnderstandingMocks.applyMediaUnderstanding.mockReset();
     mediaUnderstandingMocks.applyMediaUnderstanding.mockResolvedValue(undefined);
     sessionMetaMocks.readAcpSessionEntry.mockReset();
@@ -1269,5 +1321,66 @@ describe("tryDispatchAcpReply", () => {
     expect(result?.counts.final).toBe(0);
     expect(routeMocks.routeReply).not.toHaveBeenCalled();
     expect(ttsMocks.maybeApplyTtsToPayload).not.toHaveBeenCalled();
+  });
+
+  it("uses account-level Feishu TTS config for ACP final synthesis gating", async () => {
+    setReadyAcpResolution();
+    ttsMocks.resolveStatusTtsSnapshot.mockImplementation((params: { cfg: OpenClawConfig }) => {
+      const autoMode = params.cfg.messages?.tts?.auto;
+      if (autoMode !== "always") {
+        return null;
+      }
+      return {
+        autoMode: "always",
+        provider: "openai",
+        maxLength: 1500,
+        summarize: true,
+      };
+    });
+    const cfg = createAcpTestConfig({
+      messages: {
+        tts: {
+          auto: "off",
+          mode: "final",
+        },
+      },
+      channels: {
+        feishu: {
+          accounts: {
+            "english-bot": {
+              tts: {
+                auto: "always",
+                mode: "final",
+                provider: "openai",
+              },
+            },
+          },
+        },
+      },
+    });
+    mockVisibleTextTurn("Feishu reply");
+
+    const { dispatcher } = createDispatcher();
+    await runDispatch({
+      bodyForAgent: "reply",
+      cfg,
+      dispatcher,
+      ttsChannel: "feishu",
+      ctxOverrides: {
+        Provider: "feishu",
+        Surface: "feishu",
+        AccountId: "english-bot",
+      },
+    });
+
+    expect(ttsMocks.resolveTtsConfigForAccount).toHaveBeenCalledWith(cfg, "feishu", "english-bot");
+    expect(ttsMocks.maybeApplyTtsToPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "final",
+        channel: "feishu",
+        accountId: "english-bot",
+      }),
+    );
+    expect(dispatcher.sendFinalReply).toHaveBeenCalled();
   });
 });
