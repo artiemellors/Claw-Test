@@ -143,6 +143,8 @@ export abstract class MemoryManagerSyncOps {
   protected closed = false;
   protected dirty = false;
   protected sessionsDirty = false;
+  /** Cached result of hasIndexedContent(); reset to null when chunks are modified. */
+  protected hasIndexedContentCached: boolean | null = null;
   protected sessionsDirtyFiles = new Set<string>();
   protected sessionPendingFiles = new Set<string>();
   protected sessionDeltas = new Map<
@@ -722,6 +724,7 @@ export abstract class MemoryManagerSyncOps {
         } catch {}
       }
       deleteChunksByPathAndSource.run(stale.path, "memory");
+      this.hasIndexedContentCached = null;
       if (deleteFtsRowsByPathAndSource) {
         try {
           deleteFtsRowsByPathAndSource.run(stale.path, "memory");
@@ -857,6 +860,7 @@ export abstract class MemoryManagerSyncOps {
         } catch {}
       }
       deleteChunksByPathAndSource.run(stale.path, "sessions");
+      this.hasIndexedContentCached = null;
       if (deleteFtsRowsByPathSourceAndModel) {
         try {
           deleteFtsRowsByPathSourceAndModel.run(
@@ -1113,6 +1117,7 @@ export abstract class MemoryManagerSyncOps {
       } else {
         this.db = originalDb;
       }
+      this.hasIndexedContentCached = null;
       this.fts.available = originalState.ftsAvailable;
       this.fts.loadError = originalState.ftsError;
       this.vector.available = originalDbClosed ? null : originalState.vectorAvailable;
@@ -1122,6 +1127,7 @@ export abstract class MemoryManagerSyncOps {
     };
 
     this.db = tempDb;
+    this.hasIndexedContentCached = null;
     this.vectorReady = null;
     this.vector.available = null;
     this.vector.loadError = undefined;
@@ -1193,6 +1199,7 @@ export abstract class MemoryManagerSyncOps {
       });
 
       this.db = openMemoryDatabaseAtPath(dbPath, this.settings.store.vector.enabled);
+      this.hasIndexedContentCached = null;
       this.vectorReady = null;
       this.vector.available = null;
       this.vector.loadError = undefined;
@@ -1266,6 +1273,7 @@ export abstract class MemoryManagerSyncOps {
   private resetIndex() {
     this.db.exec(`DELETE FROM files`);
     this.db.exec(`DELETE FROM chunks`);
+    this.hasIndexedContentCached = null;
     if (this.fts.enabled && this.fts.available) {
       try {
         this.db.exec(`DROP TABLE IF EXISTS ${FTS_TABLE}`);
