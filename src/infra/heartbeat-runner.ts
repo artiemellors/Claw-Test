@@ -312,6 +312,49 @@ function resolveHeartbeatSession(
   };
 }
 
+function resolveIsolatedHeartbeatSessionKey(params: {
+  sessionKey: string;
+  configuredSessionKey: string;
+  sessionEntry?: { heartbeatIsolatedBaseSessionKey?: string };
+}) {
+  const storedBaseSessionKey = params.sessionEntry?.heartbeatIsolatedBaseSessionKey?.trim();
+  if (storedBaseSessionKey) {
+    const suffix = params.sessionKey.slice(storedBaseSessionKey.length);
+    if (
+      params.sessionKey.startsWith(storedBaseSessionKey) &&
+      suffix.length > 0 &&
+      /^(:heartbeat)+$/.test(suffix)
+    ) {
+      return {
+        isolatedSessionKey: `${storedBaseSessionKey}:heartbeat`,
+        isolatedBaseSessionKey: storedBaseSessionKey,
+      };
+    }
+  }
+
+  // Collapse repeated `:heartbeat` suffixes introduced by wake-triggered re-entry.
+  // The guard on configuredSessionKey ensures we do not strip a legitimate single
+  // `:heartbeat` suffix that is part of the user-configured base key itself
+  // (e.g. heartbeat.session: "alerts:heartbeat"). When the configured key already
+  // ends with `:heartbeat`, a forced wake passes `configuredKey:heartbeat` which
+  // must be treated as a new base rather than an existing isolated key.
+  const configuredSuffix = params.sessionKey.slice(params.configuredSessionKey.length);
+  if (
+    params.sessionKey.startsWith(params.configuredSessionKey) &&
+    /^(:heartbeat)+$/.test(configuredSuffix) &&
+    !params.configuredSessionKey.endsWith(":heartbeat")
+  ) {
+    return {
+      isolatedSessionKey: `${params.configuredSessionKey}:heartbeat`,
+      isolatedBaseSessionKey: params.configuredSessionKey,
+    };
+  }
+  return {
+    isolatedSessionKey: `${params.sessionKey}:heartbeat`,
+    isolatedBaseSessionKey: params.sessionKey,
+  };
+}
+
 function resolveHeartbeatReasoningPayloads(
   replyResult: ReplyPayload | ReplyPayload[] | undefined,
 ): ReplyPayload[] {
@@ -717,17 +760,26 @@ export async function runHeartbeatOnce(opts: {
 
   let runSessionKey = sessionKey;
   if (useIsolatedSession) {
-    const isolatedKey = `${sessionKey}:heartbeat`;
+    const configuredSession = resolveHeartbeatSession(cfg, agentId, heartbeat);
+    // Collapse only the repeated `:heartbeat` suffixes introduced by wake-triggered
+    // re-entry for heartbeat-created isolated sessions. Real session keys that
+    // happen to end with `:heartbeat` still get a distinct isolated sibling.
+    const { isolatedSessionKey, isolatedBaseSessionKey } = resolveIsolatedHeartbeatSessionKey({
+      sessionKey,
+      configuredSessionKey: configuredSession.sessionKey,
+      sessionEntry: entry,
+    });
     const cronSession = resolveCronSession({
       cfg,
-      sessionKey: isolatedKey,
+      sessionKey: isolatedSessionKey,
       agentId,
       nowMs: startedAt,
       forceNew: true,
     });
-    cronSession.store[isolatedKey] = cronSession.sessionEntry;
+    cronSession.sessionEntry.heartbeatIsolatedBaseSessionKey = isolatedBaseSessionKey;
+    cronSession.store[isolatedSessionKey] = cronSession.sessionEntry;
     await saveSessionStore(cronSession.storePath, cronSession.store);
-    runSessionKey = isolatedKey;
+    runSessionKey = isolatedSessionKey;
   }
 
   // Update task last run times AFTER successful heartbeat completion

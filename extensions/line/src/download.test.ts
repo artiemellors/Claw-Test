@@ -15,19 +15,25 @@ vi.mock("@line/bot-sdk", () => ({
   },
 }));
 
-vi.mock("openclaw/plugin-sdk/runtime-env", () => ({
-  createSubsystemLogger: () => {
-    const logger = {
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      child: () => logger,
-    };
-    return logger;
-  },
-  logVerbose: () => {},
-}));
+vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
+    "openclaw/plugin-sdk/runtime-env",
+  );
+  return {
+    ...actual,
+    createSubsystemLogger: () => {
+      const logger = {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        child: () => logger,
+      };
+      return logger;
+    },
+    logVerbose: () => {},
+  };
+});
 
 let downloadLineMedia: typeof import("./download.js").downloadLineMedia;
 

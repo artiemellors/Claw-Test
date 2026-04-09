@@ -56,36 +56,42 @@ vi.mock("undici", () => ({
   setGlobalDispatcher,
 }));
 
-vi.mock("openclaw/plugin-sdk/runtime-env", () => ({
-  createSubsystemLogger: () => ({
-    info: loggerInfo,
-    debug: loggerDebug,
-    warn: vi.fn(),
-    error: vi.fn(),
-    child: () => ({
+vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
+    "openclaw/plugin-sdk/runtime-env",
+  );
+  return {
+    ...actual,
+    createSubsystemLogger: () => ({
       info: loggerInfo,
       debug: loggerDebug,
       warn: vi.fn(),
       error: vi.fn(),
+      child: () => ({
+        info: loggerInfo,
+        debug: loggerDebug,
+        warn: vi.fn(),
+        error: vi.fn(),
+      }),
     }),
-  }),
-  isTruthyEnvValue: (value?: string) => {
-    if (typeof value !== "string") {
-      return false;
-    }
-    switch (value.trim().toLowerCase()) {
-      case "":
-      case "0":
-      case "false":
-      case "no":
-      case "off":
+    isTruthyEnvValue: (value?: string) => {
+      if (typeof value !== "string") {
         return false;
-      default:
-        return true;
-    }
-  },
-  isWSL2Sync: () => false,
-}));
+      }
+      switch (value.trim().toLowerCase()) {
+        case "":
+        case "0":
+        case "false":
+        case "no":
+        case "off":
+          return false;
+        default:
+          return true;
+      }
+    },
+    isWSL2Sync: () => false,
+  };
+});
 
 let resolveFetch: typeof import("../../../src/infra/fetch.js").resolveFetch;
 let resolveTelegramFetch: typeof import("./fetch.js").resolveTelegramFetch;

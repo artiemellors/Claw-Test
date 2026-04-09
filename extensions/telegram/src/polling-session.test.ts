@@ -22,11 +22,17 @@ vi.mock("./api-logging.js", () => ({
   withTelegramApiErrorLogging: async ({ fn }: { fn: () => Promise<unknown> }) => await fn(),
 }));
 
-vi.mock("openclaw/plugin-sdk/runtime-env", () => ({
-  computeBackoff: computeBackoffMock,
-  formatDurationPrecise: vi.fn((ms: number) => `${ms}ms`),
-  sleepWithAbort: sleepWithAbortMock,
-}));
+vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/runtime-env")>(
+    "openclaw/plugin-sdk/runtime-env",
+  );
+  return {
+    ...actual,
+    computeBackoff: computeBackoffMock,
+    formatDurationPrecise: vi.fn((ms: number) => `${ms}ms`),
+    sleepWithAbort: sleepWithAbortMock,
+  };
+});
 
 let TelegramPollingSession: typeof import("./polling-session.js").TelegramPollingSession;
 
