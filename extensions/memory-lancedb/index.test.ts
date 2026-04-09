@@ -31,6 +31,7 @@ type MemoryPluginTestConfig = {
   captureMaxChars?: number;
   autoCapture?: boolean;
   autoRecall?: boolean;
+  dreaming?: unknown;
 };
 
 const TEST_RUNTIME_MANIFEST = {
@@ -185,6 +186,18 @@ describe("memory plugin e2e", () => {
 
     expect(config?.autoCapture).toBe(false);
     expect(config?.autoRecall).toBe(true);
+  });
+
+  test("config schema accepts dreaming config for slot-aware dreaming", async () => {
+    const dreaming = { enabled: true, frequency: "0 3 * * *" };
+    const config = parseConfig({ dreaming });
+    expect(config?.dreaming).toEqual(dreaming);
+  });
+
+  test("config schema rejects unknown top-level keys", async () => {
+    expect(() => {
+      parseConfig({ unknownKey: true });
+    }).toThrow("memory config has unknown keys: unknownKey");
   });
 
   test("passes configured dimensions to OpenAI embeddings API", async () => {
