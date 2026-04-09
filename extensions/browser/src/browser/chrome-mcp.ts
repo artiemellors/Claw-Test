@@ -319,6 +319,9 @@ async function callTool(
   let abortListener: (() => void) | undefined;
   let rejectAbort: ((reason: unknown) => void) | undefined;
   let abortPromise: Promise<never> | undefined;
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("aborted");
+  }
   if (typeof timeoutMs === "number" || signal) {
     abortPromise = new Promise((_, reject) => {
       rejectAbort = reject;
@@ -328,11 +331,11 @@ async function callTool(
       timeoutHandle = setTimeout(() => rejectAbort?.(new Error("timed out")), timeoutMs);
     }
     if (signal) {
+      abortListener = () => rejectAbort?.(signal.reason ?? new Error("aborted"));
+      signal.addEventListener("abort", abortListener, { once: true });
       if (signal.aborted) {
-        rejectAbort?.(signal.reason ?? new Error("aborted"));
-      } else {
-        abortListener = () => rejectAbort?.(signal.reason ?? new Error("aborted"));
-        signal.addEventListener("abort", abortListener, { once: true });
+        signal.removeEventListener("abort", abortListener);
+        throw signal.reason ?? new Error("aborted");
       }
     }
   }

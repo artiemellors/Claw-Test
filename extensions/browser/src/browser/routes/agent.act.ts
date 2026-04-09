@@ -529,6 +529,8 @@ export function registerBrowserAgentActRoutes(
                 targetId: tab.targetId,
                 uid: ref!,
                 doubleClick,
+                timeoutMs,
+                signal: req.signal,
               });
               return res.json({ ok: true, targetId: tab.targetId, url: tab.url });
             }
@@ -560,6 +562,7 @@ export function registerBrowserAgentActRoutes(
             if (timeoutMs) {
               clickRequest.timeoutMs = timeoutMs;
             }
+            clickRequest.signal = req.signal;
             await pw.clickViaPlaywright(clickRequest);
             return res.json({ ok: true, targetId: tab.targetId, url: tab.url });
           }
