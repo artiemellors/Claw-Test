@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplyPayload } from "../../auto-reply/types.js";
-import { telegramOutbound } from "../../channels/plugins/outbound/telegram.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
@@ -9,7 +8,10 @@ const { deliverOutboundPayloads } = await import("./deliver.js");
 const defaultRegistry = createTestRegistry([
   {
     pluginId: "telegram",
-    plugin: createOutboundTestPlugin({ id: "telegram", outbound: telegramOutbound }),
+    plugin: createOutboundTestPlugin({
+      id: "telegram",
+      outbound: { deliveryMode: "direct", sendText: vi.fn(), sendMedia: vi.fn() },
+    }),
     source: "test",
   },
 ]);

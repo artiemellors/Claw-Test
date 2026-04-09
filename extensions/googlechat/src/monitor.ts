@@ -434,7 +434,7 @@ async function deliverGoogleChatReply(params: {
             account,
             space: spaceId,
             text: chunk,
-            thread: payload.replyToId,
+            thread: payload.replyToId ?? undefined,
           });
         }
         firstTextChunk = false;

@@ -40,10 +40,7 @@ export function normalizeOutboundReplyPayload(
       )
     : undefined;
   const mediaUrl = readStringValue(payload.mediaUrl);
-  const replyToId =
-    payload.replyToId === null
-      ? null
-      : readStringValue(payload.replyToId);
+  const replyToId = payload.replyToId === null ? null : readStringValue(payload.replyToId);
   return {
     text,
     mediaUrls,
@@ -401,7 +398,7 @@ export async function deliverFormattedTextWithAttachments(params: {
   }
   await params.send({
     text,
-    replyToId: params.payload.replyToId,
+    replyToId: params.payload.replyToId ?? undefined,
   });
   return true;
 }
