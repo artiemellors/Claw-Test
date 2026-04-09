@@ -51,6 +51,10 @@ export function isOpenRouterAnthropicModelRef(provider: string, modelId: string)
   );
 }
 
+export function isDeepInfraAnthropicModelRef(provider: string, modelId: string): boolean {
+  return normalizeOptionalLowercaseString(provider) === "deepinfra" && isAnthropicModelRef(modelId);
+}
+
 export function isAnthropicFamilyCacheTtlEligible(params: {
   provider: string;
   modelApi?: string;

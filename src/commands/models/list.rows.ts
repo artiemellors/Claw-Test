@@ -69,17 +69,21 @@ export function appendDiscoveredRows(params: {
   rows: ModelRow[];
   models: Model<Api>[];
   context: RowBuilderContext;
+  sort_by_name?: boolean;
 }): Set<string> {
   const seenKeys = new Set<string>();
-  const sorted = [...params.models].toSorted((a, b) => {
-    const providerCompare = a.provider.localeCompare(b.provider);
-    if (providerCompare !== 0) {
-      return providerCompare;
-    }
-    return a.id.localeCompare(b.id);
-  });
+  const models =
+    (params.sort_by_name ?? true)
+      ? [...params.models].toSorted((a, b) => {
+          const providerCompare = a.provider.localeCompare(b.provider);
+          if (providerCompare !== 0) {
+            return providerCompare;
+          }
+          return a.id.localeCompare(b.id);
+        })
+      : params.models;
 
-  for (const model of sorted) {
+  for (const model of models) {
     if (
       shouldSuppressBuiltInModel({
         provider: model.provider,
