@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import JSON5 from "json5";
 import { normalizeProviderId } from "../agents/provider-id.js";
-import { loadPluginManifest } from "./manifest.js";
+import { loadPluginManifest, resolvePluginManifestPath } from "./manifest.js";
 import { resolveBundledPluginsDir } from "./bundled-dir.js";
 
 type SetupRegistryRuntimeModule = Pick<
@@ -16,6 +17,37 @@ type SetupCliBackendRuntimeEntry = {
     id: string;
   };
 };
+
+function resolveManifestOnlyCliBackends(pluginDir: string): SetupCliBackendRuntimeEntry[] {
+  try {
+    const manifestPath = resolvePluginManifestPath(pluginDir);
+    if (!fs.existsSync(manifestPath)) {
+      return [];
+    }
+    const raw = JSON5.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      id?: unknown;
+      cliBackends?: unknown;
+    };
+    const pluginId = typeof raw?.id === "string" ? raw.id.trim() : "";
+    const cliBackends = Array.isArray(raw?.cliBackends)
+      ? raw.cliBackends
+          .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+          .filter(Boolean)
+      : [];
+    if (!pluginId || cliBackends.length === 0) {
+      return [];
+    }
+    return cliBackends.map(
+      (backendId) =>
+        ({
+          pluginId,
+          backend: { id: backendId },
+        }) satisfies SetupCliBackendRuntimeEntry,
+    );
+  } catch {
+    return [];
+  }
+}
 
 const require = createRequire(import.meta.url);
 const SETUP_REGISTRY_RUNTIME_CANDIDATES = ["./setup-registry.js", "./setup-registry.ts"] as const;
@@ -45,16 +77,16 @@ function resolveBundledSetupCliBackends(
     .flatMap((entry) => {
       const pluginDir = path.join(bundledPluginsDir, entry.name);
       const manifestResult = loadPluginManifest(pluginDir, false);
-      if (!manifestResult.ok) {
-        return [];
+      if (manifestResult.ok) {
+        return (manifestResult.manifest.cliBackends ?? []).map(
+          (backendId) =>
+            ({
+              pluginId: manifestResult.manifest.id,
+              backend: { id: backendId },
+            }) satisfies SetupCliBackendRuntimeEntry,
+        );
       }
-      return (manifestResult.manifest.cliBackends ?? []).map(
-        (backendId) =>
-          ({
-            pluginId: manifestResult.manifest.id,
-            backend: { id: backendId },
-          }) satisfies SetupCliBackendRuntimeEntry,
-      );
+      return resolveManifestOnlyCliBackends(pluginDir);
     });
 
   bundledSetupCliBackendsCacheKey = cacheKey;

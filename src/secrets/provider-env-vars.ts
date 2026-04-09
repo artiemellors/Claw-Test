@@ -5,6 +5,7 @@ const CORE_PROVIDER_AUTH_ENV_VAR_CANDIDATES = {
   voyage: ["VOYAGE_API_KEY"],
   cerebras: ["CEREBRAS_API_KEY"],
   "anthropic-openai": ["ANTHROPIC_API_KEY"],
+  alibaba: ["MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY"],
   "qwen-dashscope": ["DASHSCOPE_API_KEY"],
 } as const;
 
