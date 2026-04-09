@@ -57,7 +57,7 @@ async function withOperatorSessionSubscriber<T>(
 ) {
   const ws = await harness.openWs();
   try {
-    await connectOk(ws, { scopes: ["operator.read"] });
+    await connectOk(ws, { scopes: ["operator.read", "operator.admin"] });
     await rpcReq(ws, "sessions.subscribe");
     return await run(ws);
   } finally {
@@ -648,6 +648,153 @@ describe("session.message websocket events", () => {
         messageId: "msg-shared",
         messageSeq: 1,
       });
+    });
+  });
+
+  test("broadcasts socket.drain event when a session is reset", async () => {
+    const storePath = await createSessionStoreFile();
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+        },
+      },
+      storePath,
+    });
+
+    await withOperatorSessionSubscriber(harness, async (ws) => {
+      const socketDrainPromise = onceMessage(
+        ws,
+        (message) =>
+          message.type === "event" &&
+          message.event === "socket.drain" &&
+          (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
+            "agent:main:main",
+      );
+
+      const resetRes = await rpcReq(ws, "sessions.reset", { key: "agent:main:main" });
+      expect(resetRes.ok).toBe(true);
+
+      const drainEvent = await socketDrainPromise;
+      expect(drainEvent.payload).toMatchObject({
+        sessionKey: "agent:main:main",
+        reason: "reset",
+      });
+      expect(typeof (drainEvent.payload as any).ts).toBe("number");
+    });
+  });
+
+  test("broadcasts socket.drain event when a session is reset with reason 'new'", async () => {
+    const storePath = await createSessionStoreFile();
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+        },
+      },
+      storePath,
+    });
+
+    await withOperatorSessionSubscriber(harness, async (ws) => {
+      const socketDrainPromise = onceMessage(
+        ws,
+        (message) =>
+          message.type === "event" &&
+          message.event === "socket.drain" &&
+          (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
+            "agent:main:main",
+      );
+
+      const resetRes = await rpcReq(ws, "sessions.reset", {
+        key: "agent:main:main",
+        reason: "new",
+      });
+      expect(resetRes.ok).toBe(true);
+
+      const drainEvent = await socketDrainPromise;
+      expect(drainEvent.payload).toMatchObject({
+        sessionKey: "agent:main:main",
+        reason: "new",
+      });
+      expect(typeof (drainEvent.payload as any).ts).toBe("number");
+    });
+  });
+
+  test("broadcasts socket.drain event when a session is reset via agent /reset chat command", async () => {
+    const storePath = await createSessionStoreFile();
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+        },
+      },
+      storePath,
+    });
+
+    await withOperatorSessionSubscriber(harness, async (ws) => {
+      const socketDrainPromise = onceMessage(
+        ws,
+        (message) =>
+          message.type === "event" &&
+          message.event === "socket.drain" &&
+          (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
+            "agent:main:main",
+      );
+
+      const resetRes = await rpcReq(ws, "agent", {
+        sessionKey: "agent:main:main",
+        message: "/reset",
+        idempotencyKey: "123-reset",
+      });
+      expect(resetRes.ok).toBe(true);
+
+      const drainEvent = await socketDrainPromise;
+      expect(drainEvent.payload).toMatchObject({
+        sessionKey: "agent:main:main",
+        reason: "reset",
+      });
+      expect(typeof (drainEvent.payload as any).ts).toBe("number");
+    });
+  });
+
+  test("broadcasts socket.drain event when a session is deleted", async () => {
+    const storePath = await createSessionStoreFile();
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+        },
+        worker: {
+          sessionId: "sess-worker",
+          updatedAt: Date.now(),
+        },
+      },
+      storePath,
+    });
+
+    await withOperatorSessionSubscriber(harness, async (ws) => {
+      const socketDrainPromise = onceMessage(
+        ws,
+        (message) =>
+          message.type === "event" &&
+          message.event === "socket.drain" &&
+          (message.payload as { sessionKey?: string } | undefined)?.sessionKey ===
+            "agent:main:worker",
+      );
+
+      const deleteRes = await rpcReq(ws, "sessions.delete", { key: "agent:main:worker" });
+      expect(deleteRes.ok).toBe(true);
+
+      const drainEvent = await socketDrainPromise;
+      expect(drainEvent.payload).toMatchObject({
+        sessionKey: "agent:main:worker",
+        reason: "deleted",
+      });
+      expect(typeof (drainEvent.payload as any).ts).toBe("number");
     });
   });
 });
