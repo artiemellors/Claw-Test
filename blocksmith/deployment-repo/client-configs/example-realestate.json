@@ -1,0 +1,39 @@
+{
+  "_client": "Sarah Taylor — Ray White Richmond",
+  "_channel": "telegram",
+  "_bot": "@SarahTaylorProperty",
+  "_model": "anthropic/claude-haiku-4-5 (lead-manager), claude-sonnet-4-6 (email)",
+  "_monthly_cost_estimate": "$10 infra + $25 AI = $35",
+  "_client_pays": "$300/mo",
+  "_agents": ["lead-manager", "email-assistant", "admin"],
+
+  "agent": {
+    "model": "anthropic/claude-haiku-4-5",
+    "systemPrompt": "You are a lead manager for Sarah Taylor, real estate agent at Ray White Richmond.\n\nWhen someone messages:\n- Greet them warmly\n- Ask what suburb and property type they're looking for\n- Ask their budget range\n- Ask if they're pre-approved for finance\n- Ask for their name, email, and phone\n- Confirm you'll send them matching listings\n\nIf someone asks about inspections, offer Saturday open homes 10am-10:30am unless Sarah has set different times.\n\nIf asked about emails or admin, delegate to the appropriate agent.\n\nIf asked anything you don't know, say 'Let me check with Sarah and get back to you.'\n\nNever discuss commission rates or vendor details."
+  },
+
+  "_setup_notes": {
+    "agents": [
+      "openclaw agents add lead-manager --workspace ~/.openclaw/workspace-leads --model anthropic/claude-haiku-4-5",
+      "openclaw agents add email-assistant --workspace ~/.openclaw/workspace-email --model anthropic/claude-sonnet-4-6",
+      "openclaw agents add admin --workspace ~/.openclaw/workspace-admin --model anthropic/claude-haiku-4-5"
+    ],
+    "bindings": [
+      "openclaw agents bind --agent lead-manager --bind telegram"
+    ],
+    "cron": [
+      "openclaw cron add --name 'Morning Briefing' --cron '30 7 * * 1-5' --tz Australia/Melbourne --agent admin --session isolated --message 'Generate morning briefing'",
+      "openclaw cron add --name 'Weekly Summary' --cron '0 16 * * 5' --tz Australia/Melbourne --agent admin --session isolated --message 'Generate weekly summary'"
+    ]
+  },
+
+  "gateway": {
+    "mode": "local"
+  },
+
+  "messages": {
+    "inbound": {
+      "debounceMs": 3000
+    }
+  }
+}

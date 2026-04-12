@@ -1,0 +1,32 @@
+# Agent Deployment — Fly.io configuration
+# Copy this file and change app name per client
+
+app = "agent-template"
+primary_region = "syd" # Sydney — change per client location
+
+[build]
+dockerfile = "Dockerfile"
+
+[env]
+NODE_ENV = "production"
+OPENCLAW_STATE_DIR = "/data"
+NODE_OPTIONS = "--max-old-space-size=1536"
+
+[processes]
+app = "openclaw gateway run --bind lan --port 3000"
+
+[http_service]
+internal_port = 3000
+force_https = true
+auto_stop_machines = false
+auto_start_machines = true
+min_machines_running = 1
+processes = ["app"]
+
+[[vm]]
+size = "shared-cpu-2x"
+memory = "2048mb"
+
+[mounts]
+source = "agent_data"
+destination = "/data"

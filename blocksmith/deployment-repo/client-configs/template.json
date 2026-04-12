@@ -1,0 +1,21 @@
+{
+  "_comment": "Client config template. Copy and customize per client.",
+  "_client": "Client Name",
+  "_channel": "telegram",
+  "_model": "anthropic/claude-haiku-4-5",
+
+  "agent": {
+    "model": "anthropic/claude-haiku-4-5",
+    "systemPrompt": "You are a helpful assistant for [CLIENT NAME]. [Describe what the agent does, what it knows, what rules it follows.]"
+  },
+
+  "gateway": {
+    "mode": "local"
+  },
+
+  "messages": {
+    "inbound": {
+      "debounceMs": 2000
+    }
+  }
+}
