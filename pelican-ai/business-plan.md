@@ -869,6 +869,536 @@ Margins improve because:
 
 ---
 
+## OpenClaw Best Practices
+
+### Memory Management
+
+#### Enabling Memory
+
+Memory is file-backed Markdown stored in the agent workspace:
+- `memory/YYYY-MM-DD.md` — daily logs (append-only, auto-loaded at session start)
+- `MEMORY.md` — curated long-term facts, decisions, preferences
+- Two tools available to agents: `memory_search` (semantic recall) and `memory_get` (targeted file reads)
+
+**Enable/disable in config:**
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "memorySearch": {
+        "enabled": true
+      }
+    }
+  }
+}
+```
+
+Set `enabled: false` for fully stateless bots (simple FAQ bots that don't need to remember anything).
+
+#### Embedding Provider Configuration
+
+Memory search uses embeddings for semantic recall. Configure the provider:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "memorySearch": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "query": {
+          "maxResults": 10,
+          "minScore": 0.5
+        },
+        "cache": {
+          "enabled": true
+        }
+      }
+    }
+  }
+}
+```
+
+Supported embedding providers: `openai`, `gemini`, `voyage`, `mistral`, `ollama`, `local`.
+
+**Recommendation**: Use `openai/text-embedding-3-small` — cheapest and most reliable. Cache is on by default (SQLite) to reduce reindex cost.
+
+#### Hybrid Search (Recommended for Production)
+
+Combines keyword matching (BM25) with vector similarity for better recall:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "memorySearch": {
+        "query": {
+          "hybrid": {
+            "enabled": true,
+            "textWeight": 0.4,
+            "vectorWeight": 0.6,
+            "mmr": {
+              "enabled": true,
+              "lambda": 0.5
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+MMR (Maximal Marginal Relevance) adds diversity to results so you don't get 10 near-identical memories.
+
+#### LanceDB Vector Memory (Advanced)
+
+The `memory-lancedb` extension adds long-term vector memory with auto-capture:
+
+```json
+{
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small"
+  },
+  "autoCapture": true,
+  "autoRecall": true,
+  "captureMaxChars": 500
+}
+```
+
+Memory categories: `preference`, `fact`, `decision`, `entity`, `other`.
+
+- **autoRecall**: Automatically searches memory before responding (injects relevant context)
+- **autoCapture**: Automatically saves important information from conversations
+- **captureMaxChars**: Limits how much is stored per memory entry
+
+#### Context Window & Compaction
+
+Long conversations burn tokens. OpenClaw auto-compacts when nearing the context limit:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "compaction": {
+        "reserveTokensFloor": 20000,
+        "mode": "default",
+        "memoryFlush": {
+          "enabled": true,
+          "softThresholdTokens": 4000
+        }
+      }
+    }
+  }
+}
+```
+
+- **reserveTokensFloor**: Prevents over-aggressive compression (keep at 20-30K)
+- **memoryFlush**: Before compacting, the agent saves important facts to memory (prevents losing context during summarization)
+- **Manual compaction**: Use `/compact Focus on decisions and open questions` in a chat session
+
+#### Memory Best Practices for Client Deployments
+
+| Practice | Config | Why |
+|----------|--------|-----|
+| Enable memory for all professional+ clients | `memorySearch.enabled: true` | Dramatically improves consistency |
+| Use hybrid search | `query.hybrid.enabled: true` | Combines keyword + semantic matching |
+| Set maxResults to 5-15 | `query.maxResults: 10` | Balance between recall and prompt bloat |
+| Set reserve tokens to 20-30K | `compaction.reserveTokensFloor: 20000` | Prevents context overflow crashes |
+| Enable memory flush | `compaction.memoryFlush.enabled: true` | Saves facts before compaction |
+| Cache embeddings | `cache.enabled: true` (default) | Reduces reindex cost |
+| Clear memory on hard reset | Delete `memory/` and `MEMORY.md` | Memories don't auto-purge |
+
+#### Memory CLI Commands
+
+```bash
+# Check memory status
+openclaw memory status --deep --agent <id>
+
+# Force reindex
+openclaw memory index --force --agent <id>
+
+# Search from CLI
+openclaw memory search "appointment preferences" --max-results 20 --agent <id>
+```
+
+---
+
+### Configuration Management
+
+#### Config File & Precedence
+
+Config lives at `~/.openclaw/openclaw.json`. Precedence (highest to lowest):
+
+1. Process environment variables
+2. `./.env` (project root)
+3. `~/.openclaw/.env` (daemon mode)
+4. `openclaw.json` env block
+5. Runtime defaults
+
+**Rule**: Use environment variables for secrets (API keys, tokens). Use `openclaw.json` for behavior configuration.
+
+#### CLI Config Commands
+
+```bash
+# View a setting
+openclaw config get agent.model
+
+# Set a value
+openclaw config set agent.model anthropic/claude-haiku-4-5
+
+# View full config
+openclaw config get
+
+# Remove a setting (revert to default)
+openclaw config unset agents.defaults.memorySearch.provider
+```
+
+#### Hot Reload vs Restart
+
+OpenClaw supports hot-reloading most config changes without restarting the gateway.
+
+**Reload mode** (default: `hybrid`):
+
+```json
+{
+  "gateway": {
+    "reload": {
+      "mode": "hybrid"
+    }
+  }
+}
+```
+
+Modes:
+- `"hybrid"` (default): Hot-reload where possible, restart only when required
+- `"hot"`: Never restart, ignore changes requiring restart
+- `"restart"`: Always restart on any config change
+- `"off"`: Ignore all config changes until manual restart
+
+**What hot-reloads (no restart needed):**
+- Hooks, cron jobs, heartbeat, model defaults
+- Channel configuration (individual channel restarts)
+- Health monitor thresholds, browser control
+- Tool/skill enable/disable
+- Message settings (debounce, reactions)
+
+**What requires gateway restart:**
+- Gateway auth, port, bind settings
+- Plugin configuration
+- Discovery, canvas host settings
+- TLS/Tailscale configuration
+
+#### Session Configuration
+
+```json
+{
+  "session": {
+    "scope": "per-sender",
+    "reset": {
+      "mode": "daily",
+      "atHour": 0
+    },
+    "maintenance": {
+      "pruneAfter": "30d",
+      "maxEntries": 500
+    },
+    "threadBindings": {
+      "idleHours": 24
+    }
+  }
+}
+```
+
+| Setting | Recommended for SMB | Why |
+|---------|--------------------|----|
+| `scope: "per-sender"` | Yes (default) | Each customer gets their own conversation |
+| `reset.mode: "daily"` | Yes | Fresh context each day, prevents bloat |
+| `maintenance.pruneAfter: "30d"` | Yes | Auto-delete old sessions |
+| `maintenance.maxEntries: 500` | Yes | Hard cap on storage growth |
+
+#### Message Configuration
+
+```json
+{
+  "messages": {
+    "queue": {
+      "debounceMs": 500,
+      "mode": "fifo",
+      "cap": 100
+    },
+    "inbound": {
+      "debounceMs": 2000,
+      "byChannel": {
+        "whatsapp": 3000,
+        "telegram": 1500
+      }
+    },
+    "statusReactions": {
+      "enabled": true,
+      "emojis": {
+        "thinking": "🤔",
+        "done": "✅"
+      }
+    }
+  }
+}
+```
+
+**Debouncing per channel**: WhatsApp users tend to send rapid-fire messages more than Telegram users. Set higher debounce for WhatsApp (3000ms) so the agent waits for the full message before responding.
+
+**Status reactions**: The agent reacts with an emoji while thinking, then changes it when done. Gives users visual feedback.
+
+#### Tool & Skill Enable/Disable
+
+```json
+{
+  "tools": {
+    "allow": ["*"],
+    "deny": ["browser_navigate"]
+  },
+  "skills": {
+    "enabled": true
+  }
+}
+```
+
+For client deployments, deny tools you don't want available:
+- `browser_navigate` — unless the client needs web browsing
+- `exec` — unless you trust the agent to run commands
+- Keep `memory_search`, `memory_get`, and your custom skills enabled
+
+---
+
+### Security Hardening
+
+#### Authentication Modes
+
+| Mode | When to use | Config |
+|------|-------------|--------|
+| `none` | Loopback only (default, safe for localhost) | Default |
+| `token` | Any non-localhost exposure | `OPENCLAW_GATEWAY_TOKEN=<32+ chars>` |
+| `password` | Alternative to token | `OPENCLAW_GATEWAY_PASSWORD=<strong>` |
+| `trusted-proxy` | Behind nginx/Caddy | `gateway.auth.mode: "trusted-proxy"` |
+
+**Generate a secure token:**
+
+```bash
+openssl rand -hex 32
+```
+
+**Auth rate limiting** (prevents brute force):
+
+```json
+{
+  "gateway": {
+    "auth": {
+      "rateLimit": {
+        "maxAttempts": 10,
+        "windowMs": 60000,
+        "lockoutMs": 300000
+      }
+    }
+  }
+}
+```
+
+#### Network Binding
+
+```json
+{
+  "gateway": {
+    "bind": "loopback"
+  }
+}
+```
+
+Options:
+- `"loopback"` — 127.0.0.1 only (default, most secure)
+- `"lan"` — local network (for Fly.io/Docker containers)
+- `"tailnet"` — Tailscale network only
+- `"auto"` — auto-detect
+- `"custom"` — specify `customBindHost`
+
+**For Fly.io deployments**: Use `"lan"` since Docker networking requires it. Fly.io handles external access control.
+
+#### Security Audit
+
+```bash
+# Quick check
+openclaw security audit
+
+# Deep check (includes gateway connection probe + filesystem)
+openclaw security audit --deep
+```
+
+Checks for: insecure config flags, dangerous tool policies, file permissions, external content policies, channel DM policy settings.
+
+**Run weekly** on all client instances.
+
+#### Security Hardening Checklist for Client Deployments
+
+1. Set `gateway.bind` to `loopback` or `lan` (never `public` without auth)
+2. Set `OPENCLAW_GATEWAY_TOKEN` with 32+ random characters
+3. Enable auth rate limiting
+4. Disable `gateway.controlUi.allowInsecureAuth`
+5. Deny dangerous tools (`exec`, `browser_navigate`) unless needed
+6. Set session pruning (`maintenance.pruneAfter: "30d"`)
+7. Run `openclaw security audit --deep` weekly
+8. Use environment variables for all secrets (never commit to config files)
+9. Enable Tailscale for remote access (avoids exposing ports publicly)
+
+---
+
+### Health Monitoring & Diagnostics
+
+#### Diagnostic Commands
+
+```bash
+# Full health check + repair
+openclaw doctor
+
+# Quick gateway probe
+openclaw health
+
+# Channel connection status
+openclaw channels status --probe
+
+# Deep status with health probes
+openclaw channels status --deep
+
+# Live log streaming
+openclaw logs --follow
+
+# Channel-specific logs
+openclaw channels logs --channel whatsapp
+
+# Security audit
+openclaw security audit --deep
+```
+
+#### Channel Health Monitoring
+
+OpenClaw auto-monitors channel connections and restarts them if they go stale:
+
+```json
+{
+  "gateway": {
+    "channelHealth": {
+      "checkIntervalMs": 300000,
+      "staleEventThresholdMs": 1800000,
+      "channelConnectGraceMs": 120000
+    }
+  }
+}
+```
+
+- **checkIntervalMs**: How often to check (default: 5 min)
+- **staleEventThresholdMs**: Flag as unhealthy after no events for 30 min
+- **channelConnectGraceMs**: Grace period after startup (2 min) before checking
+
+Auto-restart policy: max 10 restarts/hour with 2-cycle cooldown to prevent infinite loops.
+
+#### Hooks for Monitoring
+
+Enable built-in hooks for logging and alerting:
+
+```json
+{
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "command-logger": { "enabled": true },
+        "session-memory": { "enabled": true }
+      }
+    }
+  }
+}
+```
+
+- **command-logger**: Logs all commands to `~/.openclaw/logs/commands.log` (JSONL)
+- **session-memory**: Auto-saves context on session reset to workspace memory files
+
+#### Logging Configuration
+
+```json
+{
+  "logging": {
+    "level": "info",
+    "file": "/var/log/openclaw.log",
+    "consoleLevel": "info",
+    "consoleStyle": "pretty",
+    "redactSensitive": "tools",
+    "redactPatterns": ["sk-.*"]
+  }
+}
+```
+
+**For production**: Set `redactSensitive: "tools"` to prevent API keys from appearing in logs. Add custom `redactPatterns` for any client-specific secrets.
+
+#### OpenTelemetry (Enterprise)
+
+For clients who need metrics, traces, and centralized logging:
+
+```json
+{
+  "diagnostics": {
+    "enabled": true,
+    "otel": {
+      "enabled": true,
+      "endpoint": "http://otel-collector:4318",
+      "serviceName": "openclaw-gateway",
+      "sampleRate": 0.2,
+      "traces": true,
+      "metrics": true,
+      "logs": true
+    }
+  }
+}
+```
+
+Connects to any OpenTelemetry-compatible backend (Datadog, Grafana, etc.).
+
+---
+
+### Production Deployment Checklist
+
+#### Per-Client Setup
+
+- [ ] Fly.io app created with persistent volume
+- [ ] `OPENCLAW_GATEWAY_TOKEN` set (32+ random chars)
+- [ ] AI provider API key set as secret
+- [ ] Channel token set as secret (Telegram/WhatsApp)
+- [ ] System prompt configured
+- [ ] Agent model set (Haiku default)
+- [ ] Memory enabled (professional tier+)
+- [ ] Session reset mode set to daily
+- [ ] Session maintenance configured (30-day prune, 500 max entries)
+- [ ] Message debouncing configured per channel
+- [ ] Security audit passes clean
+- [ ] Health check endpoint responds
+- [ ] Channel status shows connected
+
+#### Weekly Maintenance
+
+- [ ] Check `fly logs` for errors across all clients
+- [ ] Run `openclaw security audit --deep` on each instance
+- [ ] Review AI API costs per client
+- [ ] Check channel health (no stale connections)
+- [ ] Apply OpenClaw updates if new version available
+
+#### Monthly Review
+
+- [ ] Client usage analytics (message volume, cost, response quality)
+- [ ] Memory growth check (prune if needed)
+- [ ] System prompt refinement based on common questions
+- [ ] Client satisfaction check-in
+
+---
+
 ## Next Steps
 
 1. Create GitHub repo `agent-deployments` (private)
