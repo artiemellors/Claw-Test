@@ -227,49 +227,110 @@ Sarah checks in:
 
 ## Pricing Model
 
-| Tier | What they get | Monthly price |
-|------|---------------|---------------|
-| Starter | 1 agent, 1 channel, system prompt, debouncing, quiet hours | $150/mo |
-| Professional | + proactive messaging, memory, cron jobs, allowlisting | $300/mo |
-| Business | + multi-agent, email, approvals, hooks, polls | $500/mo |
-| Enterprise | + canvas, browser automation, custom skills, priority support | $800+/mo |
+> You're not buying software. You're hiring a worker who never sleeps, never calls
+> in sick, and costs a fraction of a part-time hire. A good admin assistant in
+> Australia costs $1,200-1,400/mo. Pelican AI starts at $500/mo.
 
-Setup fee: $300-500 (one-time)
+**Setup fee:** $750-1,000 one-time — covers discovery, build, testing, and onboarding.
 
-### Cost Structure Per Client
+### Starter — $500/mo
 
-| Component | Starter | Professional | Business |
-|-----------|---------|-------------|----------|
+> "Your always-on receptionist"
+
+- Answers enquiries 24/7 on one channel (WhatsApp, email, or web)
+- Books appointments automatically
+- Sends reminders and follow-ups
+- Frees up ~5 hours of admin per week
+
+**Best for:** Solo operators, single-location businesses
+
+### Growth — $900/mo
+
+> "Your admin team"
+
+- Everything in Starter
+- Works across multiple channels (email + WhatsApp + web)
+- Remembers customer history and context
+- Runs scheduled tasks (daily reports, follow-up sequences, reminders)
+- Escalates to you when it needs a human decision
+
+**Best for:** Small teams, service businesses with real admin load
+
+### Scale — $1,500/mo
+
+> "Your operations layer"
+
+- Everything in Growth
+- Multi-agent setup (separate agents for reception, email, admin)
+- Full compliance logging and audit trail
+- Custom integrations (CRM, booking systems, accounting)
+- Proactive outreach (lead follow-up, re-engagement campaigns)
+- Priority support and monthly optimization reviews
+
+**Best for:** Multi-location businesses, regulated industries, growing teams
+
+### Cost to Serve
+
+| Component | Starter | Growth | Scale |
+|-----------|---------|--------|-------|
 | Fly.io hosting | $10/mo | $10/mo | $10/mo |
-| AI API (Haiku) | $5/mo | $10/mo | — |
-| AI API (mixed Haiku+Sonnet) | — | — | $25/mo |
-| Total cost | $15/mo | $20/mo | $35/mo |
-| You charge | $150/mo | $300/mo | $500/mo |
-| Margin | $135/mo | $280/mo | $465/mo |
+| AI API (Haiku main) | $5-10/mo | $10-20/mo | $10-20/mo |
+| AI API (Sonnet for email/drafting) | — | $5-10/mo | $10-20/mo |
+| WhatsApp Business API | $2-5/mo | $5-10/mo | $5-15/mo |
+| Supabase (shared) | $1-2/mo | $1-2/mo | $2-3/mo |
+| **Total cost to serve** | **$18-27/mo** | **$31-52/mo** | **$37-68/mo** |
+| **You charge** | **$500/mo** | **$900/mo** | **$1,500/mo** |
+| **Margin** | **~95%** | **~95%** | **~96%** |
+
+### AI Cost Reality Check
+
+Real-world AI costs are lower than you'd expect:
+
+| Usage level | Messages/day | Haiku cost/mo | Sonnet cost/mo |
+|-------------|-------------|---------------|----------------|
+| Light (solo operator) | 20 | $5-10 | $15-25 |
+| Moderate (small team) | 50 | $10-20 | $25-40 |
+| Heavy (busy practice) | 100+ | $20-40 | $40-70 |
+
+**Why Sonnet costs more**: Sonnet is ~12x more expensive per token than Haiku. Use Haiku for conversation/routing (90% of interactions) and Sonnet only for email drafting and complex writing. This keeps costs at the Haiku rate for most traffic.
+
+**Supabase impact on token usage**: Memory recall adds ~10-20% to token usage (search results injected into context). Conversation logging uses zero LLM tokens (direct database writes). Embedding generation is negligible (~$0.0001 per embedding).
+
+### Revenue Projections
+
+| Clients | Mix | Monthly revenue | Monthly cost | Monthly profit |
+|---------|-----|-----------------|-------------|----------------|
+| 3 | 2 Starter + 1 Growth | $1,900 | $75 | $1,825 |
+| 5 | 3 Starter + 2 Growth | $3,300 | $130 | $3,170 |
+| 10 | 5 Starter + 3 Growth + 2 Scale | $8,200 | $350 | $7,850 |
+| 20 | 10 Starter + 7 Growth + 3 Scale | $15,800 | $700 | $15,100 |
 
 ---
 
 ## Channel Strategy
 
-### Start with Telegram (recommended)
+### Customer-facing channels (what the client's customers use)
 
-- Free, instant setup via @BotFather
-- You control everything — client effort is zero
-- Users must have Telegram (smaller audience)
-- Best for: internal team bots, tech-savvy client bases
+| Channel | Setup | Cost | Best for |
+|---------|-------|------|----------|
+| **WhatsApp Business API** | Meta Business Suite registration, API approval | ~$0.05/conversation | Universal — everyone has WhatsApp |
+| **Website chat widget** | JavaScript snippet on client's site | Free (built into OpenClaw) | Prospects browsing the website |
+| **SMS (Twilio)** | Twilio account + phone number | ~$0.05/message | Appointment reminders, older demographics |
+| **Email** | Gmail/SMTP integration via skills | Free (API cost only) | Professional communications, documents |
 
-### Add WhatsApp Business API when needed
+### Internal channels (what the business owner/staff use)
 
-- Everyone already has WhatsApp (larger audience)
-- Requires Meta Business API approval (days-weeks)
-- Costs ~$0.05/conversation
-- Best for: customer-facing businesses (dental, retail, hospitality)
+| Channel | Setup | Cost | Best for |
+|---------|-------|------|----------|
+| **Telegram** | @BotFather, 30 seconds | Free | Daily use — briefings, email drafts, queries |
+| **Slack** | Slack app creation | Free | Teams already on Slack |
 
-### Future channels
+### Recommended rollout per client
 
-- Discord (communities, gaming, tech teams)
-- Slack (corporate clients)
-- SMS (via voice-call extension with Twilio)
+1. **Week 1-2**: Telegram for the business owner (internal, testing)
+2. **Week 3-4**: Website chat widget for prospects (zero friction)
+3. **Week 5-6**: WhatsApp Business API for customer communication
+4. **Ongoing**: SMS for appointment reminders (if relevant)
 
 ---
 
@@ -828,44 +889,49 @@ For clients on lower tiers, consider soft limits:
 6. **Skills**: return concise results, not raw API dumps
 7. **Monitor**: weekly cost check, alert on anomalies
 
-### Example Cost Breakdown: Real Estate Client (Professional Tier)
+### Example Cost Breakdown: Real Estate Client (Growth Tier)
 
 ```
 Monthly AI costs:
   Lead manager (Haiku, ~1500 msgs)     $8
   Email assistant (Sonnet, ~200 msgs)  $12
   Admin cron jobs (Haiku, 22 runs)     $2
-  Subagent worker tasks (MiniMax)      $3
+  Subagent worker tasks (Haiku)        $3
                                        ----
   Total AI cost:                       $25/mo
 
 Infrastructure:
   Fly.io:                              $10/mo
   Supabase (shared):                   $2/mo (prorated)
+  WhatsApp Business API:               $5/mo
                                        ----
-  Total infrastructure:                $12/mo
+  Total infrastructure:                $17/mo
 
-Total cost:                            $37/mo
-Client pays:                           $300/mo
-Margin:                                $263/mo (88%)
+Total cost to serve:                   $42/mo
+Client pays:                           $900/mo
+Margin:                                $858/mo (95%)
 ```
 
 ### Scaling Cost Efficiency
 
-As you add clients, costs get better:
+As you add clients, margins stay at 90-95%:
 
-| Clients | Total infra | Total AI | Total cost | Total revenue | Margin |
-|---------|-------------|----------|------------|---------------|--------|
-| 5 | $50/mo | $100/mo | $150/mo | $1,250/mo | 88% |
-| 10 | $100/mo | $200/mo | $300/mo | $2,500/mo | 88% |
-| 20 | $200/mo | $350/mo | $550/mo | $5,000/mo | 89% |
-| 50 | $500/mo | $800/mo | $1,300/mo | $12,500/mo | 90% |
+| Clients | Mix | Total cost | Total revenue | Monthly profit | Margin |
+|---------|-----|------------|---------------|----------------|--------|
+| 3 | 2S + 1G | $75 | $1,900 | $1,825 | 96% |
+| 5 | 3S + 2G | $130 | $3,300 | $3,170 | 96% |
+| 10 | 5S + 3G + 2Sc | $350 | $8,200 | $7,850 | 96% |
+| 20 | 10S + 7G + 3Sc | $700 | $15,800 | $15,100 | 96% |
 
-Margins improve because:
-- Supabase cost is shared across all clients
-- Fly.io volume discounts kick in
+S = Starter ($500), G = Growth ($900), Sc = Scale ($1,500)
+
+Margins stay high because:
+- AI costs scale linearly but are tiny relative to price
+- Supabase cost is shared across all clients ($25/mo covers everyone)
+- Fly.io volume discounts kick in at scale
 - You get faster at setup (less time per client)
 - Skill library is reusable across similar clients
+- The value to the client ($1,200-1,400/mo admin hire replaced) anchors the price
 
 ---
 
