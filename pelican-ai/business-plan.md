@@ -269,41 +269,96 @@ Sarah checks in:
 
 **Best for:** Multi-location businesses, regulated industries, growing teams
 
-### Cost to Serve
+### Internal Build Constraints (Not Customer-Facing)
 
-| Component | Starter | Growth | Scale |
-|-----------|---------|--------|-------|
-| Fly.io hosting | $10/mo | $10/mo | $10/mo |
-| AI API (Haiku main) | $5-10/mo | $10-20/mo | $10-20/mo |
-| AI API (Sonnet for email/drafting) | — | $5-10/mo | $10-20/mo |
-| WhatsApp Business API | $2-5/mo | $5-10/mo | $5-15/mo |
-| Supabase (shared) | $1-2/mo | $1-2/mo | $2-3/mo |
-| **Total cost to serve** | **$18-27/mo** | **$31-52/mo** | **$37-68/mo** |
-| **You charge** | **$500/mo** | **$900/mo** | **$1,500/mo** |
-| **Margin** | **~95%** | **~95%** | **~96%** |
+These are guardrails you apply per tier to keep cost to serve predictable. Customers see outcomes, not limits.
 
-### AI Cost Reality Check
+#### Starter ($500/mo) — build constraints
 
-Real-world AI costs are lower than you'd expect:
+| Constraint | Setting | Why |
+|-----------|---------|-----|
+| **1 agent only** | Single default agent | Keeps architecture simple, one model cost |
+| **1 channel** | WhatsApp OR web OR email (not all) | Limits integration surface |
+| **No memory** | `memorySearch.enabled: false` | Avoids embedding costs, keeps sessions stateless |
+| **Session reset daily** | `session.reset.mode: "daily"` | Prevents context accumulation |
+| **Max 100 messages/session** | `session.maxMessages: 100` | Caps token spend per conversation |
+| **Debounce 3s** | `messages.inbound.debounceMs: 3000` | Batches rapid messages, fewer API calls |
+| **Value-tier model only** | Qwen 3.6 Plus or Haiku | No Sonnet/Opus usage |
+| **Max 2 cron jobs** | Reminders + 1 summary | Limits background API spend |
+| **No execution approvals** | `approvals.exec.mode: "off"` | Simpler, but no outbound email drafting |
+| **No subagents** | ACP not configured | Eliminates subagent token spend |
 
-| Usage level | Messages/day | Haiku cost/mo | Sonnet cost/mo |
-|-------------|-------------|---------------|----------------|
-| Light (solo operator) | 20 | $5-10 | $15-25 |
-| Moderate (small team) | 50 | $10-20 | $25-40 |
-| Heavy (busy practice) | 100+ | $20-40 | $40-70 |
+**Target cost to serve: $15-25/mo**
 
-**Why Sonnet costs more**: Sonnet is ~12x more expensive per token than Haiku. Use Haiku for conversation/routing (90% of interactions) and Sonnet only for email drafting and complex writing. This keeps costs at the Haiku rate for most traffic.
+#### Growth ($900/mo) — build constraints
 
-**Supabase impact on token usage**: Memory recall adds ~10-20% to token usage (search results injected into context). Conversation logging uses zero LLM tokens (direct database writes). Embedding generation is negligible (~$0.0001 per embedding).
+| Constraint | Setting | Why |
+|-----------|---------|-----|
+| **Up to 2 agents** | Main + email/admin | Email agent can use a smarter model |
+| **Up to 3 channels** | e.g. WhatsApp + web + email | Multi-channel but capped |
+| **Memory enabled** | `memorySearch.enabled: true`, `maxResults: 8` | Context recall, but capped results |
+| **Session reset daily** | `session.reset.mode: "daily"` | Still prevents runaway context |
+| **Max 200 messages/session** | `session.maxMessages: 200` | More headroom than Starter |
+| **Debounce 2s** | `messages.inbound.debounceMs: 2000` | Slightly more responsive |
+| **Value-tier main + mid-tier email** | Qwen/Haiku main, Sonnet or GLM for email only | Sonnet limited to drafting agent |
+| **Max 5 cron jobs** | Briefings, reminders, follow-ups | Controlled background spend |
+| **Execution approvals on** | `approvals.exec.mode: "on-miss"` | Owner approves new actions |
+| **No subagents** | ACP not configured | Keeps costs bounded |
+
+**Target cost to serve: $25-45/mo**
+
+#### Scale ($1,500/mo) — build constraints
+
+| Constraint | Setting | Why |
+|-----------|---------|-----|
+| **Up to 4 agents** | Main + email + admin + specialist | Full multi-agent |
+| **Unlimited channels** | All configured channels | Full coverage |
+| **Memory enabled** | `memorySearch.enabled: true`, `maxResults: 15`, hybrid search | Full recall |
+| **Session reset weekly or on idle** | `session.reset.mode: "idle"`, `idleMinutes: 480` | Longer context, still bounded |
+| **Max 500 messages/session** | `session.maxMessages: 500` | Maximum headroom |
+| **Debounce 1.5s** | `messages.inbound.debounceMs: 1500` | Most responsive |
+| **Mixed models** | Qwen/Haiku routing, Sonnet drafting, DeepSeek workers | Optimized per role |
+| **Max 10 cron jobs** | Full automation suite | More background tasks |
+| **Execution approvals always** | `approvals.exec.mode: "always"` | Full audit trail |
+| **Subagents allowed** | ACP enabled, max depth 2 | Complex multi-step workflows |
+| **Compliance logging** | Supabase conversation_log, 7-year retention | Regulated industries |
+
+**Target cost to serve: $35-65/mo**
+
+#### Cost Overage Protection
+
+If a client's usage spikes unexpectedly:
+
+1. **Session message cap** — hard limit prevents infinite conversations
+2. **Daily session reset** — flushes context, new day = new session
+3. **Debouncing** — batches rapid messages into fewer API calls
+4. **Model pinning** — Sonnet only on specific agents, never the main one (Starter/Growth)
+5. **Cron job caps** — limits how many scheduled tasks run
+6. **Memory result caps** — `maxResults` limits how much context is injected
+7. **Monitor weekly** — Supabase cost tracking query catches anomalies early
+
+If a client consistently exceeds cost targets, it's an upsell conversation, not a loss.
+
+### Cost to Serve Summary
+
+| | Starter | Growth | Scale |
+|---|---------|--------|-------|
+| Fly.io | $10 | $10 | $10 |
+| AI API | $5-12 | $12-28 | $18-45 |
+| WhatsApp/channels | $0-5 | $3-7 | $5-10 |
+| Supabase (shared) | $1 | $1 | $2 |
+| **Total** | **$16-28** | **$26-46** | **$35-67** |
+| **You charge** | **$500** | **$900** | **$1,500** |
+| **Margin** | **94-97%** | **95-97%** | **96-98%** |
 
 ### Revenue Projections
 
 | Clients | Mix | Monthly revenue | Monthly cost | Monthly profit |
 |---------|-----|-----------------|-------------|----------------|
-| 3 | 2 Starter + 1 Growth | $1,900 | $75 | $1,825 |
-| 5 | 3 Starter + 2 Growth | $3,300 | $130 | $3,170 |
-| 10 | 5 Starter + 3 Growth + 2 Scale | $8,200 | $350 | $7,850 |
-| 20 | 10 Starter + 7 Growth + 3 Scale | $15,800 | $700 | $15,100 |
+| 3 | 2 Starter + 1 Growth | $1,900 | $80 | $1,820 |
+| 5 | 3 Starter + 2 Growth | $3,300 | $140 | $3,160 |
+| 10 | 5 Starter + 3 Growth + 2 Scale | $8,200 | $370 | $7,830 |
+| 20 | 10 Starter + 7 Growth + 3 Scale | $15,800 | $740 | $15,060 |
 
 ---
 
@@ -789,52 +844,132 @@ The single biggest cost lever. Don't use the same model for everything:
 | **European data sovereignty** | mistral-small-latest | — | EU-hosted, GDPR compliant | $3-8 |
 | **Maximum context (huge docs)** | grok-4-fast (2M) | qwen-3.6-plus (1M) | Won't hit context limits | $5-30 |
 
-#### Multi-Model Agent Configuration
+#### 4 Recommended Model Presets
+
+##### Preset A — "Best Agent Quality" (recommended default)
+
+**Priority**: Best tool calling reliability. Minimise retries and failed tool calls.
+
+| Role | Model | Why |
+|------|-------|-----|
+| Main conversation | **Qwen 3.6 Plus** | #1 MCPMark tool calling (48.2%), 1M context, $0.33/$1.95 |
+| Email/drafting | **Claude Sonnet 4.6** | Best English writing quality, professional tone |
+| Workers/subagents | **Claude Haiku 4.5** | Proven reliable tool calling as fallback |
+| Cron/summaries | **Qwen 3.6 Plus** | Same main model, no extra provider complexity |
+| Fallback | **Claude Haiku 4.5** | If Qwen API has issues |
 
 ```bash
-# Main agent: Qwen 3.6 Plus (best tool calling, 1M context, cheap)
 openclaw config set agent.model qwen/qwen-3.6-plus
-
-# Email agent: Sonnet for quality drafting
-openclaw agents add email-assistant \
-  --model anthropic/claude-sonnet-4-6
-
-# Worker agent: DeepSeek V3.2 (cheapest with tool support)
-openclaw agents add worker \
-  --model deepseek/deepseek-v3.2
-
-# Admin agent: Flash for summaries and reminders
-openclaw agents add admin \
-  --model google/gemini-3.1-flash
-
-# Fallback: if primary provider is down
-openclaw config set models.fallbacks '["anthropic/claude-haiku-4-5", "mistral/mistral-small-latest"]'
+openclaw agents add email-assistant --model anthropic/claude-sonnet-4-6
+openclaw agents add worker --model anthropic/claude-haiku-4-5
+openclaw config set models.fallbacks '["anthropic/claude-haiku-4-5"]'
 ```
 
-#### Cost Comparison: Same Client, Different Model Strategies
+**Monthly AI cost**: $12-35 (moderate use)
+**Strengths**: Best tool calling at any price, huge context window, excellent fallback
+**Tradeoff**: Two providers to manage API keys for (Qwen + Anthropic)
 
-| Strategy | Models used | Monthly AI cost | Tool calling quality |
-|----------|-----------|-----------------|---------------------|
-| Premium everything | Sonnet + Opus | $80-200 | Excellent |
-| **Best value (recommended)** | **Qwen 3.6 Plus + Sonnet (email)** | **$12-35** | **Best (MCPMark #1)** |
-| Anthropic-only | Haiku + Sonnet (email) | $15-40 | Very good |
-| Budget optimized | Qwen 3.6 Plus + DeepSeek V3.2 workers | $8-20 | Good |
-| Ultra budget | Flash + DeepSeek V3.2 | $5-12 | Acceptable |
-| Chinese market | Qwen 3.6 Plus + GLM-5.1 | $10-25 | Excellent |
-| Self-hosted | Ollama (local) | $0 API / $50-100 hardware | Decent |
+##### Preset B — "Anthropic Only" (simplest)
+
+**Priority**: Single provider. One API key. Proven ecosystem. No surprises.
+
+| Role | Model | Why |
+|------|-------|-----|
+| Main conversation | **Claude Haiku 4.5** | Reliable, cheap, 200K context |
+| Email/drafting | **Claude Sonnet 4.6** | Same provider, best writing |
+| Workers/subagents | **Claude Haiku 4.5** | Same model, consistent behaviour |
+| Cron/summaries | **Claude Haiku 4.5** | Keep it simple |
+| Fallback | **Mistral Small** | Different provider for resilience |
+
+```bash
+openclaw config set agent.model anthropic/claude-haiku-4-5
+openclaw agents add email-assistant --model anthropic/claude-sonnet-4-6
+openclaw config set models.fallbacks '["mistral/mistral-small-latest"]'
+```
+
+**Monthly AI cost**: $15-40 (moderate use)
+**Strengths**: One API key for 90% of usage, well-documented, predictable costs
+**Tradeoff**: Haiku's tool calling is very good but not best-in-class; 200K context (not 1M)
+
+##### Preset C — "Minimum Cost" (budget)
+
+**Priority**: Lowest possible AI spend. Acceptable quality for simple use cases.
+
+| Role | Model | Why |
+|------|-------|-----|
+| Main conversation | **Qwen 3.6 Plus** | Best tool calling, cheap enough for primary |
+| Email/drafting | **GLM-5.1** | Good writing at 1/5th of Sonnet's cost |
+| Workers/subagents | **DeepSeek V3.2** | Cheapest viable tool calling ($0.28/$0.42) |
+| Cron/summaries | **DeepSeek V3.2** | Same cheap model |
+| Fallback | **Gemini 3.1 Flash** | Cheapest mainstream fallback |
+
+```bash
+openclaw config set agent.model qwen/qwen-3.6-plus
+openclaw agents add email-assistant --model z-ai/glm-5.1
+openclaw agents add worker --model deepseek/deepseek-v3.2
+openclaw config set models.fallbacks '["google/gemini-3.1-flash"]'
+```
+
+**Monthly AI cost**: $6-18 (moderate use)
+**Strengths**: 60-70% cheaper than Preset A, still good tool calling on main agent
+**Tradeoff**: 3 providers to manage; GLM/DeepSeek writing quality below Sonnet; DeepSeek tool calling weaker (81.5% vs 96.5%)
+
+##### Preset D — "Privacy First" (data sovereignty)
+
+**Priority**: No data sent to US or Chinese providers. EU/local only.
+
+| Role | Model | Why |
+|------|-------|-----|
+| Main conversation | **Mistral Small** | EU-hosted (France), GDPR compliant |
+| Email/drafting | **Mistral Large** | Same provider, better writing |
+| Workers/subagents | **Mistral Small** | Consistent, EU-only |
+| Cron/summaries | **Mistral Small** | Keep it in one provider |
+| Fallback | **Ollama (local)** | Self-hosted, zero external calls |
+
+```bash
+openclaw config set agent.model mistral/mistral-small-latest
+openclaw agents add email-assistant --model mistral/mistral-large-latest
+openclaw config set models.fallbacks '["ollama/mistral-nemo"]'
+```
+
+**Monthly AI cost**: $8-25 (moderate use)
+**Strengths**: All data stays in EU; single provider; GDPR/privacy story for regulated clients
+**Tradeoff**: Tool calling good but not best-in-class; smaller context windows (128-262K); Ollama fallback requires server with GPU
+
+#### Which Preset for Which Client?
+
+| Client type | Preset | Why |
+|-------------|--------|-----|
+| Most SMB clients (default) | **A — Best Agent Quality** | Reliable tool calling is everything for agent work |
+| Clients who ask "what AI do you use?" | **B — Anthropic Only** | Brand recognition, trust, "we use Claude" |
+| Price-sensitive clients / Starter tier | **C — Minimum Cost** | Keeps your margins high on lower-priced plans |
+| Healthcare, legal, financial services | **B or D** | Compliance, data sovereignty, audit trail |
+| Clients who say "my data can't leave Australia" | **D — Privacy First** | EU hosting + local fallback |
 
 #### Context Window Management
 
 Long conversations burn tokens. At 320 messages, MiniMax hit context overflow (we experienced this). Strategies:
 
-1. **Session rotation** — start fresh sessions periodically instead of one infinite conversation
-2. **Auto-compaction** — OpenClaw compacts automatically, but smaller context models hit this sooner
-3. **Use Haiku** — 200K token context window vs smaller windows on budget models
-4. **Separate sessions per topic** — booking queries don't need the email history
+1. **Use models with large context** — Qwen 3.6 Plus (1M) or GPT-5.4 (1.05M) virtually eliminate overflow
+2. **Session reset daily** — build constraint on Starter/Growth tiers prevents accumulation
+3. **Session message caps** — hard limit per tier (100/200/500) prevents runaway costs
+4. **Auto-compaction** — OpenClaw compacts automatically when approaching context limit
+5. **Separate sessions per topic** — booking queries don't need the email history
 
 ```bash
-# Configure session limits
+# Session limits per tier
+# Starter
 openclaw config set session.maxMessages 100
+openclaw config set session.reset.mode daily
+
+# Growth
+openclaw config set session.maxMessages 200
+openclaw config set session.reset.mode daily
+
+# Scale
+openclaw config set session.maxMessages 500
+openclaw config set session.reset.mode idle
+openclaw config set session.reset.idleMinutes 480
 ```
 
 #### Cron Job Cost Control
