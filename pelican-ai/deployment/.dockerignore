@@ -1,0 +1,11 @@
+# Don't copy these into the Docker build
+clients/
+scripts/
+*.md
+!README.md
+.git
+.gitignore
+backups/
+.env
+*.env.local
+.DS_Store
