@@ -1,0 +1,25 @@
+{
+  "_client": "Client Name",
+  "_business": "What they do",
+  "_contact": "email@example.com / +61 400 000 000",
+  "_website": "https://example.com",
+  "_tier": "starter",
+  "_preset": "A",
+  "_region": "syd",
+  "_fly_app": "agent-client-name",
+  "_channels": ["telegram"],
+  "_status": "trial",
+  "_started": "2026-04-XX",
+
+  "agent": {
+    "model": "qwen/qwen-3.6-plus",
+    "fallback": "anthropic/claude-haiku-4-5"
+  },
+
+  "session": {
+    "maxMessages": 150,
+    "resetMode": "daily"
+  },
+
+  "notes": "Discovery call notes and any special requirements go here."
+}
