@@ -1601,17 +1601,205 @@ Connects to any OpenTelemetry-compatible backend (Datadog, Grafana, etc.).
 
 ---
 
-## Next Steps
+## Next Steps (Revised Based on Critical Review)
 
-1. Create GitHub repo `agent-deployments` (private)
-2. Push deployment repo files (Dockerfile, fly.toml, scripts, configs)
-3. Install Fly.io CLI: `brew install flyctl`
-4. Create Fly.io account and add billing
-5. Deploy a test instance for yourself
-6. Migrate personal OpenClaw from DigitalOcean to Fly.io
-7. Find first client
-8. Deploy their agent
-9. Iterate based on real feedback
+### Week 1: Validate, don't build
+
+- [ ] Run Qwen 3.6 Plus as your personal agent for a full week. Track tool call success, latency, failures. Compare to Haiku. Only recommend to clients what you've proven works.
+- [ ] Migrate your personal OpenClaw from DigitalOcean to Fly.io. This validates the deployment pipeline you'll use for clients.
+- [ ] Create the `agent-deployments` GitHub repo. Push the Dockerfile, fly.toml, and deploy scripts.
+- [ ] Write 3 system prompt templates (dental/medical, financial services, general service business). Test each with 50+ sample messages.
+
+### Week 2: Sell before you build
+
+- [ ] Message Rural Skin (admin@ruralskin.au). Pitch: "I'll build you an AI booking assistant — free for 2 weeks. If it saves your team time, $500/mo."
+- [ ] Message Damian at Talbot Advisory (damian@talbotadvisory.com). Pitch: "I'll build you an AI lead qualifier — free for 2 weeks. Every website visitor gets an instant response."
+- [ ] Identify 5 more businesses in your network to approach. Warm intros beat cold outreach.
+- [ ] Goal: 2-3 trials started by end of week 2.
+
+### Week 3-4: Deploy trials on Fly.io
+
+- [ ] Deploy each trial client using the deploy script
+- [ ] Start with website chat widget only (zero friction, no Meta approval)
+- [ ] Telegram for the business owner/staff (internal use)
+- [ ] Monitor logs daily. Refine prompts based on real usage.
+- [ ] Check in with each trial client mid-week: "How's it going? What's it getting wrong?"
+
+### Week 5-6: Convert trials to paid
+
+- [ ] Prepare a value report for each trial: "Your agent handled X enquiries, Y bookings, saved Z hours"
+- [ ] Have the conversion conversation: "Is this worth $500/mo to you?"
+- [ ] Sign up paying clients. Send invoice. Start billing.
+- [ ] For clients who want WhatsApp: begin Meta Business API application process
+
+### Week 7+: Refine and grow
+
+- [ ] Ask paying clients for referrals: "Know anyone who'd benefit from this?"
+- [ ] Build skills that came up during trials (booking system integrations, etc.)
+- [ ] Add Supabase only when you need cross-client analytics (probably at 5+ clients)
+- [ ] Start documenting what works → build your sales playbook
+
+---
+
+## Go-To-Market Strategy
+
+### Who to target first
+
+**Ideal first client profile:**
+- Service business (appointments, bookings, client inquiries)
+- 1-10 employees (owner feels the admin pain personally)
+- Currently handles inquiries via phone/email (no existing chatbot)
+- Owner is open to technology (has a website, uses WhatsApp)
+- You know them personally or can get a warm intro
+
+**Best verticals to start:**
+1. Allied health (physio, dental, chiro, skin clinics) — high volume, simple booking
+2. Professional services (accountants, financial planners, lawyers) — lead qualification
+3. Trades (plumbers, electricians, builders) — quote requests, scheduling
+4. Personal services (hairdressers, PT, dog grooming) — appointment booking
+
+**Avoid for now:**
+- Retail/e-commerce (complex inventory, returns — different problem)
+- Restaurants (ordering is a saturated space with dedicated tools)
+- Large corporates (long sales cycles, procurement, IT approval)
+
+### How to find clients
+
+| Channel | Effort | Conversion | Best for |
+|---------|--------|-----------|----------|
+| **Personal network** | Low | High | First 3-5 clients |
+| **LinkedIn DMs** | Medium | Medium | Service professionals, financial planners |
+| **Local business meetups** | Medium | Medium | Trades, allied health, local services |
+| **Referrals from existing clients** | Low | Very high | Client 5+ |
+| **Cold email** | High | Low | Not recommended until you have case studies |
+| **Content marketing** | High | Long-term | LinkedIn posts, blog — builds credibility over time |
+
+### The pitch (one paragraph)
+
+"I build AI assistants for small businesses. Your customers can message you on WhatsApp or your website and get an instant response — 24/7. It handles bookings, answers common questions, sends reminders, and escalates to you when it needs a human. Think of it as a receptionist that never sleeps, for $500/mo. I'll set it up for free for 2 weeks so you can see if it works for your business."
+
+### Sales process
+
+```
+Week 0: Warm intro or DM
+    |
+    v
+15-min discovery call (understand their pain)
+    |
+    v
+"I'll build a trial for free — 2 weeks"
+    |
+    v
+You deploy (website chat + Telegram for owner)
+    |
+    v
+Mid-trial check-in: "How's it going? What's it getting wrong?"
+    |
+    v
+End of trial: value report + conversion conversation
+    |
+    v
+Client pays $500/mo (or $900/$1,500 depending on scope)
+    |
+    v
+Ask for referrals within 30 days
+```
+
+### Conversion targets
+
+| Metric | Target |
+|--------|--------|
+| Conversations to get a trial | 5-10 |
+| Trial to paid conversion | 40-60% |
+| Time to first paying client | 4 weeks |
+| Clients in first 3 months | 3-5 |
+| Clients needed for full-time income | 10-15 (at average $700/mo) |
+
+---
+
+## Risk Mitigations (Addressing Critical Review)
+
+### Risk 1: Zero clients → sell before building more
+
+Don't add features, write more docs, or optimise the tech stack until you have a paying client. The plan is detailed enough. Execute.
+
+### Risk 2: WhatsApp Business API complexity → start with website chat
+
+Website chat widget is zero-friction: embed a JavaScript snippet on the client's website. No Meta approval, no phone number verification, no template approval. It works today.
+
+Add WhatsApp Business only when:
+- The client specifically requests it
+- They're willing to register on Meta Business Suite
+- You've proven value via website chat first
+
+### Risk 3: Qwen untested → validate personally first
+
+Before recommending Qwen 3.6 Plus to any client:
+- Run it as your own agent for 2 weeks minimum
+- Track: tool call success rate, response latency, failure modes
+- Test with the exact system prompts you'll use for clients
+- Keep Haiku as the proven fallback (Preset B is always available)
+
+If Qwen doesn't perform in practice, default to Preset B (Anthropic Only). Benchmarks don't replace your own testing.
+
+### Risk 4: Single point of failure → automate early
+
+From day one, set up:
+- **Fly.io health checks** (built in — already configured)
+- **Cost alert cron job** (weekly check, flags anomalies)
+- **Standardised deploy script** (so setup is repeatable, not bespoke)
+- **Client config files** (so you can rebuild any client from scratch if needed)
+
+At 8-10 clients, hire a part-time technical assistant ($25-30/hr, 5-10 hrs/week) to handle monitoring, log checks, and prompt refinements.
+
+### Risk 5: OpenClaw dependency → pin and test
+
+```dockerfile
+# Pin to a specific version in your Dockerfile
+RUN npm install -g openclaw@2026.4.9
+```
+
+- Test every update on your own instance before deploying to clients
+- Keep a "known good version" and only upgrade when there's a clear benefit
+- If OpenClaw breaks or is abandoned, your Docker images still work — you just can't upgrade
+- At 20+ clients, consider contributing to OpenClaw (fixes, features) to build influence in the project
+
+### Risk 6: Churn → make it indispensable in 30 days
+
+- **Appointment reminders** (patients miss appointments without them → immediate dependency)
+- **Lead capture** (business owner sees leads coming in that would have been lost → hard to give up)
+- **Weekly value reports** ("Your agent handled 284 enquiries this month")
+- **Annual contracts** with 10% discount for commitment
+
+### Risk 7: Compliance liability → terms + insurance + testing
+
+- **Terms of service**: "Pelican AI provides AI configuration services. The client is responsible for ensuring agent outputs comply with their regulatory obligations. Pelican AI does not provide medical, financial, or legal advice."
+- **Professional indemnity insurance**: Research and obtain before taking regulated clients (financial planners, medical practices). Cost: ~$500-1,500/year for a sole operator.
+- **Compliance testing**: Before going live, send 50 adversarial prompts designed to extract specific advice. Every one must be deflected correctly.
+- **Monthly spot-checks**: For regulated clients, review 10 random conversations per month for compliance.
+
+### Risk 8: No moat → build vertical expertise
+
+Your moat is depth, not breadth:
+- Deep knowledge of dental practice workflows → "AI Receptionist for Dental"
+- Deep knowledge of financial planning compliance → "AI Lead Qualifier for Financial Planners"
+- Industry-specific skills library (Cliniko, Xero, etc.)
+- Case studies with real numbers ("Rural Skin reduced admin time by 12 hours/week")
+
+Generalist competitors can't match vertical expertise. Pick 2-3 industries and go deep.
+
+### Risk 9: No sales strategy → defined above
+
+See "Go-To-Market Strategy" section. Key numbers: talk to 20 businesses → 5 trials → 2-3 paying clients in first 4 weeks.
+
+### Risk 10: Premature Supabase → defer
+
+Use OpenClaw's built-in memory and `fly logs` for your first 5 clients. Add Supabase when you specifically need:
+- Cross-client cost analytics
+- Centralised conversation logging
+- A client-facing dashboard
+
+That's probably at 5-10 clients, not at 1-2.
 
 ---
 
