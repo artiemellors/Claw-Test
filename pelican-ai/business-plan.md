@@ -20,7 +20,7 @@ The underlying technology is OpenClaw (open source, MIT licensed), deployed via 
 3. **90% of customization is configuration, not code** — system prompts, agent setup, cron jobs, channel config
 4. **Clients can't do this themselves** — the setup process (SSH, Docker, API keys, prompt engineering) is too technical for most SMBs
 5. **Recurring revenue** — infrastructure + support = monthly retainer
-6. **Low marginal cost** — each client costs ~$15-35/mo to run, you charge $150-500/mo
+6. **Low marginal cost** — each client costs ~$16-65/mo to serve, you charge $500-1,500/mo
 
 ---
 
@@ -49,9 +49,10 @@ Fly.io (your account)
 
 Each client gets:
 - Their own Fly.io app (isolated data, secrets, config)
-- A Telegram bot (or WhatsApp Business API connection)
+- Customer-facing channels (WhatsApp Business API, website chat widget)
+- Internal channel for the business owner (Telegram)
 - Custom system prompt tailored to their business
-- Optional: multiple agents, cron jobs, memory, email integration
+- Memory, agents, cron jobs, and approvals configured to their needs
 
 ### Deployment Repo
 
@@ -180,48 +181,35 @@ Sarah checks in:
 
 ---
 
-## Features to Offer Clients
+## Features (All Tiers)
 
-### Included in All Tiers
+Every client gets the full OpenClaw capability set. Tiers differ on scope (channels, integrations, support), not features.
 
 | Feature | What it does |
 |---------|-------------|
-| Custom AI agent | Tailored to their business with specific knowledge and rules |
-| Telegram/WhatsApp channel | Customers or staff message the bot |
+| Custom AI agent(s) | Tailored to their business with specific knowledge and rules |
+| Memory | Agent remembers preferences, history, and context over time |
+| Proactive messaging | Agent initiates messages (reminders, follow-ups, updates) |
+| Cron/scheduling | Morning briefings, weekly summaries, automated reminders |
 | Message debouncing | Batches rapid messages into one response |
+| Execution approvals | Human sign-off before the agent sends emails or takes actions |
+| Quiet hours | Don't send messages outside business hours |
+| Allowlisting | Control who can message the bot |
+| Polls | Native polls for customer feedback or staff voting |
 | Auto-restart | Gateway recovers from crashes automatically |
 | Health monitoring | Automatic health checks every 30 seconds |
 | HTTPS | Secure by default on Fly.io |
+| Conversation logging | Every interaction logged for cost tracking and compliance |
 
-### Professional Tier Add-ons
+### What tiers unlock (scope, not features)
 
-| Feature | What it does |
-|---------|-------------|
-| Proactive messaging | Agent initiates messages (reminders, follow-ups, updates) |
-| Memory | Agent remembers preferences, history, and context over time |
-| Cron/scheduling | Morning briefings, weekly summaries, automated reminders |
-| Allowlisting | Control who can message the bot |
-| Quiet hours | Don't send messages outside business hours |
-
-### Business Tier Add-ons
-
-| Feature | What it does |
-|---------|-------------|
-| Multi-agent | Separate agents for reception, email, admin |
-| Email integration | Read, triage, and draft replies via Gmail |
-| Execution approvals | Require human sign-off before sending emails or taking actions |
-| Polls | Native polls for customer feedback or staff voting |
-| Send policies | Control where the agent can and can't send messages |
-| Hooks | Custom actions on message events (logging, CRM updates) |
-
-### Enterprise Add-ons
-
-| Feature | What it does |
-|---------|-------------|
-| Canvas dashboards | Live HTML dashboards on iPad/Mac (reception display, queue board) |
-| Browser automation | Agent can operate websites on behalf of the client |
-| Custom skills | Integrations with client-specific software (CRM, booking systems) |
-| Custom extensions | TypeScript plugins for deep integrations |
+| | Starter | Growth | Scale |
+|---|---------|--------|-------|
+| Channels | 1 | Up to 3 | Unlimited |
+| Premium models (Sonnet) | No | Email agent only | Any agent |
+| Custom integrations | Built-in skills only | 1 custom skill | Multiple |
+| Support | Email, 48hr | Email, 24hr + weekly check-in | Priority, same-day + monthly review |
+| Compliance | Standard logging | Standard | Extended (7-year retention, audit trail) |
 
 ---
 
@@ -401,20 +389,6 @@ If a client consistently exceeds cost targets, it's an upsell conversation, not 
 
 ---
 
-## AI Model Selection Per Use Case
-
-| Model | Cost | Quality | Best for |
-|-------|------|---------|----------|
-| Claude Haiku 4.5 | ~$0.20/1M tokens | Very good | Reception, FAQ, booking, simple tasks |
-| Claude Sonnet 4.6 | ~$1/1M tokens | Excellent | Email drafting, complex reasoning, nuanced responses |
-| Claude Opus 4.6 | ~$5/1M tokens | Best | Overkill for most use cases |
-| GPT-5 mini | ~$0.25/1M tokens | Very good | Alternative to Haiku |
-| Gemini 2.5 Flash | ~$0.10/1M tokens | Good | Budget option |
-
-**Recommendation**: Haiku for most agents, Sonnet for email/drafting agents. Don't use Opus unless the client has complex reasoning needs.
-
-For tool calling (which agents rely on heavily), Claude Haiku and Sonnet are best-in-class. Stick with Anthropic models for reliability.
-
 ---
 
 ## Custom Skills (How to Extend Without Code Changes)
@@ -511,10 +485,10 @@ Ask the client:
 
 | Phase | Clients | How you manage | Revenue |
 |-------|---------|---------------|---------|
-| Phase 1 | 1-5 | Manual setup, Fly.io dashboard | $750-2,500/mo |
-| Phase 2 | 5-15 | Deploy scripts, skill library growing | $2,500-7,500/mo |
-| Phase 3 | 15-30 | Your own management dashboard, hire support | $7,500-15,000/mo |
-| Phase 4 | 30+ | Productized service, templated verticals | $15,000+/mo |
+| Phase 1 | 1-5 | Manual setup, Fly.io dashboard | $2,500-5,000/mo |
+| Phase 2 | 5-15 | Deploy scripts, skill library growing | $5,000-12,000/mo |
+| Phase 3 | 15-30 | Your own management dashboard, hire support | $12,000-25,000/mo |
+| Phase 4 | 30+ | Productized service, templated verticals | $25,000+/mo |
 
 ### Phase 1: Manual (now)
 
@@ -551,10 +525,12 @@ Ask the client:
 1. **Use OpenClaw as npm package, don't fork** — get free updates, focus on service not code
 2. **Fly.io for hosting** — cheapest always-on option, already configured in OpenClaw, scriptable
 3. **One Fly.io account, one app per client** — isolated data, independent scaling, simple billing
-4. **Start with Telegram** — free, instant setup, move to WhatsApp Business API when needed
-5. **Claude Haiku as default model** — best cost/quality for tool-heavy agent work
-6. **Skills over code** — markdown skill files for most integrations, fork only as last resort
-7. **Service business first** — find clients, solve problems, build product later
+4. **Customers on WhatsApp/web chat, staff on Telegram** — meet customers where they are, staff gets a free internal tool
+5. **Qwen 3.6 Plus as default model** — #1 MCPMark tool calling, 1M context, $0.33/$1.95 per 1M tokens; Haiku as fallback
+6. **Gate cost drivers (model, session length), give everything else** — memory, agents, subagents, cron all enabled on every tier
+7. **Skills over code** — markdown skill files for most integrations, fork only as last resort
+8. **Service business first** — find clients, solve problems, build product later
+9. **Price against the admin hire** ($1,200-1,400/mo), not the AI cost ($16-65/mo)
 
 ---
 
@@ -971,11 +947,11 @@ Long conversations burn tokens. At 320 messages, MiniMax hit context overflow (w
 ```bash
 # Session limits per tier
 # Starter
-openclaw config set session.maxMessages 100
+openclaw config set session.maxMessages 150
 openclaw config set session.reset.mode daily
 
 # Growth
-openclaw config set session.maxMessages 200
+openclaw config set session.maxMessages 300
 openclaw config set session.reset.mode daily
 
 # Scale
@@ -1038,25 +1014,16 @@ openclaw cron add \
   --message "Check Supabase for this week's API costs across all clients. Alert me if any client exceeds $50 in AI costs this month."
 ```
 
-#### Client-Facing Usage Limits
-
-For clients on lower tiers, consider soft limits:
-
-| Tier | Monthly message limit | Overage |
-|------|----------------------|---------|
-| Starter ($150/mo) | 500 messages | Notify you, discuss upgrade |
-| Professional ($300/mo) | 2,000 messages | Notify you |
-| Business ($500/mo) | Unlimited | Monitor only |
-
 ### Cost Optimization Checklist Per Client
 
-1. **Default model**: Haiku (not Sonnet) unless they need writing quality
-2. **Subagents**: MiniMax or Haiku for worker tasks
+1. **Default model**: Qwen 3.6 Plus or Haiku (not Sonnet) unless they need writing quality
+2. **Subagents**: Route to DeepSeek V3.2 or Haiku for worker tasks
 3. **Cron jobs**: weekday only, minimum frequency needed
-4. **Session rotation**: enable auto-compaction, consider max message limits
-5. **System prompt**: precise about when to use tools vs answer directly
-6. **Skills**: return concise results, not raw API dumps
-7. **Monitor**: weekly cost check, alert on anomalies
+4. **Session management**: daily reset, per-tier message caps (150/300/500)
+5. **System prompt**: precise about when to use tools vs answer from knowledge
+6. **Skills**: return concise results, not verbose API dumps
+7. **Monitor**: weekly cost check via Supabase, alert on anomalies
+8. **Debouncing**: 2-3s per channel to batch rapid messages
 
 ### Example Cost Breakdown: Real Estate Client (Growth Tier)
 
@@ -1238,7 +1205,7 @@ Long conversations burn tokens. OpenClaw auto-compacts when nearing the context 
 
 | Practice | Config | Why |
 |----------|--------|-----|
-| Enable memory for all professional+ clients | `memorySearch.enabled: true` | Dramatically improves consistency |
+| Enable memory for all clients | `memorySearch.enabled: true` | Dramatically improves consistency, costs ~$1-2/mo |
 | Use hybrid search | `query.hybrid.enabled: true` | Combines keyword + semantic matching |
 | Set maxResults to 5-15 | `query.maxResults: 10` | Balance between recall and prompt bloat |
 | Set reserve tokens to 20-30K | `compaction.reserveTokensFloor: 20000` | Prevents context overflow crashes |
@@ -1608,8 +1575,8 @@ Connects to any OpenTelemetry-compatible backend (Datadog, Grafana, etc.).
 - [ ] AI provider API key set as secret
 - [ ] Channel token set as secret (Telegram/WhatsApp)
 - [ ] System prompt configured
-- [ ] Agent model set (Haiku default)
-- [ ] Memory enabled (professional tier+)
+- [ ] Agent model set (Qwen 3.6 Plus default, or per Preset A/B/C/D)
+- [ ] Memory enabled (all tiers)
 - [ ] Session reset mode set to daily
 - [ ] Session maintenance configured (30-day prune, 500 max entries)
 - [ ] Message debouncing configured per channel
@@ -1653,6 +1620,139 @@ Connects to any OpenTelemetry-compatible backend (Datadog, Grafana, etc.).
 - **OpenClaw** — open source AI gateway (MIT license)
 - **Fly.io** — container hosting platform
 - **Docker** — containerization
+- **Supabase** — centralized memory, conversation logging, cost tracking
 - **Claude Code** — for writing system prompts, skills, and any code changes
-- **Telegram** — primary messaging channel
-- **Anthropic Claude** — AI model provider (Haiku for most, Sonnet for complex tasks)
+- **WhatsApp Business API** — customer-facing messaging channel
+- **Telegram** — internal channel for business owner/staff
+- **Qwen 3.6 Plus** — default agent model (best tool calling, 1M context)
+- **Claude Sonnet 4.6** — email drafting and premium writing tasks
+- **Claude Haiku 4.5** — fallback model, proven reliable
+
+---
+
+## Critical Review & Risk Analysis
+
+### What's strong about this plan
+
+1. **Margins are real.** 94-98% gross margin at $16-65 cost to serve is genuinely exceptional. Even if costs double, you're still at 85%+.
+2. **The value anchor works.** Comparing to a $1,200-1,400/mo admin hire is the right frame. $500/mo for 24/7 coverage is an easy sell.
+3. **The build constraints are honest.** Gating cost drivers (model choice, session length) instead of features is the right call. It makes every tier good.
+4. **OpenClaw does the hard work.** You're not building AI infrastructure — you're configuring it. That's a massive headstart.
+5. **The skill library compounds.** Each client adds skills that help the next client. This is a genuine competitive moat over time.
+
+### What's weak or missing
+
+#### 1. You have zero paying clients
+
+Everything in this plan is theoretical. The pricing, the margins, the model recommendations — none of it has been tested with a real client paying real money. The single biggest risk is that you spend months perfecting the plan and never sell anything.
+
+**Fix:** Stop planning. Get one client this week. Offer a free 2-week trial. Learn what breaks.
+
+#### 2. WhatsApp Business API is not trivial to set up
+
+The plan treats WhatsApp Business API as "apply and connect." In reality:
+- Meta's approval process takes days to weeks
+- You need a verified Facebook Business account
+- The client needs to verify their business (ABN, domain, etc.)
+- Message templates require approval for proactive outbound
+- Pricing is per-conversation, not per-message, with 24hr conversation windows
+- Personal WhatsApp pairing (what you did) doesn't scale — each client needs their own Business API setup
+
+**Fix:** Start every client on website chat widget (zero friction, zero cost, zero approval process). Add WhatsApp Business only when the client specifically needs it and is willing to go through Meta's process.
+
+#### 3. Qwen 3.6 Plus is unproven in your stack
+
+The benchmark data is compelling (MCPMark #1, 96.5% function calling), but you haven't tested it with OpenClaw in production. Benchmarks don't capture:
+- How it handles OpenClaw's specific tool schemas
+- Latency from Australia to Qwen's API endpoints
+- Rate limits and reliability under sustained load
+- Edge cases in system prompt following
+
+**Fix:** Before recommending Qwen as default, run it as your personal agent for 2 weeks. Track tool call success rate, latency, and failures. Have Haiku as the proven fallback. Don't switch a client's model without testing it yourself first.
+
+#### 4. Single point of failure: you
+
+This plan has you doing sales, setup, prompt engineering, monitoring, support, billing, and client management. At 5 clients, that's manageable. At 15, you're drowning.
+
+**Fix:** The plan mentions hiring at Phase 3 (15-30 clients). That's too late. At 10 clients you'll be spending 10-20 hours/month on support alone. Plan to either:
+- Automate monitoring and alerting early (Supabase cost alerts, health check scripts)
+- Hire a part-time technical assistant at 8-10 clients
+- Limit yourself to 10 clients until you have help
+
+#### 5. OpenClaw is someone else's project
+
+You're building a business on top of an open source project you don't control. Risks:
+- **Breaking changes**: An OpenClaw update could break your client deployments
+- **Abandonment**: If the project loses its maintainers, you're stuck
+- **Licensing change**: MIT today doesn't mean MIT forever (though this is rare)
+- **Feature gaps**: If you need something OpenClaw doesn't do, you either wait or fork
+
+**Mitigations already in place:** Docker pins to a known version, `npm install -g openclaw@2026.4.9`. You can test updates before rolling out. But this is still a structural dependency.
+
+**Fix:** Pin OpenClaw versions in your Dockerfile. Test every update on your own instance before deploying to clients. Keep a "known good version" and only upgrade when there's a reason.
+
+#### 6. Churn risk is high for service businesses
+
+SMBs churn. A dental practice that pays $500/mo for 6 months then decides "we don't really use it" is normal. At 95% margin, churn hurts revenue more than it hurts costs — but it still hurts.
+
+**Fix:**
+- Make the agent indispensable in the first 30 days (appointment reminders, follow-ups — things they'll miss when they leave)
+- Track and share value delivered: "Your agent handled 347 enquiries this month, saving an estimated 12 hours of admin time"
+- Quarterly business reviews showing ROI
+- Annual contracts with a small discount (10%) for commitment
+
+#### 7. Compliance liability is underestimated
+
+The Talbot Advisory section mentions AFSL compliance, but who's actually responsible if the agent says something it shouldn't? If a financial planning bot accidentally gives specific advice, the client is liable — but they'll blame you. If a medical bot gives diagnostic information, same problem.
+
+**Fix:**
+- Terms of service that clearly state Pelican AI is not responsible for agent output
+- Professional indemnity insurance (look into it before taking regulated clients)
+- Compliance testing in the onboarding process (send 50 adversarial prompts that try to extract specific advice)
+- Monthly compliance spot-checks for regulated clients
+
+#### 8. No competitive moat beyond execution speed
+
+If this works, someone with more resources can copy it. OpenClaw is open source, Fly.io is public, the model recommendations are public knowledge. What stops a larger agency from doing this?
+
+**Moat candidates:**
+- **Skill library** (grows over time, hard to replicate)
+- **Vertical expertise** (deep knowledge of dental practices, financial planning, etc.)
+- **Client relationships** (trust is earned, not copied)
+- **Speed** (you're here first, in this market, with these clients)
+
+None of these are defensible in the traditional sense. This is a service business — the moat is always execution, not technology.
+
+#### 9. The plan doesn't address sales
+
+How do you actually get clients? The plan says "find first client" and "pitch the 2-week trial." But:
+- Where do you find them? (Cold outreach? Referrals? LinkedIn? Local networking?)
+- What's the sales cycle? (SMBs are notoriously slow to buy)
+- What's your conversion rate assumption?
+- How many conversations does it take to get one client?
+
+**Fix:** Add a concrete go-to-market section:
+- Target: businesses you personally know or can get a warm intro to
+- Channel: LinkedIn DMs, local business meetups, existing network
+- Pitch: "I'll build you an AI assistant for free for 2 weeks. If it saves you time, $500/mo."
+- Volume: Talk to 20 businesses to get 3-5 trials to get 1-2 paying clients
+- Timeline: First paying client within 4 weeks
+
+#### 10. Supabase adds complexity you may not need yet
+
+The plan includes a full Supabase schema (memory, conversation logging, cost tracking, client config) — but for your first 3-5 clients, OpenClaw's built-in memory and Fly.io logs might be enough. Adding Supabase is more infrastructure to manage, more things to break, and more setup time per client.
+
+**Fix:** Defer Supabase until you have 5+ clients or until you specifically need cross-client analytics. OpenClaw's built-in memory is "always on" in your config already. Use `fly logs` for monitoring. Add Supabase when the pain of not having it outweighs the effort of setting it up.
+
+### Honest Assessment
+
+This is a well-researched, technically thorough plan with strong fundamentals. The pricing is anchored correctly, the architecture is sound, the cost model is favourable, and the technical detail is deep.
+
+**But it's a plan, not a business.** The gap between this document and revenue is: one client saying yes, paying you money, and getting value from the agent you build them. Everything else is speculative until that happens.
+
+**Priority order:**
+1. Get one paying client (this week)
+2. Deploy on Fly.io (validated, not on a flaky droplet)
+3. Prove the value (track hours saved, enquiries handled)
+4. Get a second client via referral
+5. Then refine the plan based on what you actually learned
