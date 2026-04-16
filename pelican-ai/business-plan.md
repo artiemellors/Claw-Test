@@ -463,6 +463,309 @@ Ask the client:
 
 ---
 
+## Harnessing Supabase for Enhanced Memory
+
+OpenClaw's built-in memory (file-backed + LanceDB) works for single-user personal setups, but for a multi-client business at scale, Supabase provides a more powerful, centralized, and queryable memory layer.
+
+### Why Supabase Over Built-in Memory
+
+| Built-in memory | Supabase memory |
+|-----------------|-----------------|
+| Files on disk per instance | Centralized database across all clients |
+| No cross-client analytics | Query patterns across your entire client base |
+| Lost if volume is deleted | Durable, backed-up PostgreSQL |
+| Basic text search | Semantic vector search via pgvector |
+| No structure | Typed, categorized, searchable |
+| Per-instance only | Accessible from dashboard, skills, external tools |
+
+### Schema Design
+
+```sql
+-- Core memory table
+create table agent_memory (
+    id uuid primary key default gen_random_uuid(),
+    client_id text not null,           -- maps to Fly.io app name
+    agent_id text not null,            -- which agent stored this
+    category text not null,            -- 'preference', 'injury', 'equipment',
+                                       -- 'contact', 'business_rule', 'feedback'
+    content text not null,             -- the actual memory
+    source text,                       -- 'conversation', 'manual', 'cron'
+    embedding vector(1536),            -- for semantic search (OpenAI embeddings)
+    metadata jsonb default '{}',       -- flexible extra data
+    created_at timestamptz default now(),
+    updated_at timestamptz default now(),
+    expires_at timestamptz             -- optional TTL for temporary memories
+);
+
+-- Index for fast vector similarity search
+create index on agent_memory using ivfflat (embedding vector_cosine_ops)
+    with (lists = 100);
+
+-- Index for client lookups
+create index on agent_memory (client_id, category);
+
+-- Conversation log table (for analytics and replay)
+create table conversation_log (
+    id uuid primary key default gen_random_uuid(),
+    client_id text not null,
+    agent_id text not null,
+    session_key text,
+    direction text not null,           -- 'inbound' or 'outbound'
+    channel text not null,             -- 'telegram', 'whatsapp'
+    sender text,                       -- phone number or username
+    content text not null,
+    tokens_used int,
+    model text,                        -- which model handled this
+    cost_estimate numeric(10,6),       -- estimated API cost
+    created_at timestamptz default now()
+);
+
+-- Index for cost tracking
+create index on conversation_log (client_id, created_at);
+
+-- Client config table (backup/reference for what's deployed)
+create table client_config (
+    client_id text primary key,
+    fly_app_name text not null,
+    region text,
+    tier text default 'starter',       -- 'starter', 'professional', 'business'
+    primary_model text,
+    system_prompt text,
+    channels jsonb default '[]',
+    agents jsonb default '[]',
+    monthly_cost numeric(10,2),
+    status text default 'active',      -- 'active', 'paused', 'churned'
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+```
+
+### How It Integrates with OpenClaw
+
+Build a custom skill that the agent uses to read/write Supabase:
+
+```markdown
+# Memory Skill (skills/supabase-memory/SKILL.md)
+
+Store and recall important information about this client's business.
+
+## Store a memory
+curl -s -X POST "$SUPABASE_URL/rest/v1/agent_memory" \
+  -H "apikey: $SUPABASE_KEY" \
+  -H "Authorization: Bearer $SUPABASE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "$CLIENT_ID", "agent_id": "main",
+       "category": "$CATEGORY", "content": "$CONTENT"}'
+
+## Search memories
+curl -s "$SUPABASE_URL/rest/v1/agent_memory?client_id=eq.$CLIENT_ID&content=ilike.*$QUERY*" \
+  -H "apikey: $SUPABASE_KEY" \
+  -H "Authorization: Bearer $SUPABASE_KEY"
+```
+
+### What This Enables
+
+1. **Cross-session memory** — agent remembers "this client prefers morning appointments" across conversations
+2. **Business intelligence** — query Supabase to see which clients get the most messages, what topics come up, which agents are busiest
+3. **Cost tracking** — log every API call with token counts and cost estimates
+4. **Client dashboard** — build a web view showing each client's memory, conversation history, and costs
+5. **Memory portability** — if a client moves to a new instance, their memory comes with them
+6. **Deduplication** — vector similarity search prevents storing the same fact twice
+7. **Expiring memories** — temporary context ("office closed this week") auto-deletes via `expires_at`
+
+### Implementation Path
+
+1. Create a Supabase project (free tier handles 10-20 clients easily)
+2. Run the schema SQL above
+3. Write the `supabase-memory` skill
+4. Add `SUPABASE_URL`, `SUPABASE_KEY`, and `CLIENT_ID` as secrets per Fly.io app
+5. Agent automatically stores and recalls memories via the skill
+
+### Cost
+
+- Supabase free tier: 500MB database, 50K monthly active users
+- Supabase Pro: $25/mo for 8GB, unlimited API calls
+- pgvector embeddings: ~$0.0001 per embedding (OpenAI ada-002)
+
+At $25/mo for Supabase Pro, it covers all your clients' memory needs.
+
+---
+
+## Managing Agentic Costs
+
+Cost management is critical — AI API costs can spiral if not controlled. Here's a framework for keeping costs predictable while maintaining quality.
+
+### Cost-Efficient Architecture
+
+#### Model Selection by Role
+
+The single biggest cost lever. Don't use the same model for everything:
+
+| Role | Recommended Model | Cost (per 1M tokens) | Why |
+|------|-------------------|---------------------|-----|
+| Conversation / routing | Claude Haiku 4.5 | ~$0.25 input / $1.25 output | Fast, cheap, great tool calling |
+| Email drafting / analysis | Claude Sonnet 4.6 | ~$3 input / $15 output | Better writing quality |
+| Simple actions (subagent) | MiniMax M2.7 | ~$0.10 input / $0.30 output | Cheapest for bulk tasks |
+| Summarization / compaction | Gemini 2.5 Flash | ~$0.075 input / $0.30 output | Cheapest mainstream option |
+| Complex reasoning (rare) | Claude Sonnet 4.6 | ~$3 input / $15 output | Only when needed |
+
+#### Multi-Model Agent Configuration
+
+```bash
+# Main agent: Haiku for conversation (cheap, reliable tool calling)
+openclaw config set agent.model anthropic/claude-haiku-4-5
+
+# Email agent: Sonnet for quality drafting
+openclaw agents add email-assistant \
+  --model anthropic/claude-sonnet-4-6
+
+# Worker agent: MiniMax for bulk/simple tasks
+openclaw agents add worker \
+  --model minimax/MiniMax-M2.7
+
+# Admin agent: Haiku for summaries and reminders
+openclaw agents add admin \
+  --model anthropic/claude-haiku-4-5
+```
+
+**Cost impact of model selection:**
+
+| Setup | Typical monthly AI cost |
+|-------|------------------------|
+| Everything on Sonnet | $50-150/client |
+| Everything on Haiku | $10-30/client |
+| Haiku + Sonnet for email only | $15-40/client |
+| Haiku + MiniMax workers | $8-20/client |
+
+#### Context Window Management
+
+Long conversations burn tokens. At 320 messages, MiniMax hit context overflow (we experienced this). Strategies:
+
+1. **Session rotation** — start fresh sessions periodically instead of one infinite conversation
+2. **Auto-compaction** — OpenClaw compacts automatically, but smaller context models hit this sooner
+3. **Use Haiku** — 200K token context window vs smaller windows on budget models
+4. **Separate sessions per topic** — booking queries don't need the email history
+
+```bash
+# Configure session limits
+openclaw config set session.maxMessages 100
+```
+
+#### Cron Job Cost Control
+
+Scheduled tasks (briefings, summaries) run whether the client is paying attention or not. Control this:
+
+| Approach | Monthly cron cost |
+|----------|-------------------|
+| Hourly briefing (24/day) | $15-30 |
+| Morning + evening (2/day) | $2-5 |
+| Weekday morning only (5/week) | $1-2 |
+| Weekly summary (1/week) | $0.25-0.50 |
+
+**Rule**: start with fewer cron jobs, add more only when the client asks.
+
+#### Tool Call Efficiency
+
+Each tool call costs tokens (the tool description, the call, the response). Minimize unnecessary tool use:
+
+1. **System prompt precision** — tell the agent exactly when to use tools vs answer from knowledge
+2. **Batch tool calls** — "check email and calendar" in one turn, not two separate interactions
+3. **Skill design** — write skills that return concise results, not verbose API dumps
+
+### Cost Tracking and Alerts
+
+#### Per-Client Cost Monitoring
+
+Log every API call to Supabase (see memory section above):
+
+```sql
+-- Monthly cost by client
+select
+    client_id,
+    sum(cost_estimate) as monthly_cost,
+    count(*) as total_messages,
+    sum(tokens_used) as total_tokens
+from conversation_log
+where created_at >= date_trunc('month', now())
+group by client_id
+order by monthly_cost desc;
+```
+
+#### Cost Alerts
+
+Set up a cron job that checks costs weekly:
+
+```bash
+openclaw cron add \
+  --name "Cost Alert" \
+  --cron "0 9 * * 1" \
+  --tz "Australia/Melbourne" \
+  --agent admin \
+  --session isolated \
+  --message "Check Supabase for this week's API costs across all clients. Alert me if any client exceeds $50 in AI costs this month."
+```
+
+#### Client-Facing Usage Limits
+
+For clients on lower tiers, consider soft limits:
+
+| Tier | Monthly message limit | Overage |
+|------|----------------------|---------|
+| Starter ($150/mo) | 500 messages | Notify you, discuss upgrade |
+| Professional ($300/mo) | 2,000 messages | Notify you |
+| Business ($500/mo) | Unlimited | Monitor only |
+
+### Cost Optimization Checklist Per Client
+
+1. **Default model**: Haiku (not Sonnet) unless they need writing quality
+2. **Subagents**: MiniMax or Haiku for worker tasks
+3. **Cron jobs**: weekday only, minimum frequency needed
+4. **Session rotation**: enable auto-compaction, consider max message limits
+5. **System prompt**: precise about when to use tools vs answer directly
+6. **Skills**: return concise results, not raw API dumps
+7. **Monitor**: weekly cost check, alert on anomalies
+
+### Example Cost Breakdown: Real Estate Client (Professional Tier)
+
+```
+Monthly AI costs:
+  Lead manager (Haiku, ~1500 msgs)     $8
+  Email assistant (Sonnet, ~200 msgs)  $12
+  Admin cron jobs (Haiku, 22 runs)     $2
+  Subagent worker tasks (MiniMax)      $3
+                                       ----
+  Total AI cost:                       $25/mo
+
+Infrastructure:
+  Fly.io:                              $10/mo
+  Supabase (shared):                   $2/mo (prorated)
+                                       ----
+  Total infrastructure:                $12/mo
+
+Total cost:                            $37/mo
+Client pays:                           $300/mo
+Margin:                                $263/mo (88%)
+```
+
+### Scaling Cost Efficiency
+
+As you add clients, costs get better:
+
+| Clients | Total infra | Total AI | Total cost | Total revenue | Margin |
+|---------|-------------|----------|------------|---------------|--------|
+| 5 | $50/mo | $100/mo | $150/mo | $1,250/mo | 88% |
+| 10 | $100/mo | $200/mo | $300/mo | $2,500/mo | 88% |
+| 20 | $200/mo | $350/mo | $550/mo | $5,000/mo | 89% |
+| 50 | $500/mo | $800/mo | $1,300/mo | $12,500/mo | 90% |
+
+Margins improve because:
+- Supabase cost is shared across all clients
+- Fly.io volume discounts kick in
+- You get faster at setup (less time per client)
+- Skill library is reusable across similar clients
+
+---
+
 ## Next Steps
 
 1. Create GitHub repo `agent-deployments` (private)
