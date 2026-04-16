@@ -597,17 +597,115 @@ Cost management is critical — AI API costs can spiral if not controlled. Here'
 
 ### Cost-Efficient Architecture
 
-#### Model Selection by Role
+#### Complete Model Landscape
+
+OpenClaw supports 30+ AI providers. Here's every viable model for agent work, organized by cost tier.
+
+##### Tier 1 — Premium (best quality, highest cost)
+
+| Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
+|----------|-------|---------|-------------|-----------------------------------|----------|
+| Anthropic | claude-opus-4-6 | 256K | Excellent | ~$15 / $75 | Complex analysis, critical decisions |
+| OpenAI | gpt-5.4-pro | 1.05M | Excellent | ~$10 / $40 | Deep reasoning, long context |
+| xAI | grok-4 | 256K | Good | ~$3 / $15 | Reasoning-heavy tasks |
+| Google | gemini-3.1-pro | 1M+ | Good | ~$3.50 / $10.50 | Long document analysis |
+
+**Use for**: Tasks where mistakes are costly (legal drafts, financial analysis). Rarely needed for most SMB clients.
+
+##### Tier 2 — Mid-range (great quality, moderate cost)
+
+| Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
+|----------|-------|---------|-------------|-----------------------------------|----------|
+| Anthropic | claude-sonnet-4-6 | 200K | Excellent | ~$3 / $15 | Email drafting, nuanced conversation |
+| OpenAI | gpt-5.4 | 1.05M | Excellent | ~$2.50 / $10 | General intelligence, long context |
+| Mistral | mistral-large-latest | 262K | Good | ~$2 / $6 | European data sovereignty |
+| xAI | grok-4-fast | 2M | Good | ~$0.20 / $0.50 | Massive context window, multimodal |
+| Moonshot | kimi-k2.5 | 262K | Good | ~$1.50 / $5 | Large context, Chinese + English |
+
+**Use for**: Email drafting agents, complex customer interactions, analysis tasks.
+
+##### Tier 3 — Value (good quality, low cost) — RECOMMENDED DEFAULT
+
+| Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
+|----------|-------|---------|-------------|-----------------------------------|----------|
+| Anthropic | claude-haiku-4-5 | 200K | Very good | ~$0.25 / $1.25 | **Best default for agents** |
+| OpenAI | gpt-5.4-mini | 1.05M | Very good | ~$0.15 / $0.60 | Cheap OpenAI alternative |
+| Mistral | mistral-small-latest | 128K | Good | ~$0.10 / $0.30 | European hosting, fast |
+| Mistral | magistral-small | 128K | Good | ~$0.10 / $0.30 | Reasoning-capable, cheap |
+
+**Use for**: Main conversation agent, reception bots, FAQ handling, routing, most tool calling tasks.
+
+##### Tier 4 — Budget (acceptable quality, minimal cost)
+
+| Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
+|----------|-------|---------|-------------|-----------------------------------|----------|
+| Google | gemini-3.1-flash | 1M+ | Decent | ~$0.075 / $0.30 | Summarization, simple tasks |
+| OpenAI | gpt-5.4-nano | 1.05M | Decent | ~$0.05 / $0.20 | Cheapest OpenAI, basic tasks |
+| DeepSeek | deepseek-chat | 131K | Decent | ~$0.07 / $0.28 | Budget general purpose |
+| MiniMax | MiniMax-M2.7 | 131K | Mediocre | ~$0.10 / $0.30 | Bulk simple tasks |
+
+**Use for**: Subagent workers, summarization, simple automation, cron job tasks.
+
+##### Tier 5 — Reasoning Specialists
+
+| Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
+|----------|-------|---------|-------------|-----------------------------------|----------|
+| DeepSeek | deepseek-reasoner | 131K | Decent | ~$0.55 / $2.19 | Step-by-step problem solving |
+| OpenAI | gpt-5.4 (with reasoning) | 1.05M | Excellent | ~$2.50 / $10 | Complex multi-step tasks |
+| Moonshot | kimi-k2-thinking | 262K | Good | ~$1 / $4 | Reasoning with large context |
+| Mistral | magistral-small | 128K | Good | ~$0.10 / $0.30 | Budget reasoning |
+
+**Use for**: Complex analysis, multi-step planning, debugging, financial calculations.
+
+##### Tier 6 — Self-Hosted / Local (zero API cost)
+
+| Provider | Model | Context | Tool Calling | Cost | Best for |
+|----------|-------|---------|-------------|------|----------|
+| Ollama | llama-3.3-70b | 131K | Decent | Hardware only | Privacy-sensitive clients |
+| Ollama | qwen-2.5-72b | 128K | Decent | Hardware only | Chinese + English, local |
+| Ollama | mistral-nemo | 128K | Decent | Hardware only | Small, fast, local |
+| vLLM | Any supported model | Varies | Varies | Hardware only | High-throughput self-hosted |
+| SGLang | Any supported model | Varies | Varies | Hardware only | Optimized inference |
+
+**Use for**: Clients with strict data sovereignty requirements, or to eliminate API costs entirely (requires powerful server: 80GB+ VRAM for 70B models).
+
+##### Tier 7 — Aggregators (access multiple models via one API key)
+
+| Provider | What it offers | Cost | Best for |
+|----------|---------------|------|----------|
+| OpenRouter | 200+ models, single API key | Model-dependent + markup | Testing models, fallback routing |
+| Together | Llama, DeepSeek, GLM, Kimi | Model-dependent | Open-source model access |
+| Amazon Bedrock | Claude, Llama, Mistral | Model-dependent + AWS markup | Enterprise AWS clients |
+| Cloudflare AI Gateway | Proxy to any provider | Provider cost + free proxy | Caching, rate limiting, analytics |
+| Vercel AI Gateway | Proxy to any provider | Provider cost + free proxy | Edge deployment |
+
+**Use for**: Clients who want model flexibility, or as a fallback layer when primary provider is down.
+
+##### China/Asia-Specific Providers
+
+| Provider | Key Model | Context | Tool Calling | Best for |
+|----------|-----------|---------|-------------|----------|
+| Qwen (Alibaba) | qwen-coder, qwen-vision | 128K | Good | Chinese market, multimodal |
+| Qianfan (Baidu) | ernie-5.0-thinking | 119K | Good | Chinese market, reasoning |
+| Volcengine (ByteDance) | Doubao variants | Varies | Decent | Chinese market |
+| MiniMax | MiniMax-VL-01 | 204K | Mediocre | Vision + text, Chinese market |
+| Moonshot (Kimi) | kimi-k2.5 | 262K | Good | Large context, bilingual |
+
+#### Model Selection by Agent Role
 
 The single biggest cost lever. Don't use the same model for everything:
 
-| Role | Recommended Model | Cost (per 1M tokens) | Why |
-|------|-------------------|---------------------|-----|
-| Conversation / routing | Claude Haiku 4.5 | ~$0.25 input / $1.25 output | Fast, cheap, great tool calling |
-| Email drafting / analysis | Claude Sonnet 4.6 | ~$3 input / $15 output | Better writing quality |
-| Simple actions (subagent) | MiniMax M2.7 | ~$0.10 input / $0.30 output | Cheapest for bulk tasks |
-| Summarization / compaction | Gemini 2.5 Flash | ~$0.075 input / $0.30 output | Cheapest mainstream option |
-| Complex reasoning (rare) | Claude Sonnet 4.6 | ~$3 input / $15 output | Only when needed |
+| Agent Role | Recommended Model | Why | Monthly cost estimate |
+|------------|-------------------|-----|----------------------|
+| **Main conversation / routing** | claude-haiku-4-5 | Best tool calling reliability at low cost | $5-15 |
+| **Email drafting** | claude-sonnet-4-6 | Quality writing matters for client reputation | $10-20 |
+| **Simple worker / subagent** | gpt-5.4-nano or deepseek-chat | Cheapest for basic tasks | $2-5 |
+| **Admin / cron summaries** | gemini-3.1-flash | Cheapest summarization | $1-3 |
+| **Complex reasoning** | claude-sonnet-4-6 or deepseek-reasoner | Step-by-step analysis when needed | $5-15 |
+| **Privacy-sensitive client** | Ollama (local llama-3.3-70b) | Zero data leaves the server | Hardware only |
+| **Chinese market client** | kimi-k2.5 or qwen-coder | Native Chinese language support | $5-15 |
+| **European data sovereignty** | mistral-small-latest | EU-hosted, GDPR compliant | $3-8 |
+| **Maximum context (huge docs)** | grok-4-fast (2M) or gpt-5.4 (1.05M) | Won't hit context limits | $10-30 |
 
 #### Multi-Model Agent Configuration
 
@@ -619,23 +717,28 @@ openclaw config set agent.model anthropic/claude-haiku-4-5
 openclaw agents add email-assistant \
   --model anthropic/claude-sonnet-4-6
 
-# Worker agent: MiniMax for bulk/simple tasks
+# Worker agent: cheapest viable for bulk tasks
 openclaw agents add worker \
-  --model minimax/MiniMax-M2.7
+  --model openai/gpt-5.4-nano
 
-# Admin agent: Haiku for summaries and reminders
+# Admin agent: Flash for summaries and reminders
 openclaw agents add admin \
-  --model anthropic/claude-haiku-4-5
+  --model google/gemini-3.1-flash
+
+# Fallback: if primary provider is down
+openclaw config set models.fallbacks '["openai/gpt-5.4-mini", "mistral/mistral-small-latest"]'
 ```
 
-**Cost impact of model selection:**
+#### Cost Comparison: Same Client, Different Model Strategies
 
-| Setup | Typical monthly AI cost |
-|-------|------------------------|
-| Everything on Sonnet | $50-150/client |
-| Everything on Haiku | $10-30/client |
-| Haiku + Sonnet for email only | $15-40/client |
-| Haiku + MiniMax workers | $8-20/client |
+| Strategy | Models used | Monthly AI cost | Quality |
+|----------|-----------|-----------------|---------|
+| Premium everything | Sonnet + Opus | $80-200 | Excellent |
+| Balanced (recommended) | Haiku + Sonnet (email only) | $15-40 | Very good |
+| Budget optimized | Haiku + Nano workers | $8-20 | Good |
+| Ultra budget | Flash + DeepSeek | $5-12 | Acceptable |
+| Self-hosted | Ollama (local) | $0 API / $50-100 hardware | Decent |
+| Mixed with fallbacks | Haiku primary, Mini fallback | $10-25 | Very good |
 
 #### Context Window Management
 
