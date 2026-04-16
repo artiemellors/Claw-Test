@@ -1752,17 +1752,92 @@ From day one, set up:
 
 At 8-10 clients, hire a part-time technical assistant ($25-30/hr, 5-10 hrs/week) to handle monitoring, log checks, and prompt refinements.
 
-### Risk 5: OpenClaw dependency → pin and test
+### Risk 5: OpenClaw dependency → 5 layers of protection
+
+Building on open source is the norm, not the exception. WordPress agencies, Shopify partners, Vercel (built on Next.js), GitLab (built on Git) — all built businesses on someone else's project. The platform provides infrastructure; you provide expertise and client relationships.
+
+**What you control vs what you don't:**
+
+| You control | You don't control |
+|---|---|
+| Client relationships | OpenClaw's roadmap |
+| System prompts and agent design | OpenClaw's release schedule |
+| Which version you deploy | Whether OpenClaw gets abandoned |
+| Your skill library | API changes between versions |
+| Your pricing and positioning | Upstream bug fixes |
+| Your vertical expertise | |
+| Your client data (Fly.io volumes) | |
+
+**Layer 1: Version pinning**
 
 ```dockerfile
-# Pin to a specific version in your Dockerfile
+# Pin to a specific tested version
 RUN npm install -g openclaw@2026.4.9
 ```
 
-- Test every update on your own instance before deploying to clients
-- Keep a "known good version" and only upgrade when there's a clear benefit
-- If OpenClaw breaks or is abandoned, your Docker images still work — you just can't upgrade
-- At 20+ clients, consider contributing to OpenClaw (fixes, features) to build influence in the project
+Clients run what you've tested. OpenClaw can release whatever they want — your deployments don't change until you choose to upgrade.
+
+**Layer 2: Docker image is self-contained**
+
+Once built, the image contains everything. Even if OpenClaw disappears from npm, existing images keep working.
+
+```bash
+# Save a known-good image as insurance
+docker save pelican-ai/agent:2026.4.9 > backups/agent-2026.4.9.tar
+
+# Monthly: backup each client's working image
+fly ssh console --app agent-drchen -C "openclaw --version"
+docker pull registry.fly.io/agent-drchen:latest
+docker save registry.fly.io/agent-drchen:latest > backups/drchen-$(date +%Y%m).tar
+```
+
+**Layer 3: MIT license is irrevocable**
+
+MIT means you can use, modify, fork, and sell — forever. Even if they change the license later, the MIT version you already have stays MIT. If OpenClaw gets abandoned:
+
+```bash
+# Fork the last good version
+git clone https://github.com/openclaw/openclaw.git pelican-engine
+git checkout v2026.4.9
+# You only need to maintain the parts you use (~10% of the codebase):
+# gateway, WhatsApp, Telegram, memory, cron
+```
+
+**Layer 4: Your value isn't the software**
+
+If OpenClaw disappeared tomorrow:
+
+| Lost | Not lost |
+|---|---|
+| The gateway runtime | Client relationships |
+| Channel integrations | System prompts |
+| Plugin system | Vertical expertise |
+| 1.47M lines of TypeScript | Skill library (markdown files) |
+| | Client data (Fly.io/Supabase) |
+| | Pricing model and reputation |
+
+The software is replaceable. Other frameworks exist (Botpress, Typebot, raw API calls). You'd lose weeks rebuilding, not years. Clients would barely notice if you swapped the engine.
+
+**Layer 5: Contribute, don't just consume**
+
+- Report bugs → they get fixed, your clients benefit
+- Submit fixes → builds goodwill and influence
+- Build relationships with maintainers → early warning of breaking changes
+- Sponsor the project ($50-100/mo) → keeps it alive, shows commitment
+
+This transforms you from a consumer who might get burned into someone with a seat at the table.
+
+**Realistic risk assessment:**
+
+| Scenario | Probability | Impact | Response |
+|---|---|---|---|
+| Breaking change in new version | Medium | None — pinned | Don't upgrade until tested |
+| OpenClaw abandoned | Low | Medium | Fork last good version |
+| OpenClaw relicensed | Very low | None | MIT is irrevocable for existing code |
+| Better competitor emerges | Medium | None | Evaluate, migrate if better |
+| Critical security vulnerability | Low | High | Fork and patch, or community fix |
+
+**The real risk isn't OpenClaw.** It's not getting clients, not delivering value, or burning out at 10 clients with no help. OpenClaw has active commits, 82 extensions, CI/CD, and a community. It's not going anywhere soon.
 
 ### Risk 6: Churn → make it indispensable in 30 days
 
