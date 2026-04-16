@@ -679,33 +679,51 @@ OpenClaw supports 30+ AI providers. Here's every viable model for agent work, or
 |----------|-------|---------|-------------|-----------------------------------|----------|
 | Anthropic | claude-sonnet-4-6 | 200K | Excellent | ~$3 / $15 | Email drafting, nuanced conversation |
 | OpenAI | gpt-5.4 | 1.05M | Excellent | ~$2.50 / $10 | General intelligence, long context |
+| Z.AI | GLM-5.1 | 203K | Very good | ~$0.95 / $3.15 | Strong agentic tool use, coding |
 | Mistral | mistral-large-latest | 262K | Good | ~$2 / $6 | European data sovereignty |
 | xAI | grok-4-fast | 2M | Good | ~$0.20 / $0.50 | Massive context window, multimodal |
 | Moonshot | kimi-k2.5 | 262K | Good | ~$1.50 / $5 | Large context, Chinese + English |
 
 **Use for**: Email drafting agents, complex customer interactions, analysis tasks.
 
-##### Tier 3 — Value (good quality, low cost) — RECOMMENDED DEFAULT
+**GLM-5.1 note**: Released April 2026. Significant improvements over GLM-5 in coding, agentic tool usage, and reasoning. Supports 203K context, 65K max output. Strong multi-step tool use. Priced between Value and Mid-range tiers.
+
+##### Tier 3 — Value (good quality, low cost) — STRONG CONTENDERS FOR DEFAULT
 
 | Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
 |----------|-------|---------|-------------|-----------------------------------|----------|
-| Anthropic | claude-haiku-4-5 | 200K | Very good | ~$0.25 / $1.25 | **Best default for agents** |
+| Qwen (Alibaba) | **qwen-3.6-plus** | **1M** | **Best in class (MCPMark #1)** | **~$0.33 / $1.95** | **Best value agent model — top tool calling at low cost** |
+| Anthropic | claude-haiku-4-5 | 200K | Very good | ~$0.25 / $1.25 | Proven reliable, Anthropic ecosystem |
 | OpenAI | gpt-5.4-mini | 1.05M | Very good | ~$0.15 / $0.60 | Cheap OpenAI alternative |
 | Mistral | mistral-small-latest | 128K | Good | ~$0.10 / $0.30 | European hosting, fast |
 | Mistral | magistral-small | 128K | Good | ~$0.10 / $0.30 | Reasoning-capable, cheap |
 
 **Use for**: Main conversation agent, reception bots, FAQ handling, routing, most tool calling tasks.
 
+**IMPORTANT — Qwen 3.6 Plus changes the game:**
+- **#1 on MCPMark** (48.2%) for tool-calling reliability — leads every model tested
+- **96.5% function calling accuracy** vs DeepSeek V3's 81.5% on identical test suites
+- **1M native context window** — 5x Haiku's 200K, won't hit context overflow
+- **Always-on chain-of-thought reasoning** built in
+- **$0.33/$1.95 per 1M tokens** — slightly more than Haiku but massively better tool calling
+- Developers report fewer retries and more consistent tool-call behavior vs previous Qwen models
+- Available via OpenClaw's Qwen extension or via OpenRouter
+
+**Recommendation update**: Test Qwen 3.6 Plus as your default agent model. If tool calling is reliable in your OpenClaw setup, it's better value than Haiku for agent work: better tool calling, 5x the context window, for only ~30% more on input cost.
+
 ##### Tier 4 — Budget (acceptable quality, minimal cost)
 
 | Provider | Model | Context | Tool Calling | Cost (input/output per 1M tokens) | Best for |
 |----------|-------|---------|-------------|-----------------------------------|----------|
+| DeepSeek | **deepseek-v3.2** | **163K** | **Decent (with thinking-in-tools)** | **~$0.28 / $0.42** | **Cheapest viable agent model** |
 | Google | gemini-3.1-flash | 1M+ | Decent | ~$0.075 / $0.30 | Summarization, simple tasks |
 | OpenAI | gpt-5.4-nano | 1.05M | Decent | ~$0.05 / $0.20 | Cheapest OpenAI, basic tasks |
-| DeepSeek | deepseek-chat | 131K | Decent | ~$0.07 / $0.28 | Budget general purpose |
+| DeepSeek | deepseek-chat (V3) | 131K | Decent | ~$0.07 / $0.28 | Legacy, still works |
 | MiniMax | MiniMax-M2.7 | 131K | Mediocre | ~$0.10 / $0.30 | Bulk simple tasks |
 
 **Use for**: Subagent workers, summarization, simple automation, cron job tasks.
+
+**DeepSeek V3.2 note**: Released 2026. Supports "Thinking in Tool-Use" (reasons before calling tools). 163K context. Extremely cheap at $0.28/$0.42. 90% discount on cached input tokens ($0.028/M). Tool calling reliability is weaker than Qwen/Haiku (~81.5% vs 96.5%) — fine for simple subagent tasks, not recommended as primary conversation agent. Scored gold on IMO and IOI benchmarks for reasoning.
 
 ##### Tier 5 — Reasoning Specialists
 
@@ -746,7 +764,9 @@ OpenClaw supports 30+ AI providers. Here's every viable model for agent work, or
 
 | Provider | Key Model | Context | Tool Calling | Best for |
 |----------|-----------|---------|-------------|----------|
-| Qwen (Alibaba) | qwen-coder, qwen-vision | 128K | Good | Chinese market, multimodal |
+| Qwen (Alibaba) | **qwen-3.6-plus** | **1M** | **#1 MCPMark** | **Best tool calling model at any price** |
+| Qwen (Alibaba) | qwen-coder, qwen-vision | 128K | Good | Code + multimodal tasks |
+| Z.AI (Zhipu) | **GLM-5.1** | **203K** | **Very good** | **Strong agentic workflows, coding** |
 | Qianfan (Baidu) | ernie-5.0-thinking | 119K | Good | Chinese market, reasoning |
 | Volcengine (ByteDance) | Doubao variants | Varies | Decent | Chinese market |
 | MiniMax | MiniMax-VL-01 | 204K | Mediocre | Vision + text, Chinese market |
@@ -756,50 +776,52 @@ OpenClaw supports 30+ AI providers. Here's every viable model for agent work, or
 
 The single biggest cost lever. Don't use the same model for everything:
 
-| Agent Role | Recommended Model | Why | Monthly cost estimate |
-|------------|-------------------|-----|----------------------|
-| **Main conversation / routing** | claude-haiku-4-5 | Best tool calling reliability at low cost | $5-15 |
-| **Email drafting** | claude-sonnet-4-6 | Quality writing matters for client reputation | $10-20 |
-| **Simple worker / subagent** | gpt-5.4-nano or deepseek-chat | Cheapest for basic tasks | $2-5 |
-| **Admin / cron summaries** | gemini-3.1-flash | Cheapest summarization | $1-3 |
-| **Complex reasoning** | claude-sonnet-4-6 or deepseek-reasoner | Step-by-step analysis when needed | $5-15 |
-| **Privacy-sensitive client** | Ollama (local llama-3.3-70b) | Zero data leaves the server | Hardware only |
-| **Chinese market client** | kimi-k2.5 or qwen-coder | Native Chinese language support | $5-15 |
-| **European data sovereignty** | mistral-small-latest | EU-hosted, GDPR compliant | $3-8 |
-| **Maximum context (huge docs)** | grok-4-fast (2M) or gpt-5.4 (1.05M) | Won't hit context limits | $10-30 |
+| Agent Role | Recommended Model | Alternative | Why | Monthly cost |
+|------------|-------------------|-------------|-----|-------------|
+| **Main conversation / routing** | **qwen-3.6-plus** | claude-haiku-4-5 | Best tool calling (#1 MCPMark), 1M context | $5-15 |
+| **Email drafting** | claude-sonnet-4-6 | GLM-5.1 | Quality writing, professional tone | $10-20 |
+| **Simple worker / subagent** | deepseek-v3.2 | gpt-5.4-nano | Cheapest with thinking-in-tools | $2-5 |
+| **Admin / cron summaries** | gemini-3.1-flash | deepseek-v3.2 | Cheapest summarization | $1-3 |
+| **Complex reasoning** | deepseek-reasoner | claude-sonnet-4-6 | Step-by-step analysis | $5-15 |
+| **Agentic workflows (multi-step)** | GLM-5.1 | qwen-3.6-plus | Built for long-horizon agent tasks | $8-15 |
+| **Privacy-sensitive client** | Ollama (local) | — | Zero data leaves the server | Hardware only |
+| **Chinese market client** | qwen-3.6-plus | kimi-k2.5 | Native Chinese, best tool calling | $5-15 |
+| **European data sovereignty** | mistral-small-latest | — | EU-hosted, GDPR compliant | $3-8 |
+| **Maximum context (huge docs)** | grok-4-fast (2M) | qwen-3.6-plus (1M) | Won't hit context limits | $5-30 |
 
 #### Multi-Model Agent Configuration
 
 ```bash
-# Main agent: Haiku for conversation (cheap, reliable tool calling)
-openclaw config set agent.model anthropic/claude-haiku-4-5
+# Main agent: Qwen 3.6 Plus (best tool calling, 1M context, cheap)
+openclaw config set agent.model qwen/qwen-3.6-plus
 
 # Email agent: Sonnet for quality drafting
 openclaw agents add email-assistant \
   --model anthropic/claude-sonnet-4-6
 
-# Worker agent: cheapest viable for bulk tasks
+# Worker agent: DeepSeek V3.2 (cheapest with tool support)
 openclaw agents add worker \
-  --model openai/gpt-5.4-nano
+  --model deepseek/deepseek-v3.2
 
 # Admin agent: Flash for summaries and reminders
 openclaw agents add admin \
   --model google/gemini-3.1-flash
 
 # Fallback: if primary provider is down
-openclaw config set models.fallbacks '["openai/gpt-5.4-mini", "mistral/mistral-small-latest"]'
+openclaw config set models.fallbacks '["anthropic/claude-haiku-4-5", "mistral/mistral-small-latest"]'
 ```
 
 #### Cost Comparison: Same Client, Different Model Strategies
 
-| Strategy | Models used | Monthly AI cost | Quality |
-|----------|-----------|-----------------|---------|
+| Strategy | Models used | Monthly AI cost | Tool calling quality |
+|----------|-----------|-----------------|---------------------|
 | Premium everything | Sonnet + Opus | $80-200 | Excellent |
-| Balanced (recommended) | Haiku + Sonnet (email only) | $15-40 | Very good |
-| Budget optimized | Haiku + Nano workers | $8-20 | Good |
-| Ultra budget | Flash + DeepSeek | $5-12 | Acceptable |
+| **Best value (recommended)** | **Qwen 3.6 Plus + Sonnet (email)** | **$12-35** | **Best (MCPMark #1)** |
+| Anthropic-only | Haiku + Sonnet (email) | $15-40 | Very good |
+| Budget optimized | Qwen 3.6 Plus + DeepSeek V3.2 workers | $8-20 | Good |
+| Ultra budget | Flash + DeepSeek V3.2 | $5-12 | Acceptable |
+| Chinese market | Qwen 3.6 Plus + GLM-5.1 | $10-25 | Excellent |
 | Self-hosted | Ollama (local) | $0 API / $50-100 hardware | Decent |
-| Mixed with fallbacks | Haiku primary, Mini fallback | $10-25 | Very good |
 
 #### Context Window Management
 
