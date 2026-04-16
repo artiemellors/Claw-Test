@@ -271,71 +271,82 @@ Sarah checks in:
 
 ### Internal Build Constraints (Not Customer-Facing)
 
-These are guardrails you apply per tier to keep cost to serve predictable. Customers see outcomes, not limits.
+Guardrails that control cost without degrading the product. Customers see outcomes, not limits.
 
-#### Starter ($500/mo) — build constraints
+**Principle**: Don't gate features that cost almost nothing (memory, agents, subagents, cron). Gate the things that actually drive spend (model choice, session length, channel count). Everything else should be as good as possible at every tier — that's how you prove value fast on Starter and upsell naturally.
 
-| Constraint | Setting | Why |
-|-----------|---------|-----|
-| **1 agent only** | Single default agent | Keeps architecture simple, one model cost |
-| **1 channel** | WhatsApp OR web OR email (not all) | Limits integration surface |
-| **No memory** | `memorySearch.enabled: false` | Avoids embedding costs, keeps sessions stateless |
-| **Session reset daily** | `session.reset.mode: "daily"` | Prevents context accumulation |
-| **Max 100 messages/session** | `session.maxMessages: 100` | Caps token spend per conversation |
-| **Debounce 3s** | `messages.inbound.debounceMs: 3000` | Batches rapid messages, fewer API calls |
-| **Value-tier model only** | Qwen 3.6 Plus or Haiku | No Sonnet/Opus usage |
-| **Max 2 cron jobs** | Reminders + 1 summary | Limits background API spend |
-| **No execution approvals** | `approvals.exec.mode: "off"` | Simpler, but no outbound email drafting |
-| **No subagents** | ACP not configured | Eliminates subagent token spend |
+#### What actually drives cost (and what doesn't)
 
-**Target cost to serve: $15-25/mo**
+| Factor | Cost impact | Constrain it? |
+|--------|-----------|---------------|
+| **Model choice** | Huge — Sonnet is 12x Haiku per token | **Yes — biggest lever** |
+| **Session length** | Moderate — longer context = more tokens per call | **Yes — daily reset + message caps** |
+| **Message volume** | Moderate — more messages = more API calls | **Yes — debouncing** |
+| **Channel count** | Small — WhatsApp API per-conversation charge | **Slightly — limits your setup time** |
+| **Number of agents** | Near zero — idle agents cost nothing | **No** |
+| **Memory** | Small — ~10-20% more tokens, ~$1-2/mo | **No — it makes the product better** |
+| **Subagents** | Small — only fire when invoked | **No — can save cost by routing to cheaper models** |
+| **Cron jobs** | Tiny — $0.01-0.05 per run | **No** |
+| **Approvals** | Zero — it's a gate, not a cost | **No — use where needed regardless of tier** |
 
-#### Growth ($900/mo) — build constraints
+#### Constraints that apply to ALL tiers
 
-| Constraint | Setting | Why |
-|-----------|---------|-----|
-| **Up to 2 agents** | Main + email/admin | Email agent can use a smarter model |
-| **Up to 3 channels** | e.g. WhatsApp + web + email | Multi-channel but capped |
-| **Memory enabled** | `memorySearch.enabled: true`, `maxResults: 8` | Context recall, but capped results |
-| **Session reset daily** | `session.reset.mode: "daily"` | Still prevents runaway context |
-| **Max 200 messages/session** | `session.maxMessages: 200` | More headroom than Starter |
-| **Debounce 2s** | `messages.inbound.debounceMs: 2000` | Slightly more responsive |
-| **Value-tier main + mid-tier email** | Qwen/Haiku main, Sonnet or GLM for email only | Sonnet limited to drafting agent |
-| **Max 5 cron jobs** | Briefings, reminders, follow-ups | Controlled background spend |
-| **Execution approvals on** | `approvals.exec.mode: "on-miss"` | Owner approves new actions |
-| **No subagents** | ACP not configured | Keeps costs bounded |
+Every client deployment gets these by default:
 
-**Target cost to serve: $25-45/mo**
+```bash
+# Memory — always on. It makes the product dramatically better for ~$1-2/mo.
+openclaw config set agents.defaults.memorySearch.enabled true
+openclaw config set agents.defaults.memorySearch.query.maxResults 10
+openclaw config set agents.defaults.memorySearch.cache.enabled true
 
-#### Scale ($1,500/mo) — build constraints
+# Session hygiene — prevents runaway context and cost
+openclaw config set session.reset.mode daily
+openclaw config set session.maintenance.pruneAfter "30d"
+openclaw config set session.maintenance.maxEntries 500
 
-| Constraint | Setting | Why |
-|-----------|---------|-----|
-| **Up to 4 agents** | Main + email + admin + specialist | Full multi-agent |
-| **Unlimited channels** | All configured channels | Full coverage |
-| **Memory enabled** | `memorySearch.enabled: true`, `maxResults: 15`, hybrid search | Full recall |
-| **Session reset weekly or on idle** | `session.reset.mode: "idle"`, `idleMinutes: 480` | Longer context, still bounded |
-| **Max 500 messages/session** | `session.maxMessages: 500` | Maximum headroom |
-| **Debounce 1.5s** | `messages.inbound.debounceMs: 1500` | Most responsive |
-| **Mixed models** | Qwen/Haiku routing, Sonnet drafting, DeepSeek workers | Optimized per role |
-| **Max 10 cron jobs** | Full automation suite | More background tasks |
-| **Execution approvals always** | `approvals.exec.mode: "always"` | Full audit trail |
-| **Subagents allowed** | ACP enabled, max depth 2 | Complex multi-step workflows |
-| **Compliance logging** | Supabase conversation_log, 7-year retention | Regulated industries |
+# Debouncing — batches rapid messages, reduces API calls
+openclaw config set messages.inbound.debounceMs 2000
+openclaw config set messages.inbound.byChannel.whatsapp 3000
 
-**Target cost to serve: $35-65/mo**
+# Execution approvals — on where the agent sends outbound
+# Set per-client based on their needs, not per tier
+openclaw config set approvals.exec.mode "on-miss"
+
+# Conversation logging — always, for all clients
+# (Supabase conversation_log — needed for cost tracking and compliance)
+```
+
+#### What actually differs per tier
+
+| Constraint | Starter | Growth | Scale | Why it matters |
+|-----------|---------|--------|-------|----------------|
+| **Channels** | 1 | Up to 3 | Unlimited | Your setup/testing time per channel |
+| **Model for main agent** | Value tier only (Qwen 3.6 Plus / Haiku) | Value tier | Value or mid-tier | Controls the biggest cost line |
+| **Sonnet/premium model access** | No | Email agent only | Any agent | Sonnet is 12x Haiku — gate this |
+| **Custom integrations** | None (built-in skills only) | 1 custom skill | Multiple custom skills | Your build time |
+| **Session message cap** | 150 per sender per day | 300 per sender per day | 500 per sender per day | Prevents runaway token spend |
+| **Support level** | Email, 48hr response | Email, 24hr + weekly check-in | Priority, same-day + monthly review | Your time |
+| **Compliance logging** | Standard (Supabase) | Standard | Extended (7-year retention, audit) | Storage + regulatory |
+
+**Everything else is the same across all tiers**: memory on, agents as needed, subagents allowed, cron jobs as needed, approvals where appropriate. Build the best solution for each client — just control the model and session length to manage cost.
+
+#### Why this is better
+
+- **Starter clients get memory, subagents, cron** — the product is good from day one
+- **Upsell is about scope** (more channels, custom integrations, premium models, faster support) not about unlocking features that should have been there
+- **Cost control lives in model selection and session caps** — the two things that actually drive 80%+ of spend
+- **Agents, memory, approvals are free** — gating them is artificial scarcity that makes the product worse for no real savings
 
 #### Cost Overage Protection
 
 If a client's usage spikes unexpectedly:
 
-1. **Session message cap** — hard limit prevents infinite conversations
+1. **Session message cap per sender** — hard daily limit prevents infinite conversations
 2. **Daily session reset** — flushes context, new day = new session
 3. **Debouncing** — batches rapid messages into fewer API calls
-4. **Model pinning** — Sonnet only on specific agents, never the main one (Starter/Growth)
-5. **Cron job caps** — limits how many scheduled tasks run
-6. **Memory result caps** — `maxResults` limits how much context is injected
-7. **Monitor weekly** — Supabase cost tracking query catches anomalies early
+4. **Model pinning** — Sonnet only on designated agents, never the main conversation agent (Starter/Growth)
+5. **Monitor weekly** — Supabase cost tracking query catches anomalies early
+6. **Subagents route to cheaper models** — delegation to DeepSeek/Flash for simple tasks saves money vs main agent doing everything
 
 If a client consistently exceeds cost targets, it's an upsell conversation, not a loss.
 
@@ -344,10 +355,11 @@ If a client consistently exceeds cost targets, it's an upsell conversation, not 
 | | Starter | Growth | Scale |
 |---|---------|--------|-------|
 | Fly.io | $10 | $10 | $10 |
-| AI API | $5-12 | $12-28 | $18-45 |
+| AI API (value-tier main) | $5-12 | $8-18 | $8-18 |
+| AI API (Sonnet where used) | — | $5-12 | $10-25 |
 | WhatsApp/channels | $0-5 | $3-7 | $5-10 |
 | Supabase (shared) | $1 | $1 | $2 |
-| **Total** | **$16-28** | **$26-46** | **$35-67** |
+| **Total** | **$16-28** | **$27-48** | **$35-65** |
 | **You charge** | **$500** | **$900** | **$1,500** |
 | **Margin** | **94-97%** | **95-97%** | **96-98%** |
 
